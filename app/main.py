@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import argparse
+import socket
 import sys
 import time
 from datetime import date, datetime
 from pathlib import Path
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from app.core.config import load_config
+from app.domain.collection_jobs import APPLICATION_TIMEZONE
 from app.domain.group_analysis_rules import load_analysis_rule_set
 from app.pipelines.group_analysis_service import GroupAnalysisService, GroupDailyReportService
 from app.pipelines.group_daily_report_query_service import (
@@ -61,7 +64,19 @@ from app.storage.group_runtime_metrics_repo import MysqlGroupRuntimeMetricsRepo
 from app.storage.group_runtime_summary_repo import MysqlGroupRuntimeSummaryRepo
 from app.storage.group_task_admin_repo import MysqlGroupTaskAdminRepo
 from app.storage.lock_repo import MysqlUiLockRepo
+from app.storage.worker_heartbeat_repo import MysqlWorkerHeartbeatRepo
 from app.storage.schema import read_init_sql
+from app.services.managed_mode_guard import (
+    HeldUiLockAdapter,
+    ManagedModeActiveError,
+    ManagedModeGuard,
+    WechatUiBusyError,
+    WechatUiLeaseLostError,
+    WechatUiReleaseError,
+)
+
+
+_ZONE = ZoneInfo(APPLICATION_TIMEZONE)
 
 
 def main() -> int:
@@ -287,19 +302,47 @@ def main() -> int:
         if not args.account_name:
             parser.error("--account-name is required for collect-article-once")
         config = load_config(Path(args.config))
-        ensure_wechat_health(config)
-        try:
+        guard, guard_error = _build_managed_guard_for_cli(config)
+        if guard_error is not None:
+            return guard_error
+        now = _shanghai_now()
+        owner_task_id = f"manual-article-{uuid4().hex}"
+
+        def collect_article():
+            ensure_wechat_health(config)
             runner = build_real_article_poc_runner(
                 config,
                 account_name=args.account_name,
                 max_articles_per_round=(
-                    args.max_articles_per_round or config.pipelines.article.max_articles_per_account
+                    args.max_articles_per_round
+                    or config.pipelines.article.max_articles_per_account
                 ),
+                lock_repo=HeldUiLockAdapter("article"),
+            )
+            return runner.run_once(now)
+
+        try:
+            result = guard.run_manual(
+                "article", owner_task_id, now, collect_article
             )
         except WxautoNotAvailableError as exc:
             print(f"rpa_error={exc}", file=sys.stderr)
             return 1
-        result = runner.run_once(datetime.now())
+        except WechatUiBusyError:
+            print("managed_mode_error=wechat_ui_busy", file=sys.stderr)
+            return 3
+        except WechatUiLeaseLostError:
+            print("managed_mode_error=wechat_ui_lease_lost", file=sys.stderr)
+            return 3
+        except WechatUiReleaseError:
+            print("managed_mode_error=wechat_ui_release_failed", file=sys.stderr)
+            return 1
+        except Exception as exc:
+            print(
+                f"managed_guard_error={type(exc).__name__}",
+                file=sys.stderr,
+            )
+            return 1
         print(f"account_name={args.account_name}")
         print(f"attempted_count={result.attempted_count}")
         print(f"success_count={result.success_count}")
@@ -371,13 +414,24 @@ def main() -> int:
         if not args.once:
             parser.error("--once is required for run-article-scheduler in development")
         config = load_config(Path(args.config))
+        guard, guard_error = _build_managed_guard_for_cli(config)
+        if guard_error is not None:
+            return guard_error
+        now = _shanghai_now()
+        guard_error = _ensure_scheduler_allowed_for_cli(guard, now)
+        if guard_error is not None:
+            return guard_error
         ensure_wechat_health(config)
         try:
             runner = build_real_article_scheduler_runner(config)
         except WxautoNotAvailableError as exc:
             print(f"rpa_error={exc}", file=sys.stderr)
             return 1
-        result = runner.run_once(datetime.now())
+        now = _shanghai_now()
+        guard_error = _ensure_scheduler_allowed_for_cli(guard, now)
+        if guard_error is not None:
+            return guard_error
+        result = runner.run_once(now)
         print(f"attempted_count={result.attempted_count}")
         print(f"success_count={result.success_count}")
         print(f"failed_count={result.failed_count}")
@@ -914,16 +968,42 @@ def main() -> int:
         if not args.group_name:
             parser.error("--group-name is required for collect-group-once")
         config = load_config(Path(args.config))
-        ensure_wechat_health(config)
-        try:
+        guard, guard_error = _build_managed_guard_for_cli(config)
+        if guard_error is not None:
+            return guard_error
+        now = _shanghai_now()
+        owner_task_id = f"manual-{uuid4().hex}"
+
+        def collect_group():
+            ensure_wechat_health(config)
             service = build_real_group_collect_service(config)
-            result = service.collect_once(
+            return service.collect_once(
                 group_name=args.group_name,
-                batch_id=f"manual-{uuid4().hex}",
-                collect_time=datetime.now(),
+                batch_id=owner_task_id,
+                collect_time=now,
+            )
+
+        try:
+            result = guard.run_manual(
+                "group", owner_task_id, now, collect_group
             )
         except WxautoNotAvailableError as exc:
             print(f"rpa_error={exc}", file=sys.stderr)
+            return 1
+        except WechatUiBusyError:
+            print("managed_mode_error=wechat_ui_busy", file=sys.stderr)
+            return 3
+        except WechatUiLeaseLostError:
+            print("managed_mode_error=wechat_ui_lease_lost", file=sys.stderr)
+            return 3
+        except WechatUiReleaseError:
+            print("managed_mode_error=wechat_ui_release_failed", file=sys.stderr)
+            return 1
+        except Exception as exc:
+            print(
+                f"managed_guard_error={type(exc).__name__}",
+                file=sys.stderr,
+            )
             return 1
         print(f"group_name={result.group_name}")
         print(f"batch_id={result.batch_id}")
@@ -934,6 +1014,14 @@ def main() -> int:
 
     if args.command == "run-group-scheduler":
         config = load_config(Path(args.config))
+        guard, guard_error = _build_managed_guard_for_cli(config)
+        if guard_error is not None:
+            return guard_error
+        guard_error = _ensure_scheduler_allowed_for_cli(
+            guard, _shanghai_now()
+        )
+        if guard_error is not None:
+            return guard_error
         ensure_wechat_health(config)
         try:
             runner = build_real_group_polling_runner(config)
@@ -942,7 +1030,11 @@ def main() -> int:
             return 1
 
         while True:
-            result = runner.run_once(datetime.now())
+            now = _shanghai_now()
+            guard_error = _ensure_scheduler_allowed_for_cli(guard, now)
+            if guard_error is not None:
+                return guard_error
+            result = runner.run_once(now)
             print(f"attempted_count={result.attempted_count}")
             print(f"success_count={result.success_count}")
             print(f"failed_count={result.failed_count}")
@@ -962,6 +1054,52 @@ def ensure_wechat_health(config) -> None:
     health = check_wechat_health(config)
     if health.status != WechatHealthStatus.OK:
         raise RuntimeError(f"WeChat health check failed: {health.status.value} - {health.message}")
+
+
+def build_managed_mode_guard(config) -> ManagedModeGuard:
+    engine = create_mysql_engine(config.mysql)
+    return ManagedModeGuard(
+        heartbeat_repo=MysqlWorkerHeartbeatRepo(engine),
+        ui_lock_repo=MysqlUiLockRepo(engine),
+        hostname=socket.gethostname(),
+        collector_heartbeat_ttl_seconds=(
+            config.workers.heartbeat_seconds * 3
+        ),
+        ui_lease_seconds=config.pipelines.ui_resource.lock_lease_seconds,
+        ui_heartbeat_interval_seconds=(
+            config.pipelines.ui_resource.lock_heartbeat_interval_seconds
+        ),
+    )
+
+
+def _build_managed_guard_for_cli(config):
+    try:
+        return build_managed_mode_guard(config), None
+    except Exception as exc:
+        print(
+            f"managed_guard_error={type(exc).__name__}",
+            file=sys.stderr,
+        )
+        return None, 1
+
+
+def _ensure_scheduler_allowed_for_cli(guard, now: datetime) -> int | None:
+    try:
+        guard.ensure_scheduler_allowed(now)
+    except ManagedModeActiveError:
+        print("managed_mode_error=collector_active", file=sys.stderr)
+        return 3
+    except Exception as exc:
+        print(
+            f"managed_guard_error={type(exc).__name__}",
+            file=sys.stderr,
+        )
+        return 1
+    return None
+
+
+def _shanghai_now() -> datetime:
+    return datetime.now(_ZONE)
 
 
 def build_real_group_collect_service(config) -> GroupCollectService:
@@ -1078,6 +1216,7 @@ def build_real_article_poc_runner(
     *,
     account_name: str,
     max_articles_per_round: int,
+    lock_repo=None,
 ) -> ArticlePollingRunner:
     engine = create_mysql_engine(config.mysql)
     group_config_repo = MysqlGroupConfigRepo(engine)
@@ -1098,7 +1237,9 @@ def build_real_article_poc_runner(
 
     return ArticlePollingRunner(
         collect_service=collect_service,
-        lock_repo=MysqlUiLockRepo(engine),
+        lock_repo=(
+            MysqlUiLockRepo(engine) if lock_repo is None else lock_repo
+        ),
         account_provider=account_provider,
         log_repo=MysqlArticleCollectLogRepo(engine),
         screenshot_client=DesktopScreenshotClient(),
@@ -1111,8 +1252,10 @@ def build_real_article_poc_runner(
         next_core_group_due_provider=ReadOnlyCoreGroupDueProvider(
             group_config_repo=group_config_repo,
             poll_interval_seconds=config.pipelines.group.poll_interval_seconds,
+            now_provider=_shanghai_now,
         ),
         max_core_group_block_seconds=config.pipelines.ui_resource.max_core_group_block_seconds,
+        checkpoint_now_provider=_shanghai_now,
     )
 
 
@@ -1151,8 +1294,10 @@ def build_real_article_scheduler_runner(config) -> ArticlePollingRunner:
         next_core_group_due_provider=ReadOnlyCoreGroupDueProvider(
             group_config_repo=group_config_repo,
             poll_interval_seconds=config.pipelines.group.poll_interval_seconds,
+            now_provider=_shanghai_now,
         ),
         max_core_group_block_seconds=config.pipelines.ui_resource.max_core_group_block_seconds,
+        checkpoint_now_provider=_shanghai_now,
     )
 
 

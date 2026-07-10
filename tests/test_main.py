@@ -4,8 +4,11 @@ import sys
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
+from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import app.main as main_module
+import pytest
 from app.main import main
 from app.domain.ai_analysis import AiAnalysisResult
 from app.pipelines.group_pipeline_service import GroupPipelineResult, PipelineStageResult
@@ -23,6 +26,32 @@ from app.storage.group_runtime_summary_repo import (
 from app.storage.group_runtime_metrics_repo import GroupRuntimeMetrics
 from app.storage.group_repo import GroupConfigRecord, GroupRuntimeStatus
 from app.rpa.wxauto_client import WxautoNotAvailableError
+from app.rpa.fake_clients import FakeArticleRpaClient
+from app.storage.article_raw_repo import ArticleRawInsertResult
+from app.services.managed_mode_guard import (
+    HeldUiLockAdapter,
+    ManagedModeActiveError,
+    WechatUiBusyError,
+    WechatUiLeaseLostError,
+)
+
+
+class AllowingManagedGuard:
+    def __init__(self) -> None:
+        self.ensure_calls = []
+        self.manual_calls = []
+        self.in_manual_action = False
+
+    def ensure_scheduler_allowed(self, now) -> None:
+        self.ensure_calls.append(now)
+
+    def run_manual(self, pipeline, owner_task_id, now, action):
+        self.manual_calls.append((pipeline, owner_task_id, now))
+        self.in_manual_action = True
+        try:
+            return action()
+        finally:
+            self.in_manual_action = False
 
 
 def test_main_check_config_outputs_key_settings(monkeypatch, capsys) -> None:
@@ -71,7 +100,19 @@ def test_main_collect_group_once_uses_group_name(monkeypatch, capsys) -> None:
             assert batch_id.startswith("manual-")
             return FakeResult(group_name, batch_id, 2, 1, 1)
 
-    monkeypatch.setattr(main_module, "build_real_group_collect_service", lambda config: FakeService())
+    guard = AllowingManagedGuard()
+
+    def build_service(config):
+        assert guard.in_manual_action is True
+        return FakeService()
+
+    monkeypatch.setattr(main_module, "build_real_group_collect_service", build_service)
+    monkeypatch.setattr(
+        main_module,
+        "build_managed_mode_guard",
+        lambda config: guard,
+        raising=False,
+    )
     monkeypatch.setattr(main_module, "ensure_wechat_health", lambda config: None)
     monkeypatch.setattr(
         sys,
@@ -94,13 +135,27 @@ def test_main_collect_group_once_uses_group_name(monkeypatch, capsys) -> None:
     assert "read_count=2" in output
     assert "insert_count=1" in output
     assert "duplicate_count=1" in output
+    pipeline, owner_task_id, now = guard.manual_calls[0]
+    assert pipeline == "group"
+    assert owner_task_id.startswith("manual-")
+    assert isinstance(now.tzinfo, ZoneInfo)
+    assert now.tzinfo.key == "Asia/Shanghai"
 
 
 def test_main_collect_group_once_reports_rpa_adapter_error(monkeypatch, capsys) -> None:
+    guard = AllowingManagedGuard()
+
     def raise_adapter_error(config):
+        assert guard.in_manual_action is True
         raise WxautoNotAvailableError("wxauto adapter initialization failed")
 
     monkeypatch.setattr(main_module, "build_real_group_collect_service", raise_adapter_error)
+    monkeypatch.setattr(
+        main_module,
+        "build_managed_mode_guard",
+        lambda config: guard,
+        raising=False,
+    )
     monkeypatch.setattr(main_module, "ensure_wechat_health", lambda config: None)
     monkeypatch.setattr(
         sys,
@@ -133,7 +188,19 @@ def test_main_run_group_scheduler_once_outputs_counts(monkeypatch, capsys) -> No
         def run_once(self, now):
             return FakeResult()
 
-    monkeypatch.setattr(main_module, "build_real_group_polling_runner", lambda config: FakeRunner())
+    guard = AllowingManagedGuard()
+
+    def build_runner(config):
+        assert len(guard.ensure_calls) == 1
+        return FakeRunner()
+
+    monkeypatch.setattr(main_module, "build_real_group_polling_runner", build_runner)
+    monkeypatch.setattr(
+        main_module,
+        "build_managed_mode_guard",
+        lambda config: guard,
+        raising=False,
+    )
     monkeypatch.setattr(main_module, "ensure_wechat_health", lambda config: None)
     monkeypatch.setattr(
         sys,
@@ -154,6 +221,12 @@ def test_main_run_group_scheduler_once_outputs_counts(monkeypatch, capsys) -> No
     assert "attempted_count=2" in output
     assert "success_count=1" in output
     assert "failed_count=1" in output
+    assert len(guard.ensure_calls) == 2
+    assert all(
+        isinstance(now.tzinfo, ZoneInfo)
+        and now.tzinfo.key == "Asia/Shanghai"
+        for now in guard.ensure_calls
+    )
 
 
 def test_main_group_config_upsert_outputs_group_name(monkeypatch, capsys) -> None:
@@ -412,14 +485,29 @@ def test_main_collect_article_once_runs_single_explicit_account(monkeypatch, cap
             return FakeResult()
 
     fake_runner = FakeRunner()
+    guard = AllowingManagedGuard()
 
-    def build_runner(config, account_name: str, max_articles_per_round: int):
+    def build_runner(
+        config,
+        account_name: str,
+        max_articles_per_round: int,
+        lock_repo=None,
+    ):
+        assert guard.in_manual_action is True
         assert account_name == "行业观察"
         assert max_articles_per_round == 3
+        assert isinstance(lock_repo, HeldUiLockAdapter)
+        assert lock_repo.pipeline == "article"
         return fake_runner
 
     monkeypatch.setattr(main_module, "ensure_wechat_health", lambda config: None)
     monkeypatch.setattr(main_module, "build_real_article_poc_runner", build_runner)
+    monkeypatch.setattr(
+        main_module,
+        "build_managed_mode_guard",
+        lambda config: guard,
+        raising=False,
+    )
     monkeypatch.setattr(
         sys,
         "argv",
@@ -449,14 +537,30 @@ def test_main_collect_article_once_runs_single_explicit_account(monkeypatch, cap
     assert "raw_insert_count=1" in output
     assert "duplicate_count=0" in output
     assert "task_created_count=1" in output
+    assert guard.manual_calls[0][0] == "article"
 
 
 def test_main_collect_article_once_reports_rpa_adapter_error(monkeypatch, capsys) -> None:
-    def raise_adapter_error(config, account_name: str, max_articles_per_round: int):
+    guard = AllowingManagedGuard()
+
+    def raise_adapter_error(
+        config,
+        account_name: str,
+        max_articles_per_round: int,
+        lock_repo=None,
+    ):
+        assert guard.in_manual_action is True
+        assert isinstance(lock_repo, HeldUiLockAdapter)
         raise WxautoNotAvailableError("wxauto adapter initialization failed")
 
     monkeypatch.setattr(main_module, "ensure_wechat_health", lambda config: None)
     monkeypatch.setattr(main_module, "build_real_article_poc_runner", raise_adapter_error)
+    monkeypatch.setattr(
+        main_module,
+        "build_managed_mode_guard",
+        lambda config: guard,
+        raising=False,
+    )
     monkeypatch.setattr(
         sys,
         "argv",
@@ -493,9 +597,16 @@ def test_main_parse_article_once_outputs_counts_without_wechat_health(monkeypatc
 
     fake_service = FakeService()
     health_calls: list[object] = []
+    guard_calls: list[object] = []
 
     monkeypatch.setattr(main_module, "build_real_article_parse_service", lambda config: fake_service)
     monkeypatch.setattr(main_module, "ensure_wechat_health", lambda config: health_calls.append(config))
+    monkeypatch.setattr(
+        main_module,
+        "build_managed_mode_guard",
+        lambda config: guard_calls.append(config),
+        raising=False,
+    )
     monkeypatch.setattr(
         sys,
         "argv",
@@ -515,6 +626,7 @@ def test_main_parse_article_once_outputs_counts_without_wechat_health(monkeypatc
     assert exit_code == 0
     assert fake_service.calls[0][0] == 7
     assert health_calls == []
+    assert guard_calls == []
     assert "read_count=2" in output
     assert "success_count=1" in output
     assert "failed_count=1" in output
@@ -1631,3 +1743,533 @@ def test_main_article_task_retry_failed_outputs_reset_count_with_limit(monkeypat
     assert "task_type=clean_article" in output
     assert "limit=5" in output
     assert "reset_count=5" in output
+
+
+class _ManagedCliResult:
+    attempted_count = 1
+    success_count = 1
+    failed_count = 0
+    lock_timeout_count = 0
+    interrupted_count = 0
+    link_count = 1
+    raw_insert_count = 1
+    duplicate_count = 0
+    skipped_count = 0
+    task_created_count = 1
+    group_name = "核心群A"
+    batch_id = "manual-test"
+    read_count = 1
+    insert_count = 1
+
+
+class _ManagedCliRunner:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def run_once(self, now):
+        self.calls.append(now)
+        return _ManagedCliResult()
+
+
+@pytest.mark.parametrize(
+    ("command", "builder_name"),
+    [
+        ("run-group-scheduler", "build_real_group_polling_runner"),
+        ("run-article-scheduler", "build_real_article_scheduler_runner"),
+    ],
+)
+def test_managed_collector_rejects_scheduler_before_health_or_rpa_builder(
+    monkeypatch, capsys, command, builder_name
+) -> None:
+    class RejectingGuard:
+        def ensure_scheduler_allowed(self, now):
+            raise ManagedModeActiveError("managed collector is active")
+
+    health_calls = []
+    builder_calls = []
+    monkeypatch.setattr(
+        main_module,
+        "build_managed_mode_guard",
+        lambda config: RejectingGuard(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "ensure_wechat_health",
+        lambda config: health_calls.append(config),
+    )
+    monkeypatch.setattr(
+        main_module,
+        builder_name,
+        lambda config: builder_calls.append(config) or _ManagedCliRunner(),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "weinsight",
+            command,
+            "--once",
+            "--config",
+            "config/config.dev.yaml",
+        ],
+    )
+
+    exit_code = main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 3
+    assert captured.err.strip() == "managed_mode_error=collector_active"
+    assert health_calls == []
+    assert builder_calls == []
+
+
+def test_group_scheduler_rechecks_guard_before_every_round(monkeypatch, capsys) -> None:
+    class Guard:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def ensure_scheduler_allowed(self, now):
+            self.calls.append(now)
+            if len(self.calls) == 3:
+                raise ManagedModeActiveError("managed collector is active")
+
+    class Runner(_ManagedCliRunner):
+        def run_once(self, now):
+            if self.calls:
+                raise AssertionError("guard was not checked before next round")
+            return super().run_once(now)
+
+    guard = Guard()
+    runner = Runner()
+    monkeypatch.setattr(
+        main_module,
+        "build_managed_mode_guard",
+        lambda config: guard,
+        raising=False,
+    )
+    monkeypatch.setattr(main_module, "ensure_wechat_health", lambda config: None)
+    monkeypatch.setattr(
+        main_module, "build_real_group_polling_runner", lambda config: runner
+    )
+    monkeypatch.setattr(main_module.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "weinsight",
+            "run-group-scheduler",
+            "--config",
+            "config/config.dev.yaml",
+        ],
+    )
+
+    exit_code = main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 3
+    assert captured.err.strip() == "managed_mode_error=collector_active"
+    assert len(runner.calls) == 1
+    assert len(guard.calls) == 3
+
+
+def test_article_scheduler_uses_guard_and_shanghai_time(monkeypatch, capsys) -> None:
+    guard = AllowingManagedGuard()
+    runner = _ManagedCliRunner()
+
+    def build_runner(config):
+        assert len(guard.ensure_calls) == 1
+        return runner
+
+    monkeypatch.setattr(
+        main_module,
+        "build_managed_mode_guard",
+        lambda config: guard,
+        raising=False,
+    )
+    monkeypatch.setattr(main_module, "ensure_wechat_health", lambda config: None)
+    monkeypatch.setattr(main_module, "build_real_article_scheduler_runner", build_runner)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "weinsight",
+            "run-article-scheduler",
+            "--once",
+            "--config",
+            "config/config.dev.yaml",
+        ],
+    )
+
+    assert main() == 0
+    capsys.readouterr()
+    assert len(guard.ensure_calls) == 2
+    assert len(runner.calls) == 1
+    assert isinstance(runner.calls[0].tzinfo, ZoneInfo)
+    assert runner.calls[0].tzinfo.key == "Asia/Shanghai"
+
+
+@pytest.mark.parametrize(
+    ("command", "name_option", "name_value"),
+    [
+        ("collect-group-once", "--group-name", "核心群A"),
+        ("collect-article-once", "--account-name", "行业观察"),
+    ],
+)
+def test_manual_cli_busy_never_checks_health_or_builds_rpa(
+    monkeypatch, capsys, command, name_option, name_value
+) -> None:
+    class BusyGuard:
+        def run_manual(self, pipeline, owner_task_id, now, action):
+            raise WechatUiBusyError("WeChat UI is busy")
+
+    health_calls = []
+    builder_calls = []
+    monkeypatch.setattr(
+        main_module,
+        "build_managed_mode_guard",
+        lambda config: BusyGuard(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "ensure_wechat_health",
+        lambda config: health_calls.append(config),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "build_real_group_collect_service",
+        lambda config: builder_calls.append("group") or _ManualGroupService(),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "build_real_article_poc_runner",
+        lambda *args, **kwargs: builder_calls.append("article")
+        or _ManagedCliRunner(),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "weinsight",
+            command,
+            "--config",
+            "config/config.dev.yaml",
+            name_option,
+            name_value,
+        ],
+    )
+
+    exit_code = main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 3
+    assert captured.err.strip() == "managed_mode_error=wechat_ui_busy"
+    assert health_calls == []
+    assert builder_calls == []
+
+
+class _ManualGroupService:
+    def collect_once(self, group_name, batch_id, collect_time):
+        return _ManagedCliResult()
+
+
+def test_manual_cli_lease_lost_uses_fixed_safe_output(monkeypatch, capsys) -> None:
+    class LeaseLostGuard:
+        def run_manual(self, pipeline, owner_task_id, now, action):
+            action()
+            raise WechatUiLeaseLostError(
+                "raw mysql://secret@private-host lease details"
+            )
+
+    monkeypatch.setattr(
+        main_module,
+        "build_managed_mode_guard",
+        lambda config: LeaseLostGuard(),
+        raising=False,
+    )
+    monkeypatch.setattr(main_module, "ensure_wechat_health", lambda config: None)
+    monkeypatch.setattr(
+        main_module,
+        "build_real_group_collect_service",
+        lambda config: _ManualGroupService(),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "weinsight",
+            "collect-group-once",
+            "--config",
+            "config/config.dev.yaml",
+            "--group-name",
+            "核心群A",
+        ],
+    )
+
+    assert main() == 3
+    captured = capsys.readouterr()
+    assert captured.err.strip() == "managed_mode_error=wechat_ui_lease_lost"
+    assert "secret" not in captured.err
+    assert "private-host" not in captured.err
+
+
+def test_guard_builder_failure_outputs_only_safe_exception_type(monkeypatch, capsys) -> None:
+    def fail_guard(config):
+        raise RuntimeError("mysql://admin:secret@private-host/weinsight")
+
+    monkeypatch.setattr(
+        main_module,
+        "build_managed_mode_guard",
+        fail_guard,
+        raising=False,
+    )
+    monkeypatch.setattr(main_module, "ensure_wechat_health", lambda config: None)
+    monkeypatch.setattr(
+        main_module,
+        "build_real_group_polling_runner",
+        lambda config: _ManagedCliRunner(),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "weinsight",
+            "run-group-scheduler",
+            "--once",
+            "--config",
+            "config/config.dev.yaml",
+        ],
+    )
+
+    assert main() == 1
+    captured = capsys.readouterr()
+    assert captured.err.strip() == "managed_guard_error=RuntimeError"
+    assert "secret" not in captured.err
+    assert "private-host" not in captured.err
+
+
+def test_help_does_not_build_managed_guard(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        main_module,
+        "build_managed_mode_guard",
+        lambda config: calls.append(config),
+        raising=False,
+    )
+    monkeypatch.setattr(sys, "argv", ["weinsight", "--help"])
+
+    with pytest.raises(SystemExit) as raised:
+        main()
+
+    assert raised.value.code == 0
+    assert calls == []
+
+
+def test_manual_argument_error_does_not_build_managed_guard(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        main_module,
+        "build_managed_mode_guard",
+        lambda config: calls.append(config),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "weinsight",
+            "collect-group-once",
+            "--config",
+            "config/config.dev.yaml",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as raised:
+        main()
+
+    assert raised.value.code == 2
+    assert calls == []
+
+
+def test_build_managed_mode_guard_reuses_one_engine_and_runtime_limits(
+    monkeypatch,
+) -> None:
+    config = main_module.load_config(Path("config/config.dev.yaml"))
+    engine = object()
+    captured = {}
+
+    monkeypatch.setattr(main_module, "create_mysql_engine", lambda mysql: engine)
+    monkeypatch.setattr(
+        main_module,
+        "MysqlWorkerHeartbeatRepo",
+        lambda value: ("heartbeat", value),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "MysqlUiLockRepo",
+        lambda value: ("ui_lock", value),
+    )
+    monkeypatch.setattr(main_module.socket, "gethostname", lambda: "HOST-A")
+
+    def capture_guard(**kwargs):
+        captured.update(kwargs)
+        return "guard"
+
+    monkeypatch.setattr(main_module, "ManagedModeGuard", capture_guard)
+
+    guard = main_module.build_managed_mode_guard(config)
+
+    assert guard == "guard"
+    assert captured["heartbeat_repo"] == ("heartbeat", engine)
+    assert captured["ui_lock_repo"] == ("ui_lock", engine)
+    assert captured["hostname"] == "HOST-A"
+    assert captured["collector_heartbeat_ttl_seconds"] == 30
+    assert captured["ui_lease_seconds"] == 120
+    assert captured["ui_heartbeat_interval_seconds"] == 10
+
+
+def test_article_poc_builder_uses_outer_held_lock_adapter(monkeypatch) -> None:
+    config = main_module.load_config(Path("config/config.dev.yaml"))
+    engine = object()
+    held_lock = HeldUiLockAdapter("article")
+    captured = {}
+
+    monkeypatch.setattr(main_module, "create_mysql_engine", lambda mysql: engine)
+    monkeypatch.setattr(
+        main_module, "build_real_article_rpa_client", lambda config: object()
+    )
+
+    def capture_runner(**kwargs):
+        captured.update(kwargs)
+        return "runner"
+
+    monkeypatch.setattr(main_module, "ArticlePollingRunner", capture_runner)
+
+    runner = main_module.build_real_article_poc_runner(
+        config,
+        account_name="行业观察",
+        max_articles_per_round=3,
+        lock_repo=held_lock,
+    )
+
+    assert runner == "runner"
+    assert captured["lock_repo"] is held_lock
+
+
+@pytest.mark.parametrize("builder_kind", ["poc", "scheduler"])
+def test_real_article_builders_keep_all_three_checkpoints_shanghai_aware(
+    monkeypatch, builder_kind
+) -> None:
+    now = datetime(
+        2026, 7, 10, 18, 0, tzinfo=ZoneInfo("Asia/Shanghai")
+    )
+
+    class GroupRepo:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def list_due_groups(self, current, limit):
+            self.calls.append((current, limit))
+            return []
+
+    class RawRepo:
+        def insert_today_raw_ignore_duplicates(self, articles, *, crawl_date):
+            items = list(articles)
+            return ArticleRawInsertResult(
+                read_count=len(items),
+                inserted_count=len(items),
+                duplicate_count=0,
+                skipped_count=0,
+                task_created_count=len(items),
+            )
+
+    class LogRepo:
+        def __init__(self) -> None:
+            self.records = []
+
+        def insert_collect_log(self, record):
+            self.records.append(record)
+
+    class ProgressRepo:
+        def get_progress(self, crawl_date, account_name):
+            return None
+
+        def upsert_progress(self, record):
+            raise AssertionError("future core group must not interrupt")
+
+        def mark_success(self, crawl_date, account_name, success_time=None):
+            return None
+
+    class AccountRepo:
+        def list_due_accounts(self, current, limit):
+            return [
+                SimpleNamespace(
+                    account_name="行业观察",
+                    priority=1,
+                    poll_interval_minutes=60,
+                    max_articles_per_round=3,
+                )
+            ]
+
+    class ScreenshotClient:
+        def save_screenshot(self, path):
+            return path
+
+    group_repo = GroupRepo()
+    monkeypatch.setattr(main_module, "_shanghai_now", lambda: now)
+    monkeypatch.setattr(main_module, "create_mysql_engine", lambda mysql: object())
+    monkeypatch.setattr(
+        main_module, "MysqlGroupConfigRepo", lambda engine: group_repo
+    )
+    monkeypatch.setattr(
+        main_module, "MysqlArticleRawRepo", lambda engine: RawRepo()
+    )
+    monkeypatch.setattr(
+        main_module, "MysqlArticleCollectLogRepo", lambda engine: LogRepo()
+    )
+    monkeypatch.setattr(
+        main_module, "MysqlArticleProgressRepo", lambda engine: ProgressRepo()
+    )
+    monkeypatch.setattr(
+        main_module,
+        "MysqlArticleAccountConfigRepo",
+        lambda engine: AccountRepo(),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "build_real_article_rpa_client",
+        lambda config: FakeArticleRpaClient(
+            {"行业观察": ["https://mp.weixin.qq.com/s/1"]}
+        ),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "MysqlUiLockRepo",
+        lambda engine: HeldUiLockAdapter("article"),
+    )
+    monkeypatch.setattr(
+        main_module, "DesktopScreenshotClient", ScreenshotClient
+    )
+    config = main_module.load_config(Path("config/config.dev.yaml"))
+
+    if builder_kind == "poc":
+        runner = main_module.build_real_article_poc_runner(
+            config,
+            account_name="行业观察",
+            max_articles_per_round=3,
+            lock_repo=HeldUiLockAdapter("article"),
+        )
+    else:
+        runner = main_module.build_real_article_scheduler_runner(config)
+
+    result = runner.run_once(now)
+
+    assert result.failed_count == 0
+    assert len(group_repo.calls) == 3
+    assert all(
+        isinstance(current.tzinfo, ZoneInfo)
+        and current.tzinfo.key == "Asia/Shanghai"
+        and limit == 1
+        for current, limit in group_repo.calls
+    )

@@ -25,6 +25,13 @@ def test_run_article_scheduler_requires_once(monkeypatch, capsys) -> None:
 
 
 def test_run_article_scheduler_once_outputs_safe_counts(monkeypatch, capsys) -> None:
+    class Guard:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def ensure_scheduler_allowed(self, now):
+            self.calls.append(now)
+
     class FakeRunner:
         def run_once(self, now):
             return ArticlePollingRunResult(
@@ -35,6 +42,10 @@ def test_run_article_scheduler_once_outputs_safe_counts(monkeypatch, capsys) -> 
                 interrupted_count=0,
             )
 
+    guard = Guard()
+    monkeypatch.setattr(
+        main_module, "build_managed_mode_guard", lambda config: guard
+    )
     monkeypatch.setattr(main_module, "build_real_article_scheduler_runner", lambda config: FakeRunner())
     monkeypatch.setattr(main_module, "ensure_wechat_health", lambda config: None)
     monkeypatch.setattr(
@@ -55,3 +66,4 @@ def test_run_article_scheduler_once_outputs_safe_counts(monkeypatch, capsys) -> 
     assert "mp.weixin.qq.com" not in output
     assert "article_url" not in output
     assert "article_body" not in output
+    assert len(guard.calls) == 2
