@@ -19,6 +19,19 @@ username: weinsight
 password: WEINSIGHT_MYSQL_PASSWORD
 ```
 
+## 第一阶段管理 Web
+
+设置开发库密码并启动管理 Web：
+
+```powershell
+$env:WEINSIGHT_MYSQL_PASSWORD='weinsight_dev'
+python -m app.web --config config/config.dev.yaml
+```
+
+未传入 `--config` 时默认使用 `config/config.dev.yaml`。开发配置的默认登录用户名为 `admin`，初始密码为 `admin123456`；首次登录不会强制修改密码，建议验证后主动更换。
+
+当前阶段仅提供 Web 鉴权基础。该命令只启动管理 Web，不启动微信 RPA 或 Worker。
+
 ## 生产配置模板
 
 生产模板文件：
