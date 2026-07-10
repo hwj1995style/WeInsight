@@ -35,6 +35,17 @@ class ArticleInterruptedForCoreGroup(RuntimeError):
         )
 
 
+class ArticleStopRequested(RuntimeError):
+    def __init__(
+        self,
+        stage: ArticleStage,
+        last_article_url: str | None = None,
+    ) -> None:
+        self.stage = stage
+        self.last_article_url = last_article_url
+        super().__init__(f"article stop requested at stage={stage.value}")
+
+
 def should_interrupt_article_for_core_group(
     *,
     checkpoint_time: datetime,

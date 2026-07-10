@@ -72,6 +72,11 @@ def test_group_polling_runner_collects_due_groups_with_ui_lock(tmp_path: Path) -
     result = runner.run_once(now)
 
     assert result.success_count == 2
+    assert result.read_count == 4
+    assert result.insert_count == 2
+    assert result.duplicate_count == 2
+    assert result.error_code is None
+    assert result.screenshot_path is None
     assert [call[0] for call in collect_service.calls] == ["核心群B", "核心群A"]
     assert lock_repo.current_owner("wechat_ui") is None
     assert [record["status"] for record in log_repo.records] == ["success", "success"]
@@ -100,6 +105,9 @@ def test_group_polling_runner_does_not_open_wechat_when_ui_lock_is_busy(tmp_path
     result = runner.run_once(now)
 
     assert result.lock_timeout_count == 1
+    assert result.error_code == "WECHAT_UI_LOCK_TIMEOUT"
+    assert result.error_summary is not None
+    assert result.screenshot_path is None
     assert collect_service.calls == []
     assert lock_repo.current_owner("wechat_ui") == "article"
     assert log_repo.records[0]["status"] == "failed"
@@ -130,6 +138,9 @@ def test_group_polling_runner_saves_screenshot_and_releases_lock_on_rpa_error(tm
     result = runner.run_once(now)
 
     assert result.failed_count == 1
+    assert result.error_code == "WECHAT_RPA_ERROR"
+    assert result.error_summary == "boom"
+    assert result.screenshot_path == screenshot_client.paths[0]
     assert lock_repo.current_owner("wechat_ui") is None
     assert len(screenshot_client.paths) == 1
     assert screenshot_client.paths[0].endswith("runtime/screenshots/group/20260703/batch-rpa-error.png")

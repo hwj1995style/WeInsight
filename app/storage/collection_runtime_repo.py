@@ -292,6 +292,16 @@ class MysqlCollectionRuntimeRepo:
                 raise RuntimeStateError("run is not running")
             connection.execute(_SET_STOPPED_AFTER_RUN, {"run_id": run_id})
 
+    def cancel_queued_targets(self, run_id: int, now: datetime) -> int:
+        _positive_integer(run_id, "run_id")
+        _shanghai_datetime(now, "now")
+        with self.engine.begin() as connection:
+            result = connection.execute(
+                _CANCEL_QUEUED_TARGETS,
+                {"run_id": run_id, "now": _to_db_datetime(now)},
+            )
+            return int(result.rowcount or 0)
+
     def abort_expired_runs(self, now: datetime) -> int:
         _shanghai_datetime(now, "now")
         db_now = _to_db_datetime(now)
@@ -735,6 +745,15 @@ _GET_RUN_STATUS = text(
     SELECT status
     FROM wechat_collection_job_run
     WHERE id = :run_id
+    """
+)
+
+_CANCEL_QUEUED_TARGETS = text(
+    """
+    UPDATE wechat_collection_job_target_run
+    SET status = 'cancelled', end_time = :now
+    WHERE run_id = :run_id
+      AND status = 'queued'
     """
 )
 

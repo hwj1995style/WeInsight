@@ -28,10 +28,21 @@ class Connection:
     def __init__(self, results) -> None:
         self.results = iter(results)
         self.executions = []
+        self.events = []
 
     def execute(self, statement, params=None):
         self.executions.append((str(statement), params))
-        return next(self.results)
+        self.events.append(("EXECUTE", str(statement)))
+        result = next(self.results)
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+    def commit(self):
+        self.events.append(("COMMIT", None))
+
+    def rollback(self):
+        self.events.append(("ROLLBACK", None))
 
     def __enter__(self):
         return self
@@ -44,9 +55,14 @@ class Engine:
     def __init__(self, results) -> None:
         self.connection = Connection(results)
         self.begin_count = 0
+        self.connect_count = 0
 
     def begin(self):
         self.begin_count += 1
+        return self.connection
+
+    def connect(self):
+        self.connect_count += 1
         return self.connection
 
 
@@ -125,6 +141,97 @@ def test_has_live_collector_without_exclusion_omits_predicate() -> None:
         "hostname": "HOST-A",
         "cutoff": datetime(2026, 7, 10, 9, 24, 30),
     }
+
+
+def test_register_collector_start_commits_heartbeat_before_releasing_lock() -> None:
+    engine = Engine(
+        [
+            Result(scalar=1),
+            Result(scalar=False),
+            Result(),
+            Result(scalar=1),
+        ]
+    )
+    repo = MysqlWorkerHeartbeatRepo(engine)
+
+    registered = repo.register_collector_start(
+        heartbeat(status="starting"), NOW, 30
+    )
+
+    assert registered is True
+    assert engine.connect_count == 1
+    sql = [item[0] for item in engine.connection.executions]
+    assert "GET_LOCK" in sql[0]
+    assert "worker_type = 'collector'" in sql[1]
+    assert "worker_id <>" not in sql[1]
+    assert "exclude_worker_id" not in engine.connection.executions[1][1]
+    assert "INSERT INTO wechat_worker_heartbeat" in sql[2]
+    assert "RELEASE_LOCK" in sql[3]
+    assert "wechat_ui" not in engine.connection.executions[0][1]["lock_name"]
+    events = engine.connection.events
+    commit_index = events.index(("COMMIT", None))
+    release_index = next(
+        index
+        for index, event in enumerate(events)
+        if event[0] == "EXECUTE" and "RELEASE_LOCK" in event[1]
+    )
+    assert commit_index < release_index
+
+
+def test_register_collector_start_rejects_live_peer_without_upsert() -> None:
+    engine = Engine(
+        [Result(scalar=1), Result(scalar=True), Result(scalar=1)]
+    )
+
+    registered = MysqlWorkerHeartbeatRepo(engine).register_collector_start(
+        heartbeat(status="starting"), NOW, 30
+    )
+
+    assert registered is False
+    statements = [sql for sql, _ in engine.connection.executions]
+    assert not any("INSERT INTO" in sql for sql in statements)
+    assert "RELEASE_LOCK" in statements[-1]
+    commit_index = engine.connection.events.index(("COMMIT", None))
+    release_index = next(
+        index
+        for index, event in enumerate(engine.connection.events)
+        if event[0] == "EXECUTE" and "RELEASE_LOCK" in event[1]
+    )
+    assert commit_index < release_index
+
+
+def test_register_collector_start_lock_failure_does_not_check_or_write() -> None:
+    engine = Engine([Result(scalar=0)])
+    assert (
+        MysqlWorkerHeartbeatRepo(engine).register_collector_start(
+            heartbeat(status="starting"), NOW, 30
+        )
+        is False
+    )
+    assert len(engine.connection.executions) == 1
+
+
+def test_register_collector_start_rolls_back_then_releases_on_error() -> None:
+    engine = Engine(
+        [
+            Result(scalar=1),
+            RuntimeError("live check failed"),
+            Result(scalar=1),
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="live check"):
+        MysqlWorkerHeartbeatRepo(engine).register_collector_start(
+            heartbeat(status="starting"), NOW, 30
+        )
+
+    rollback_index = engine.connection.events.index(("ROLLBACK", None))
+    release_index = next(
+        index
+        for index, event in enumerate(engine.connection.events)
+        if event[0] == "EXECUTE" and "RELEASE_LOCK" in event[1]
+    )
+    assert rollback_index < release_index
 
 
 @pytest.mark.parametrize(

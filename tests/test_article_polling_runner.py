@@ -89,6 +89,8 @@ def test_article_polling_runner_processes_one_due_account_with_ui_lock() -> None
 
     assert result.attempted_count == 1
     assert result.success_count == 1
+    assert result.error_code is None
+    assert result.screenshot_path is None
     assert collect_service.calls == [("账号B", "article-账号B", now, 5)]
     assert lock_repo.current_owner("wechat_ui") is None
     assert len(log_repo.records) == 1
@@ -150,6 +152,8 @@ def test_article_polling_runner_does_not_open_article_when_group_holds_ui_lock()
     result = runner.run_once(now)
 
     assert result.lock_timeout_count == 1
+    assert result.error_code == "WECHAT_UI_LOCK_TIMEOUT"
+    assert result.error_summary is not None
     assert collect_service.calls == []
     assert lock_repo.current_owner("wechat_ui") == "group"
     assert log_repo.records[0]["status"] == "failed"
@@ -181,6 +185,9 @@ def test_article_polling_runner_saves_screenshot_and_releases_lock_on_rpa_error(
     result = runner.run_once(now)
 
     assert result.failed_count == 1
+    assert result.error_code == "WECHAT_ARTICLE_RPA_ERROR"
+    assert result.error_summary == "article boom"
+    assert result.screenshot_path == screenshot_client.paths[0]
     assert lock_repo.current_owner("wechat_ui") is None
     assert screenshot_client.paths == ["runtime/screenshots/article/20260706/article-error.png"]
     assert log_repo.records[0]["status"] == "failed"
@@ -229,6 +236,7 @@ def test_article_polling_runner_treats_no_copied_links_as_no_data_skip() -> None
     assert result.raw_insert_count == 0
     assert result.duplicate_count == 0
     assert result.task_created_count == 0
+    assert result.error_code == "WECHAT_ARTICLE_NO_TODAY_ARTICLE"
     assert progress_repo.successes == [(now.date(), "账号A", now)]
     assert log_repo.records[0]["status"] == "skipped"
     assert log_repo.records[0]["stage"] == "copy_links"
@@ -273,5 +281,6 @@ def test_article_polling_runner_requires_raw_insert_or_duplicate_evidence() -> N
     assert result.link_count == 1
     assert result.raw_insert_count == 0
     assert result.duplicate_count == 0
+    assert result.error_code == "WECHAT_ARTICLE_NO_RAW_EVIDENCE"
     assert log_repo.records[0]["status"] == "failed"
     assert log_repo.records[0]["error_code"] == "WECHAT_ARTICLE_NO_RAW_EVIDENCE"

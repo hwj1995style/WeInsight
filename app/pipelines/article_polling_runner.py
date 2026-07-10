@@ -10,6 +10,7 @@ from app.pipelines.article_collect_service import ArticleCollectResult
 from app.pipelines.article_interrupt_resume import (
     ArticleCollectProgressRecord,
     ArticleInterruptedForCoreGroup,
+    ArticleStopRequested,
     core_group_block_seconds,
     should_interrupt_article_for_core_group,
 )
@@ -37,6 +38,11 @@ class ArticlePollingRunResult:
     duplicate_count: int = 0
     skipped_count: int = 0
     task_created_count: int = 0
+    stop_requested_count: int = 0
+    core_group_interrupted_count: int = 0
+    error_code: str | None = None
+    error_summary: str | None = None
+    screenshot_path: str | None = None
 
 
 class ArticleCollectServiceProtocol(Protocol):
@@ -106,6 +112,7 @@ class ArticlePollingRunner:
         progress_repo: ArticleProgressRepo | None = None,
         next_core_group_due_provider: Callable[[], datetime | None] | None = None,
         max_core_group_block_seconds: int = 10,
+        stop_requested_provider: Callable[[], bool] | None = None,
     ) -> None:
         self.collect_service = collect_service
         self.lock_repo = lock_repo
@@ -120,6 +127,7 @@ class ArticlePollingRunner:
         self.progress_repo = progress_repo
         self.next_core_group_due_provider = next_core_group_due_provider
         self.max_core_group_block_seconds = max_core_group_block_seconds
+        self.stop_requested_provider = stop_requested_provider
 
     def run_once(self, now: datetime) -> ArticlePollingRunResult:
         targets = sorted(
@@ -136,6 +144,11 @@ class ArticlePollingRunner:
         duplicate_count = 0
         skipped_count = 0
         task_created_count = 0
+        stop_requested_count = 0
+        core_group_interrupted_count = 0
+        error_code = None
+        error_summary = None
+        screenshot_path_value = None
 
         for target in targets:
             batch_id = self.batch_id_factory(target.account_name)
@@ -149,6 +162,11 @@ class ArticlePollingRunner:
             )
             if not acquired:
                 lock_timeout_count += 1
+                error_code = "WECHAT_UI_LOCK_TIMEOUT"
+                error_summary = (
+                    "Failed to acquire wechat_ui lock within "
+                    f"{self.lock_acquire_timeout_seconds} seconds."
+                )
                 self.log_repo.insert_collect_log(
                     ArticleCollectLogRecord(
                         batch_id=batch_id,
@@ -193,6 +211,10 @@ class ArticlePollingRunner:
 
                 if result.link_count <= 0:
                     skipped_count += 1
+                    error_code = "WECHAT_ARTICLE_NO_TODAY_ARTICLE"
+                    error_summary = (
+                        "No same-day article links were available for this account."
+                    )
                     if self.progress_repo is not None:
                         self.progress_repo.mark_success(now.date(), target.account_name, success_time=now)
                     self.log_repo.insert_collect_log(
@@ -221,6 +243,8 @@ class ArticlePollingRunner:
 
                 if failure_code is not None:
                     failed_count += 1
+                    error_code = failure_code
+                    error_summary = failure_msg
                     self.log_repo.insert_collect_log(
                         ArticleCollectLogRecord(
                             batch_id=batch_id,
@@ -252,8 +276,28 @@ class ArticlePollingRunner:
                         stage="save_links",
                     )
                 )
+            except ArticleStopRequested as exc:
+                interrupted_count += 1
+                stop_requested_count += 1
+                error_code = "ARTICLE_STOP_REQUESTED"
+                error_summary = str(exc)
+                self.log_repo.insert_collect_log(
+                    ArticleCollectLogRecord(
+                        batch_id=batch_id,
+                        account_name=target.account_name,
+                        start_time=start_time,
+                        end_time=now,
+                        status="interrupted",
+                        stage=exc.stage.value,
+                        error_code="ARTICLE_STOP_REQUESTED",
+                        error_msg=str(exc),
+                    )
+                )
             except ArticleInterruptedForCoreGroup as exc:
                 interrupted_count += 1
+                core_group_interrupted_count += 1
+                error_code = "ARTICLE_INTERRUPTED_FOR_CORE_GROUP"
+                error_summary = str(exc)
                 self.log_repo.insert_collect_log(
                     ArticleCollectLogRecord(
                         batch_id=batch_id,
@@ -268,8 +312,11 @@ class ArticlePollingRunner:
                 )
             except Exception as exc:
                 failed_count += 1
+                error_code = "WECHAT_ARTICLE_RPA_ERROR"
+                error_summary = str(exc)
                 screenshot_path = self._screenshot_path(batch_id, now)
                 saved_screenshot_path = self.screenshot_client.save_screenshot(screenshot_path.as_posix())
+                screenshot_path_value = saved_screenshot_path
                 self.log_repo.insert_collect_log(
                     ArticleCollectLogRecord(
                         batch_id=batch_id,
@@ -297,16 +344,50 @@ class ArticlePollingRunner:
             duplicate_count=duplicate_count,
             skipped_count=skipped_count,
             task_created_count=task_created_count,
+            stop_requested_count=stop_requested_count,
+            core_group_interrupted_count=core_group_interrupted_count,
+            error_code=error_code,
+            error_summary=error_summary,
+            screenshot_path=screenshot_path_value,
         )
 
     def _screenshot_path(self, batch_id: str, now: datetime) -> Path:
         return self.screenshot_root / "article" / now.strftime("%Y%m%d") / f"{batch_id}.png"
 
     def _build_checkpoint(self, account_name: str, now: datetime):
-        if self.progress_repo is None or self.next_core_group_due_provider is None:
+        if self.stop_requested_provider is None and (
+            self.progress_repo is None
+            or self.next_core_group_due_provider is None
+        ):
             return None
 
         def checkpoint(stage: ArticleStage, last_article_url: str | None) -> None:
+            if (
+                self.stop_requested_provider is not None
+                and self.stop_requested_provider()
+            ):
+                if self.progress_repo is not None:
+                    self.progress_repo.upsert_progress(
+                        ArticleCollectProgressRecord(
+                            crawl_date=now.date(),
+                            account_name=account_name,
+                            stage=stage.value,
+                            status="interrupted",
+                            last_article_url=last_article_url,
+                            retry_count=1,
+                            last_error_code="ARTICLE_STOP_REQUESTED",
+                            last_error_msg=(
+                                "collection job stop requested at safe checkpoint"
+                            ),
+                        )
+                    )
+                raise ArticleStopRequested(stage, last_article_url)
+
+            if (
+                self.progress_repo is None
+                or self.next_core_group_due_provider is None
+            ):
+                return
             next_core_group_due = self.next_core_group_due_provider()
             decision = should_interrupt_article_for_core_group(
                 checkpoint_time=now,

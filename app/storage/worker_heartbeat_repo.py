@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -33,23 +34,83 @@ class MysqlWorkerHeartbeatRepo:
 
     def upsert_heartbeat(self, record: WorkerHeartbeatRecord) -> None:
         _validate_record(record)
-        params = {
-            "worker_id": record.worker_id,
-            "worker_type": record.worker_type,
-            "hostname": record.hostname,
-            "process_id": record.process_id,
-            "version": record.version,
-            "status": record.status,
-            "last_heartbeat_at": _to_db_datetime(record.last_heartbeat_at),
-            "start_time": _to_db_datetime(record.start_time),
-            "last_error_summary": (
-                None
-                if record.last_error_summary is None
-                else sanitize_output(record.last_error_summary)
-            ),
-        }
+        params = _heartbeat_params(record)
         with self.engine.begin() as connection:
             connection.execute(_UPSERT_HEARTBEAT, params)
+
+    def register_collector_start(
+        self,
+        record: WorkerHeartbeatRecord,
+        now: datetime,
+        ttl_seconds: int,
+        lock_timeout_seconds: int = 0,
+    ) -> bool:
+        _validate_record(record)
+        if record.worker_type != "collector" or record.status != "starting":
+            raise ValueError(
+                "startup record must be a collector in starting status"
+            )
+        _shanghai_datetime(now, "now")
+        if record.last_heartbeat_at != now:
+            raise ValueError("startup last_heartbeat_at must equal now")
+        _positive_seconds(ttl_seconds, "ttl_seconds")
+        if (
+            isinstance(lock_timeout_seconds, bool)
+            or not isinstance(lock_timeout_seconds, int)
+            or lock_timeout_seconds < 0
+        ):
+            raise ValueError(
+                "lock_timeout_seconds must be a nonnegative integer"
+            )
+        lock_name = _startup_lock_name(record.hostname)
+        acquired = False
+        with self.engine.connect() as connection:
+            try:
+                acquired = (
+                    connection.execute(
+                        _GET_STARTUP_LOCK,
+                        {
+                            "lock_name": lock_name,
+                            "lock_timeout_seconds": lock_timeout_seconds,
+                        },
+                    ).scalar_one()
+                    == 1
+                )
+                if not acquired:
+                    connection.rollback()
+                    return False
+                live = bool(
+                    connection.execute(
+                        _LIVE_COLLECTOR_FOR_STARTUP,
+                        {
+                            "hostname": record.hostname,
+                            "cutoff": _to_db_datetime(
+                                now - timedelta(seconds=ttl_seconds)
+                            ),
+                        },
+                    ).scalar_one()
+                )
+                if live:
+                    connection.commit()
+                    return False
+                connection.execute(
+                    _UPSERT_HEARTBEAT,
+                    _heartbeat_params(record),
+                )
+                # The starting heartbeat must be committed while the advisory
+                # lock is still held, otherwise a peer can miss the row.
+                connection.commit()
+                return True
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                if acquired:
+                    connection.execute(
+                        _RELEASE_STARTUP_LOCK,
+                        {"lock_name": lock_name},
+                    )
+                    connection.commit()
 
     def has_live_collector(
         self,
@@ -121,6 +182,34 @@ def _validate_record(record: object) -> None:
         raise TypeError("last_error_summary must be a string or None")
 
 
+def _heartbeat_params(record: WorkerHeartbeatRecord) -> dict[str, object]:
+    return {
+        "worker_id": record.worker_id,
+        "worker_type": record.worker_type,
+        "hostname": record.hostname,
+        "process_id": record.process_id,
+        "version": record.version,
+        "status": record.status,
+        "last_heartbeat_at": _to_db_datetime(record.last_heartbeat_at),
+        "start_time": _to_db_datetime(record.start_time),
+        "last_error_summary": (
+            None
+            if record.last_error_summary is None
+            else sanitize_output(record.last_error_summary)
+        ),
+    }
+
+
+def _positive_seconds(value: object, field: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"{field} must be a positive integer")
+
+
+def _startup_lock_name(hostname: str) -> str:
+    digest = hashlib.sha256(hostname.encode("utf-8")).hexdigest()[:32]
+    return f"weinsight:collector-start:{digest}"
+
+
 def _required_text(value: object, field: str, maximum: int) -> None:
     if not isinstance(value, str) or not value or value != value.strip():
         raise ValueError(f"{field} must be a non-empty trimmed string")
@@ -154,5 +243,31 @@ _UPSERT_HEARTBEAT = text(
         status = VALUES(status),
         last_heartbeat_at = VALUES(last_heartbeat_at),
         last_error_summary = VALUES(last_error_summary)
+    """
+)
+
+_GET_STARTUP_LOCK = text(
+    """
+    SELECT GET_LOCK(:lock_name, :lock_timeout_seconds)
+    """
+)
+
+_LIVE_COLLECTOR_FOR_STARTUP = text(
+    """
+    SELECT EXISTS (
+        SELECT 1
+        FROM wechat_worker_heartbeat
+        WHERE worker_type = 'collector'
+          AND hostname = :hostname
+          AND status IN ('starting', 'running', 'degraded', 'stopping')
+          AND last_heartbeat_at >= :cutoff
+        LIMIT 1
+    )
+    """
+)
+
+_RELEASE_STARTUP_LOCK = text(
+    """
+    SELECT RELEASE_LOCK(:lock_name)
     """
 )

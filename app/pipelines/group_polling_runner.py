@@ -23,6 +23,12 @@ class GroupPollingRunResult:
     success_count: int
     failed_count: int
     lock_timeout_count: int
+    read_count: int = 0
+    insert_count: int = 0
+    duplicate_count: int = 0
+    error_code: str | None = None
+    error_summary: str | None = None
+    screenshot_path: str | None = None
 
 
 class CollectService(Protocol):
@@ -93,6 +99,12 @@ class GroupPollingRunner:
         success_count = 0
         failed_count = 0
         lock_timeout_count = 0
+        read_count = 0
+        insert_count = 0
+        duplicate_count = 0
+        error_code = None
+        error_summary = None
+        screenshot_path_value = None
 
         for target in targets:
             batch_id = self.batch_id_factory(target.group_name)
@@ -106,6 +118,11 @@ class GroupPollingRunner:
             )
             if not acquired:
                 lock_timeout_count += 1
+                error_code = "WECHAT_UI_LOCK_TIMEOUT"
+                error_summary = (
+                    "Failed to acquire wechat_ui lock within "
+                    f"{self.lock_acquire_timeout_seconds} seconds."
+                )
                 self.log_repo.insert_collect_log(
                     GroupCollectLogRecord(
                         batch_id=batch_id,
@@ -125,6 +142,9 @@ class GroupPollingRunner:
             try:
                 result = self.collect_service.collect_once(target.group_name, batch_id, now)
                 success_count += 1
+                read_count += result.read_count
+                insert_count += result.insert_count
+                duplicate_count += result.duplicate_count
                 self.log_repo.insert_collect_log(
                     GroupCollectLogRecord(
                         batch_id=batch_id,
@@ -139,8 +159,11 @@ class GroupPollingRunner:
                 )
             except Exception as exc:
                 failed_count += 1
+                error_code = "WECHAT_RPA_ERROR"
+                error_summary = str(exc)
                 screenshot_path = self._screenshot_path(batch_id, now)
                 saved_screenshot_path = self.screenshot_client.save_screenshot(screenshot_path.as_posix())
+                screenshot_path_value = saved_screenshot_path
                 self.log_repo.insert_collect_log(
                     GroupCollectLogRecord(
                         batch_id=batch_id,
@@ -162,6 +185,12 @@ class GroupPollingRunner:
             success_count=success_count,
             failed_count=failed_count,
             lock_timeout_count=lock_timeout_count,
+            read_count=read_count,
+            insert_count=insert_count,
+            duplicate_count=duplicate_count,
+            error_code=error_code,
+            error_summary=error_summary,
+            screenshot_path=screenshot_path_value,
         )
 
     def _screenshot_path(self, batch_id: str, now: datetime) -> Path:

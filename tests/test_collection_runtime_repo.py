@@ -636,12 +636,36 @@ def test_abort_expired_runs_returns_zero_without_writes() -> None:
     assert len(engine.connection.executions) == 1
 
 
+def test_cancel_queued_targets_only_closes_queued_rows_for_one_run() -> None:
+    engine = Engine([Result(rowcount=2)])
+
+    count = MysqlCollectionRuntimeRepo(engine).cancel_queued_targets(41, NOW)
+
+    assert count == 2
+    sql, params = engine.connection.executions[0]
+    assert "run_id = :run_id" in sql
+    assert "status = 'queued'" in sql
+    assert "status = 'cancelled'" in sql
+    assert "end_time = :now" in sql
+    assert "running" not in sql
+    assert params == {
+        "run_id": 41,
+        "now": datetime(2026, 7, 10, 9, 25),
+    }
+
+
+def test_cancel_queued_targets_is_idempotent() -> None:
+    engine = Engine([Result(rowcount=0)])
+    assert MysqlCollectionRuntimeRepo(engine).cancel_queued_targets(41, NOW) == 0
+
+
 @pytest.mark.parametrize("method,args", [
     ("heartbeat_run", (True, "collector-1", NOW, 120)),
     ("is_stop_requested", (True,)),
     ("start_target", (41, True, "batch", NOW)),
     ("finish_target", (True, TargetRunOutcome(status="success"), NOW)),
     ("finish_run", (True, RunStatus.SUCCESS, NOW)),
+    ("cancel_queued_targets", (True, NOW)),
 ])
 def test_runtime_methods_reject_boolean_ids(method, args) -> None:
     with pytest.raises(ValueError, match="positive integer"):

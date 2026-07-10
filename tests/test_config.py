@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from app.core.config import load_config
@@ -65,6 +66,83 @@ def test_admin_web_config_defaults_are_explicit() -> None:
     assert config.auth.login_lock_minutes == 15
 
 
+def test_worker_config_defaults_are_explicit_and_safe() -> None:
+    config = load_config(Path("config/config.dev.yaml"))
+
+    assert config.workers.collector_mode == "fake"
+    assert config.workers.schedule_tick_seconds == 5
+    assert config.workers.heartbeat_seconds == 10
+    assert config.workers.run_lease_seconds == 120
+    assert config.workers.pipeline_tick_seconds == 5
+    assert config.workers.group_clean_batch_size == 50
+    assert config.workers.group_analysis_batch_size == 100
+    assert config.workers.article_parse_batch_size == 20
+    assert config.workers.article_analysis_batch_size == 20
+
+
+def _write_changed_config(tmp_path: Path, change) -> Path:
+    raw = yaml.safe_load(Path("config/config.dev.yaml").read_text(encoding="utf-8"))
+    change(raw)
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        yaml.safe_dump(raw, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_worker_config_rejects_invalid_mode_before_runtime_build(tmp_path) -> None:
+    path = _write_changed_config(
+        tmp_path,
+        lambda raw: raw["workers"].update({"collector_mode": "unsafe"}),
+    )
+    with pytest.raises(ValueError, match="collector_mode"):
+        load_config(path)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "schedule_tick_seconds",
+        "heartbeat_seconds",
+        "run_lease_seconds",
+        "pipeline_tick_seconds",
+        "group_clean_batch_size",
+        "group_analysis_batch_size",
+        "article_parse_batch_size",
+        "article_analysis_batch_size",
+    ],
+)
+def test_worker_config_rejects_bool_and_nonpositive_integers(
+    tmp_path, field
+) -> None:
+    for invalid in (True, 0, -1):
+        path = _write_changed_config(
+            tmp_path,
+            lambda raw, value=invalid: raw["workers"].update(
+                {field: value}
+            ),
+        )
+        with pytest.raises(ValueError, match=field):
+            load_config(path)
+
+
+def test_worker_config_rejects_missing_and_unknown_fields(tmp_path) -> None:
+    missing = _write_changed_config(
+        tmp_path,
+        lambda raw: raw["workers"].pop("run_lease_seconds"),
+    )
+    with pytest.raises((TypeError, KeyError, ValueError)):
+        load_config(missing)
+
+    unknown = _write_changed_config(
+        tmp_path,
+        lambda raw: raw["workers"].update({"real_without_review": True}),
+    )
+    with pytest.raises((TypeError, KeyError, ValueError)):
+        load_config(unknown)
+
+
 def test_admin_web_uses_secure_multipart_dependency() -> None:
     requirements = Path("requirements.txt").read_text(encoding="utf-8").splitlines()
 
@@ -120,6 +198,15 @@ def test_prod_example_config_loads_without_plaintext_password(monkeypatch) -> No
     assert config.pipelines.article.browser_executable_path == "auto"
     assert config.web.host == "10.20.30.40"
     assert config.web.secure_cookie is True
+    assert config.workers.collector_mode == "fake"
+    assert config.workers.schedule_tick_seconds == 5
+    assert config.workers.heartbeat_seconds == 10
+    assert config.workers.run_lease_seconds == 120
+    assert config.workers.pipeline_tick_seconds == 5
+    assert config.workers.group_clean_batch_size == 50
+    assert config.workers.group_analysis_batch_size == 100
+    assert config.workers.article_parse_batch_size == 20
+    assert config.workers.article_analysis_batch_size == 20
 
     raw = yaml.safe_load(content)
     assert raw["mysql"]["password"] == "${WEINSIGHT_MYSQL_PASSWORD}"

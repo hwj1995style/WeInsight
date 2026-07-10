@@ -120,6 +120,36 @@ class AuthConfig:
 
 
 @dataclass(frozen=True)
+class WorkersConfig:
+    collector_mode: str
+    schedule_tick_seconds: int
+    heartbeat_seconds: int
+    run_lease_seconds: int
+    pipeline_tick_seconds: int
+    group_clean_batch_size: int
+    group_analysis_batch_size: int
+    article_parse_batch_size: int
+    article_analysis_batch_size: int
+
+    def __post_init__(self) -> None:
+        if self.collector_mode not in {"fake", "real"}:
+            raise ValueError("collector_mode must be fake or real")
+        for field in (
+            "schedule_tick_seconds",
+            "heartbeat_seconds",
+            "run_lease_seconds",
+            "pipeline_tick_seconds",
+            "group_clean_batch_size",
+            "group_analysis_batch_size",
+            "article_parse_batch_size",
+            "article_analysis_batch_size",
+        ):
+            value = getattr(self, field)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{field} must be a positive integer")
+
+
+@dataclass(frozen=True)
 class Config:
     app: AppConfig
     wechat: WechatConfig
@@ -128,6 +158,7 @@ class Config:
     mysql: MysqlConfig
     web: WebConfig
     auth: AuthConfig
+    workers: WorkersConfig
 
 
 def _expand_env(value: Any) -> Any:
@@ -195,4 +226,5 @@ def load_config(path: Path) -> Config:
         mysql=MysqlConfig(**data["mysql"]),
         web=WebConfig(**data["web"]),
         auth=AuthConfig(**data["auth"]),
+        workers=WorkersConfig(**data["workers"]),
     )
