@@ -450,6 +450,18 @@ def test_malformed_form_body_is_rejected_instead_of_raising_500(
     assert response.status_code == 403
 
 
+def test_malformed_multipart_body_is_rejected_instead_of_raising_500(
+    authenticated_client: TestClient,
+) -> None:
+    response = authenticated_client.post(
+        "/logout",
+        content=b"broken",
+        headers={"Content-Type": "multipart/form-data"},
+    )
+
+    assert response.status_code == 403
+
+
 def test_csrf_rejects_mismatched_cookie_and_request_token(
     authenticated_client: TestClient,
     auth_service: FakeAuthService,

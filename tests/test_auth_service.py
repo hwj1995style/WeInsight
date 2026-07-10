@@ -212,6 +212,18 @@ class FailIfVerifiedHasher:
         raise AssertionError("verify must not be called")
 
 
+class RecordingRejectingHasher:
+    def __init__(self) -> None:
+        self.verify_calls: list[tuple[str, str]] = []
+
+    def hash(self, password: str) -> str:
+        raise AssertionError("hash must not be called")
+
+    def verify(self, password_hash: str, password: str) -> bool:
+        self.verify_calls.append((password_hash, password))
+        return False
+
+
 @pytest.fixture
 def auth_config() -> AuthConfig:
     return AuthConfig(
@@ -387,14 +399,30 @@ def test_successful_login_resets_failures_and_expired_lock(
     assert fake_repo.users[1].locked_until is None
 
 
-def test_disabled_user_is_rejected_without_password_verification(
+def test_disabled_user_runs_dummy_verification_before_rejection(
     fake_repo: StatefulAuthRepo, auth_config: AuthConfig
 ) -> None:
     fake_repo.users[1] = replace(fake_repo.users[1], enabled=False)
-    service = AuthService(fake_repo, FailIfVerifiedHasher(), auth_config)
+    hasher = RecordingRejectingHasher()
+    service = AuthService(fake_repo, hasher, auth_config)
 
     with pytest.raises(InvalidCredentialsError):
         service.login("admin", "anything", "127.0.0.1", "pytest", NOW)
+
+    assert len(hasher.verify_calls) == 1
+    assert hasher.verify_calls[0][0] != fake_repo.users[1].password_hash
+
+
+def test_missing_user_runs_dummy_verification_before_rejection(
+    fake_repo: StatefulAuthRepo, auth_config: AuthConfig
+) -> None:
+    hasher = RecordingRejectingHasher()
+    service = AuthService(fake_repo, hasher, auth_config)
+
+    with pytest.raises(InvalidCredentialsError):
+        service.login("missing", "anything", "127.0.0.1", "pytest", NOW)
+
+    assert len(hasher.verify_calls) == 1
 
 
 def test_absolute_session_expiry_rejects_authentication(auth_service: AuthService) -> None:

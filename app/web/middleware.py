@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.formparsers import MultiPartException
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -99,6 +100,10 @@ async def _request_csrf_token(request: Request) -> str | None:
         try:
             await request.body()
             form = await request.form()
+        except StarletteHTTPException as exc:
+            if exc.status_code == 400:
+                return None
+            raise
         except (MultiPartException, ValueError):
             return None
         value = form.get("csrf_token")

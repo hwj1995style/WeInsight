@@ -18,6 +18,10 @@ from app.storage.admin_auth_repo import (
 
 
 DEFAULT_ADMIN_PASSWORD = "admin123456"
+DUMMY_PASSWORD_HASH = (
+    "$argon2id$v=19$m=65536,t=3,p=4$HGQxKNep9crHbH12RQdJYQ$"
+    "DjsD/uIApAU/HmCv+0R6tHcr/JkMwwjBP+EWtRfevSI"
+)
 
 
 @dataclass(frozen=True)
@@ -108,6 +112,7 @@ class AuthService:
     ) -> AuthenticatedSession:
         user = self.repo.find_user_by_username(username)
         if user is None or not user.enabled:
+            self.password_hasher.verify(DUMMY_PASSWORD_HASH, password)
             raise InvalidCredentialsError("invalid username or password")
         if user.locked_until is not None and user.locked_until > now:
             raise LoginLockedError(user.locked_until)
