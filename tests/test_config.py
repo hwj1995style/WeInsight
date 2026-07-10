@@ -50,6 +50,21 @@ def test_pipeline_capacity_defaults_match_design() -> None:
     assert config.pipelines.ui_resource.lock_lease_seconds == 120
 
 
+def test_admin_web_config_defaults_are_explicit() -> None:
+    config = load_config(Path("config/config.dev.yaml"))
+
+    assert config.web.host == "127.0.0.1"
+    assert config.web.port == 8848
+    assert config.web.secure_cookie is False
+    assert config.auth.default_username == "admin"
+    assert config.auth.session_cookie_name == "weinsight_session"
+    assert config.auth.csrf_cookie_name == "weinsight_csrf"
+    assert config.auth.session_idle_minutes == 480
+    assert config.auth.session_absolute_minutes == 1440
+    assert config.auth.login_failure_limit == 5
+    assert config.auth.login_lock_minutes == 15
+
+
 def test_prod_example_config_loads_without_plaintext_password(monkeypatch) -> None:
     path = Path("config/config.prod.example.yaml")
     content = path.read_text(encoding="utf-8")
@@ -61,6 +76,7 @@ def test_prod_example_config_loads_without_plaintext_password(monkeypatch) -> No
     assert "pweinsight" not in content.lower()
 
     monkeypatch.setenv("WEINSIGHT_MYSQL_PASSWORD", "prod-secret-for-test")
+    monkeypatch.setenv("WEINSIGHT_WEB_HOST", "10.20.30.40")
     config = load_config(path)
 
     assert config.app.env == "prod"
@@ -95,6 +111,8 @@ def test_prod_example_config_loads_without_plaintext_password(monkeypatch) -> No
     assert config.pipelines.article.price_items_json_preview_limit == 20
     assert config.pipelines.article.image_quote_note_enabled is True
     assert config.pipelines.article.browser_executable_path == "auto"
+    assert config.web.host == "10.20.30.40"
+    assert config.web.secure_cookie is True
 
     raw = yaml.safe_load(content)
     assert raw["mysql"]["password"] == "${WEINSIGHT_MYSQL_PASSWORD}"

@@ -14,6 +14,20 @@ runtime:
   screenshot_dir: runtime/screenshots
   report_dir: runtime/reports
 
+web:
+  host: 127.0.0.1
+  port: 8848
+  secure_cookie: false
+
+auth:
+  default_username: admin
+  session_cookie_name: weinsight_session
+  csrf_cookie_name: weinsight_csrf
+  session_idle_minutes: 480
+  session_absolute_minutes: 1440
+  login_failure_limit: 5
+  login_lock_minutes: 15
+
 pipelines:
   group:
     enabled: true

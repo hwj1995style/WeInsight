@@ -102,12 +102,32 @@ class PipelineConfig:
 
 
 @dataclass(frozen=True)
+class WebConfig:
+    host: str
+    port: int
+    secure_cookie: bool
+
+
+@dataclass(frozen=True)
+class AuthConfig:
+    default_username: str
+    session_cookie_name: str
+    csrf_cookie_name: str
+    session_idle_minutes: int
+    session_absolute_minutes: int
+    login_failure_limit: int
+    login_lock_minutes: int
+
+
+@dataclass(frozen=True)
 class Config:
     app: AppConfig
     wechat: WechatConfig
     runtime: RuntimeConfig
     pipelines: PipelineConfig
     mysql: MysqlConfig
+    web: WebConfig
+    auth: AuthConfig
 
 
 def _expand_env(value: Any) -> Any:
@@ -173,4 +193,6 @@ def load_config(path: Path) -> Config:
             ui_resource=UiResourceConfig(**data["pipelines"]["ui_resource"]),
         ),
         mysql=MysqlConfig(**data["mysql"]),
+        web=WebConfig(**data["web"]),
+        auth=AuthConfig(**data["auth"]),
     )
