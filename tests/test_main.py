@@ -11,6 +11,7 @@ import app.main as main_module
 import pytest
 from app.main import main
 from app.domain.ai_analysis import AiAnalysisResult
+from app.domain.report_lifecycle import GenerationTrigger, ReportLifecycle, ReportStatus
 from app.pipelines.group_pipeline_service import GroupPipelineResult, PipelineStageResult
 from app.storage.article_config_repo import ArticleAccountConfigRecord
 from app.domain.trial_monitor_report import TrialMonitorReport
@@ -837,16 +838,21 @@ def test_main_analyze_group_once_accepts_rules_config(monkeypatch, capsys) -> No
 
 
 def test_main_group_daily_report_once_outputs_generated_count(monkeypatch, capsys) -> None:
+    now = datetime(2026, 7, 10, 9, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+
     class FakeResult:
-        report_date = date(2026, 7, 3)
+        report_date = date(2026, 7, 10)
         generated_count = 1
 
     class FakeService:
-        def generate_once(self, report_date, group_name, generate_time):
-            assert report_date == date(2026, 7, 3)
+        def generate_once(self, report_date, group_name, generate_time, lifecycle):
+            assert report_date == date(2026, 7, 10)
             assert group_name == "核心群A"
+            assert generate_time == now.replace(tzinfo=None)
+            assert lifecycle == ReportLifecycle.provisional(now, "cli")
             return FakeResult()
 
+    monkeypatch.setattr(main_module, "_shanghai_now", lambda: now)
     monkeypatch.setattr(main_module, "build_real_group_daily_report_service", lambda config: FakeService())
     monkeypatch.setattr(
         sys,
@@ -857,7 +863,7 @@ def test_main_group_daily_report_once_outputs_generated_count(monkeypatch, capsy
             "--config",
             "config/config.dev.yaml",
             "--date",
-            "2026-07-03",
+            "2026-07-10",
             "--group-name",
             "核心群A",
         ],
@@ -867,8 +873,33 @@ def test_main_group_daily_report_once_outputs_generated_count(monkeypatch, capsy
     output = capsys.readouterr().out
 
     assert exit_code == 0
-    assert "report_date=2026-07-03" in output
+    assert "report_date=2026-07-10" in output
     assert "generated_count=1" in output
+
+
+def test_main_group_daily_report_once_rejects_future_date_safely(monkeypatch, capsys) -> None:
+    now = datetime(2026, 7, 10, 9, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+    monkeypatch.setattr(main_module, "_shanghai_now", lambda: now)
+    monkeypatch.setattr(
+        main_module,
+        "build_real_group_daily_report_service",
+        lambda config: pytest.fail("service must not be built for a future date"),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "weinsight",
+            "group-daily-report-once",
+            "--config",
+            "config/config.dev.yaml",
+            "--date",
+            "2026-07-11",
+        ],
+    )
+
+    assert main() == 1
+    assert "report_error=future report date is not allowed" in capsys.readouterr().err
 
 
 def test_main_group_daily_report_list_outputs_summary_without_body(monkeypatch, capsys) -> None:
@@ -1177,13 +1208,20 @@ def test_main_summary_daily_report_export_outputs_path(monkeypatch, capsys, tmp_
 
 
 def test_main_run_group_pipeline_once_skip_collect_outputs_stage_counts(monkeypatch, capsys) -> None:
+    now = datetime(2026, 7, 10, 9, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+
     class FakeService:
-        def run_once(self, report_date, group_name, skip_collect, limit, run_time, batch_id):
+        def run_once(self, report_date, group_name, skip_collect, limit, run_time, batch_id, lifecycle):
             assert report_date == date(2026, 7, 3)
             assert group_name is None
             assert skip_collect is True
             assert limit == 20
             assert batch_id.startswith("pipeline-")
+            assert run_time == now.replace(tzinfo=None)
+            assert lifecycle.report_status is ReportStatus.FINAL
+            assert lifecycle.generation_trigger is GenerationTrigger.MANUAL
+            assert lifecycle.data_cutoff_time == now
+            assert lifecycle.last_generated_by == "cli"
             return GroupPipelineResult(
                 status="success",
                 failed_stage=None,
@@ -1201,6 +1239,7 @@ def test_main_run_group_pipeline_once_skip_collect_outputs_stage_counts(monkeypa
         assert include_collect is False
         return FakeService()
 
+    monkeypatch.setattr(main_module, "_shanghai_now", lambda: now)
     monkeypatch.setattr(main_module, "build_real_group_pipeline_service", build_service)
     monkeypatch.setattr(
         sys,
@@ -1230,7 +1269,7 @@ def test_main_run_group_pipeline_once_skip_collect_outputs_stage_counts(monkeypa
 
 def test_main_run_group_pipeline_once_returns_failed_for_failed_stage(monkeypatch, capsys) -> None:
     class FakeService:
-        def run_once(self, report_date, group_name, skip_collect, limit, run_time, batch_id):
+        def run_once(self, report_date, group_name, skip_collect, limit, run_time, batch_id, lifecycle):
             return GroupPipelineResult(
                 status="failed",
                 failed_stage="clean",
@@ -1267,6 +1306,34 @@ def test_main_run_group_pipeline_once_returns_failed_for_failed_stage(monkeypatc
     assert "pipeline_status=failed" in output
     assert "failed_stage=clean" in output
     assert "error_msg=clean failed_count=1" in output
+
+
+def test_main_run_group_pipeline_once_rejects_future_date_safely(monkeypatch, capsys) -> None:
+    now = datetime(2026, 7, 10, 9, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+    monkeypatch.setattr(main_module, "_shanghai_now", lambda: now)
+    monkeypatch.setattr(
+        main_module,
+        "build_real_group_pipeline_service",
+        lambda config, rules_config_path, include_collect: pytest.fail(
+            "pipeline must not be built for a future date"
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "weinsight",
+            "run-group-pipeline-once",
+            "--config",
+            "config/config.dev.yaml",
+            "--date",
+            "2026-07-11",
+            "--skip-collect",
+        ],
+    )
+
+    assert main() == 1
+    assert "report_error=future report date is not allowed" in capsys.readouterr().err
 
 
 def test_main_group_runtime_summary_outputs_safe_counts(monkeypatch, capsys) -> None:

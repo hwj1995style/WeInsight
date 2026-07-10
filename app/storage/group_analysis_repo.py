@@ -9,6 +9,7 @@ from sqlalchemy.engine import Engine
 
 from app.domain.group_analysis import AnalyzedGroupMessage, DailyReportDraft, DailyReportStats
 from app.domain.group_cleaning import CleanGroupMessage
+from app.domain.report_lifecycle import ReportLifecycle
 
 
 class MysqlGroupAnalysisRepo:
@@ -252,7 +253,11 @@ class MysqlGroupAnalysisRepo:
 
         return self._stats_from_rows(report_date, rows)
 
-    def upsert_daily_report(self, report: DailyReportDraft) -> None:
+    def upsert_daily_report(
+        self,
+        report: DailyReportDraft,
+        lifecycle: ReportLifecycle,
+    ) -> None:
         statement = text(
             """
             INSERT INTO wechat_group_daily_report (
@@ -268,7 +273,11 @@ class MysqlGroupAnalysisRepo:
                 peak_hour,
                 top_keywords,
                 report_version,
-                generate_time
+                generate_time,
+                report_status,
+                data_cutoff_time,
+                generation_trigger,
+                last_generated_by
             ) VALUES (
                 :report_date,
                 :group_name,
@@ -282,7 +291,11 @@ class MysqlGroupAnalysisRepo:
                 :peak_hour,
                 :top_keywords,
                 :report_version,
-                :generate_time
+                :generate_time,
+                :report_status,
+                :data_cutoff_time,
+                :generation_trigger,
+                :last_generated_by
             )
             ON DUPLICATE KEY UPDATE
                 title = VALUES(title),
@@ -296,6 +309,10 @@ class MysqlGroupAnalysisRepo:
                 top_keywords = VALUES(top_keywords),
                 report_version = VALUES(report_version),
                 generate_time = VALUES(generate_time),
+                report_status = VALUES(report_status),
+                data_cutoff_time = VALUES(data_cutoff_time),
+                generation_trigger = VALUES(generation_trigger),
+                last_generated_by = VALUES(last_generated_by),
                 update_time = CURRENT_TIMESTAMP
             """
         )
@@ -313,6 +330,10 @@ class MysqlGroupAnalysisRepo:
             "top_keywords": report.top_keywords_json(),
             "report_version": report.report_version,
             "generate_time": report.generate_time,
+            "report_status": lifecycle.report_status.value,
+            "data_cutoff_time": lifecycle.data_cutoff_time.replace(tzinfo=None),
+            "generation_trigger": lifecycle.generation_trigger.value,
+            "last_generated_by": lifecycle.last_generated_by,
         }
         with self.engine.begin() as connection:
             connection.execute(statement, params)

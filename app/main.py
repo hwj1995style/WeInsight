@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from app.core.config import load_config
 from app.domain.collection_jobs import APPLICATION_TIMEZONE
 from app.domain.group_analysis_rules import load_analysis_rule_set
+from app.domain.report_lifecycle import ReportLifecycle
 from app.pipelines.group_analysis_service import GroupAnalysisService, GroupDailyReportService
 from app.pipelines.group_daily_report_query_service import (
     DailyReportNotFoundError,
@@ -713,13 +714,20 @@ def main() -> int:
     if args.command == "group-daily-report-once":
         if not args.date:
             parser.error("--date is required for group-daily-report-once")
+        report_date = _parse_date(args.date)
+        now = _shanghai_now()
+        try:
+            lifecycle = ReportLifecycle.manual_for_date(report_date, now, "cli")
+        except ValueError as exc:
+            print(f"report_error={exc}", file=sys.stderr)
+            return 1
         config = load_config(Path(args.config))
         service = build_real_group_daily_report_service(config)
-        report_date = _parse_date(args.date)
         result = service.generate_once(
             report_date=report_date,
             group_name=args.group_name,
-            generate_time=datetime.now(),
+            generate_time=now.replace(tzinfo=None),
+            lifecycle=lifecycle,
         )
         print(f"report_date={result.report_date.isoformat()}")
         print(f"generated_count={result.generated_count}")
@@ -941,6 +949,13 @@ def main() -> int:
             parser.error("--date is required for run-group-pipeline-once")
         if not args.skip_collect and not args.group_name:
             parser.error("--group-name is required unless --skip-collect is set")
+        report_date = _parse_date(args.date)
+        now = _shanghai_now()
+        try:
+            lifecycle = ReportLifecycle.manual_for_date(report_date, now, "cli")
+        except ValueError as exc:
+            print(f"report_error={exc}", file=sys.stderr)
+            return 1
         config = load_config(Path(args.config))
         if not args.skip_collect:
             ensure_wechat_health(config)
@@ -951,12 +966,13 @@ def main() -> int:
                 include_collect=not args.skip_collect,
             )
             result = service.run_once(
-                report_date=_parse_date(args.date),
+                report_date=report_date,
                 group_name=args.group_name,
                 skip_collect=args.skip_collect,
                 limit=args.limit,
-                run_time=datetime.now(),
+                run_time=now.replace(tzinfo=None),
                 batch_id=f"pipeline-{uuid4().hex}",
+                lifecycle=lifecycle,
             )
         except WxautoNotAvailableError as exc:
             print(f"rpa_error={exc}", file=sys.stderr)

@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from app.domain.article_daily_report import ArticleDailyReportDraft
+from app.domain.report_lifecycle import GenerationTrigger, ReportLifecycle
 from app.storage.article_daily_report_repo import MysqlArticleDailyReportRepo
 
 
@@ -83,7 +85,12 @@ def test_mysql_article_daily_report_repo_upserts_report_and_marks_article_task_s
         generate_time=datetime(2026, 7, 6, 20, 0),
     )
 
-    repo.upsert_daily_report(report)
+    lifecycle = ReportLifecycle.final(
+        cutoff=datetime(2026, 7, 7, 0, 10, tzinfo=ZoneInfo("Asia/Shanghai")),
+        trigger=GenerationTrigger.COMPENSATION,
+        generated_by="system",
+    )
+    repo.upsert_daily_report(report, lifecycle)
     repo.mark_daily_report_task_success(date(2026, 7, 6))
 
     report_sql, report_params = engine.connection.executions[0]
@@ -91,6 +98,19 @@ def test_mysql_article_daily_report_repo_upserts_report_and_marks_article_task_s
     assert "INSERT INTO wechat_article_daily_report" in report_sql
     assert "ON DUPLICATE KEY UPDATE" in report_sql
     assert json.loads(report_params["top_tags_json"])[0] == {"tag": "深圳", "count": 2}
+    for column in (
+        "report_status",
+        "data_cutoff_time",
+        "generation_trigger",
+        "last_generated_by",
+    ):
+        assert column in report_sql
+        assert f"{column} = VALUES({column})" in report_sql
+    assert report_params["report_status"] == "final"
+    assert report_params["data_cutoff_time"] == datetime(2026, 7, 7, 0, 10)
+    assert report_params["data_cutoff_time"].tzinfo is None
+    assert report_params["generation_trigger"] == "compensation"
+    assert report_params["last_generated_by"] == "system"
     assert "status = 'success'" in success_sql
     assert "task_type = 'article_daily_report'" in success_sql
     assert success_params["ref_id"] == "2026-07-06"

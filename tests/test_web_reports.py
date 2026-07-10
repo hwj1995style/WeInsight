@@ -4,6 +4,7 @@ from datetime import date, datetime
 from pathlib import Path
 import re
 from typing import Iterator
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi import FastAPI
@@ -11,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from app.core.config import Config, load_config
 from app.domain.group_reports import DailyReportDetail, DailyReportSummary
+from app.domain.report_lifecycle import GenerationTrigger, ReportStatus
 from app.pipelines.article_daily_report_query_service import (
     ArticleDailyReportDetail,
     ArticleDailyReportSummary,
@@ -33,6 +35,7 @@ from app.web.routes import reports as report_routes
 
 REPORT_DATE = date(2026, 7, 10)
 GENERATED_AT = datetime(2026, 7, 10, 23, 55)
+CUTOFF_AT = datetime(2026, 7, 10, 23, 50, tzinfo=ZoneInfo("Asia/Shanghai"))
 
 
 class FakeAuthService:
@@ -60,6 +63,10 @@ class FakeGroupReportService:
                 contact_count=3,
                 peak_hour=9,
                 generate_time=GENERATED_AT,
+                report_status=ReportStatus.PROVISIONAL,
+                data_cutoff_time=CUTOFF_AT,
+                generation_trigger=GenerationTrigger.MANUAL,
+                last_generated_by="admin",
             )
         ]
 
@@ -83,6 +90,10 @@ class FakeGroupReportService:
             top_keywords="[]",
             report_version="v1",
             generate_time=GENERATED_AT,
+            report_status=ReportStatus.PROVISIONAL,
+            data_cutoff_time=CUTOFF_AT,
+            generation_trigger=GenerationTrigger.MANUAL,
+            last_generated_by="admin",
         )
 
 
@@ -100,6 +111,10 @@ class FakeArticleReportService:
                 article_count=7,
                 avg_content_length=420,
                 generate_time=GENERATED_AT,
+                report_status=ReportStatus.PROVISIONAL,
+                data_cutoff_time=CUTOFF_AT,
+                generation_trigger=GenerationTrigger.MANUAL,
+                last_generated_by="admin",
             )
         ]
 
@@ -116,6 +131,10 @@ class FakeArticleReportService:
             top_keywords_json="[]",
             report_version="v1",
             generate_time=GENERATED_AT,
+            report_status=ReportStatus.PROVISIONAL,
+            data_cutoff_time=CUTOFF_AT,
+            generation_trigger=GenerationTrigger.MANUAL,
+            last_generated_by="admin",
         )
 
 

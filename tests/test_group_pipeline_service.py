@@ -2,8 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
+from app.domain.report_lifecycle import ReportLifecycle, ReportStatus
 from app.pipelines.group_pipeline_service import GroupPipelineService
+
+
+LIFECYCLE = ReportLifecycle.provisional(
+    cutoff=datetime(2026, 7, 3, 12, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+    generated_by="cli",
+)
 
 
 @dataclass(frozen=True)
@@ -59,10 +67,16 @@ class FakeAnalysisService:
 
 class FakeDailyReportService:
     def __init__(self) -> None:
-        self.calls: list[tuple[date, str | None, datetime]] = []
+        self.calls: list[tuple[date, str | None, datetime, ReportLifecycle]] = []
 
-    def generate_once(self, report_date: date, group_name: str | None, generate_time: datetime) -> FakeReportResult:
-        self.calls.append((report_date, group_name, generate_time))
+    def generate_once(
+        self,
+        report_date: date,
+        group_name: str | None,
+        generate_time: datetime,
+        lifecycle: ReportLifecycle,
+    ) -> FakeReportResult:
+        self.calls.append((report_date, group_name, generate_time, lifecycle))
         return FakeReportResult(report_date=report_date, generated_count=1)
 
 
@@ -103,6 +117,7 @@ def test_group_pipeline_service_skip_collect_runs_postprocess_stages() -> None:
         limit=20,
         run_time=now,
         batch_id="pipeline-1",
+        lifecycle=LIFECYCLE,
     )
 
     assert result.status == "success"
@@ -111,7 +126,8 @@ def test_group_pipeline_service_skip_collect_runs_postprocess_stages() -> None:
     assert collect.calls == []
     assert clean.calls == [(20, now)]
     assert analysis.calls == [(20, now)]
-    assert report.calls == [(date(2026, 7, 3), None, now)]
+    assert report.calls == [(date(2026, 7, 3), None, now, LIFECYCLE)]
+    assert report.calls[0][3].report_status is ReportStatus.PROVISIONAL
 
 
 def test_group_pipeline_service_collects_single_explicit_group_before_postprocess() -> None:
@@ -128,11 +144,12 @@ def test_group_pipeline_service_collects_single_explicit_group_before_postproces
         limit=20,
         run_time=now,
         batch_id="pipeline-1",
+        lifecycle=LIFECYCLE,
     )
 
     assert result.status == "success"
     assert collect.calls == [("核心群A", "pipeline-1", now)]
-    assert report.calls == [(date(2026, 7, 3), "核心群A", now)]
+    assert report.calls == [(date(2026, 7, 3), "核心群A", now, LIFECYCLE)]
     assert result.stages[0].metrics["insert_count"] == 1
 
 
@@ -149,6 +166,7 @@ def test_group_pipeline_service_stops_after_clean_failure() -> None:
         limit=20,
         run_time=datetime(2026, 7, 3, 12, 0, 0),
         batch_id="pipeline-1",
+        lifecycle=LIFECYCLE,
     )
 
     assert result.status == "failed"
@@ -171,6 +189,7 @@ def test_group_pipeline_service_stops_after_analyze_failure() -> None:
         limit=20,
         run_time=datetime(2026, 7, 3, 12, 0, 0),
         batch_id="pipeline-1",
+        lifecycle=LIFECYCLE,
     )
 
     assert result.status == "failed"

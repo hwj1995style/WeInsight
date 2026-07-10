@@ -9,6 +9,7 @@ from app.domain.article_daily_report import (
     ArticleDailyReportStats,
     build_article_daily_report,
 )
+from app.domain.report_lifecycle import ReportLifecycle
 
 
 @dataclass(frozen=True)
@@ -21,7 +22,11 @@ class ArticleDailyReportRepo(Protocol):
     def list_daily_report_stats(self, report_date: date, account_name: str | None) -> list[ArticleDailyReportStats]:
         ...
 
-    def upsert_daily_report(self, report: ArticleDailyReportDraft) -> None:
+    def upsert_daily_report(
+        self,
+        report: ArticleDailyReportDraft,
+        lifecycle: ReportLifecycle,
+    ) -> None:
         ...
 
     def mark_daily_report_task_success(self, report_date: date) -> None:
@@ -38,11 +43,12 @@ class ArticleDailyReportService:
         report_date: date,
         account_name: str | None,
         generate_time: datetime,
+        lifecycle: ReportLifecycle,
     ) -> ArticleDailyReportResult:
         stats_rows = self.repo.list_daily_report_stats(report_date=report_date, account_name=account_name)
         for stats in stats_rows:
             report = build_article_daily_report(stats, generate_time=generate_time)
-            self.repo.upsert_daily_report(report)
+            self.repo.upsert_daily_report(report, lifecycle)
         if account_name is None:
             self.repo.mark_daily_report_task_success(report_date)
         return ArticleDailyReportResult(report_date=report_date, generated_count=len(stats_rows))

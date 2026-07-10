@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from app.domain.group_reports import DailyReportDetail, DailyReportSummary
+from app.domain.report_lifecycle import GenerationTrigger, ReportLifecycle, ReportStatus
+
+
+_ZONE = ZoneInfo("Asia/Shanghai")
 
 
 class MysqlGroupDailyReportQueryRepo:
@@ -32,7 +37,11 @@ class MysqlGroupDailyReportQueryRepo:
                 supply_count,
                 contact_count,
                 peak_hour,
-                generate_time
+                generate_time,
+                report_status,
+                data_cutoff_time,
+                generation_trigger,
+                last_generated_by
             FROM wechat_group_daily_report
             WHERE report_date = :report_date
               {group_filter}
@@ -67,7 +76,11 @@ class MysqlGroupDailyReportQueryRepo:
                 peak_hour,
                 top_keywords,
                 report_version,
-                generate_time
+                generate_time,
+                report_status,
+                data_cutoff_time,
+                generation_trigger,
+                last_generated_by
             FROM wechat_group_daily_report
             WHERE report_date = :report_date
               AND group_name = :group_name
@@ -79,6 +92,7 @@ class MysqlGroupDailyReportQueryRepo:
             row = connection.execute(statement, params).mappings().first()
         if row is None:
             return None
+        lifecycle = _lifecycle_from_row(row)
         return DailyReportDetail(
             report_date=row["report_date"],
             group_name=str(row["group_name"]),
@@ -93,9 +107,14 @@ class MysqlGroupDailyReportQueryRepo:
             top_keywords=str(row["top_keywords"] or "[]"),
             report_version=str(row["report_version"] or "v1"),
             generate_time=row["generate_time"],
+            report_status=lifecycle.report_status,
+            data_cutoff_time=lifecycle.data_cutoff_time,
+            generation_trigger=lifecycle.generation_trigger,
+            last_generated_by=lifecycle.last_generated_by,
         )
 
     def _summary_from_row(self, row) -> DailyReportSummary:
+        lifecycle = _lifecycle_from_row(row)
         return DailyReportSummary(
             report_date=row["report_date"],
             group_name=str(row["group_name"]),
@@ -107,4 +126,39 @@ class MysqlGroupDailyReportQueryRepo:
             contact_count=int(row["contact_count"] or 0),
             peak_hour=None if row["peak_hour"] is None else int(row["peak_hour"]),
             generate_time=row["generate_time"],
+            report_status=lifecycle.report_status,
+            data_cutoff_time=lifecycle.data_cutoff_time,
+            generation_trigger=lifecycle.generation_trigger,
+            last_generated_by=lifecycle.last_generated_by,
         )
+
+
+def _report_status(value: object) -> ReportStatus:
+    try:
+        return ReportStatus(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid report_status: {value!r}") from exc
+
+
+def _generation_trigger(value: object) -> GenerationTrigger:
+    try:
+        return GenerationTrigger(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid generation_trigger: {value!r}") from exc
+
+
+def _data_cutoff_time(value: object) -> datetime:
+    if not isinstance(value, datetime):
+        raise ValueError(f"invalid data_cutoff_time: {value!r}")
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=_ZONE)
+    return value.astimezone(_ZONE)
+
+
+def _lifecycle_from_row(row) -> ReportLifecycle:
+    return ReportLifecycle(
+        report_status=_report_status(row["report_status"]),
+        data_cutoff_time=_data_cutoff_time(row["data_cutoff_time"]),
+        generation_trigger=_generation_trigger(row["generation_trigger"]),
+        last_generated_by=row["last_generated_by"],
+    )

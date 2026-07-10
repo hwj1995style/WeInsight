@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 
+from app.domain.report_lifecycle import GenerationTrigger, ReportStatus
 from app.pipelines.article_daily_report_query_service import (
     ArticleDailyReportDetail,
     ArticleDailyReportNotFoundError,
@@ -33,6 +35,10 @@ class FakeArticleDailyReportQueryRepo:
                 article_count=2,
                 avg_content_length=1300,
                 generate_time=datetime(2026, 7, 6, 20, 0),
+                report_status=ReportStatus.FINAL,
+                data_cutoff_time=datetime(2026, 7, 7, 0, 10, tzinfo=ZoneInfo("Asia/Shanghai")),
+                generation_trigger=GenerationTrigger.COMPENSATION,
+                last_generated_by="system",
             )
         ]
 
@@ -53,6 +59,10 @@ def _detail() -> ArticleDailyReportDetail:
         top_keywords_json='[{"keyword":"供应链","count":2}]',
         report_version="v1",
         generate_time=datetime(2026, 7, 6, 20, 0),
+        report_status=ReportStatus.FINAL,
+        data_cutoff_time=datetime(2026, 7, 7, 0, 10, tzinfo=ZoneInfo("Asia/Shanghai")),
+        generation_trigger=GenerationTrigger.COMPENSATION,
+        last_generated_by="system",
     )
 
 
@@ -65,6 +75,7 @@ def test_article_daily_report_query_service_lists_summaries() -> None:
     assert len(reports) == 1
     assert reports[0].account_name == "行业观察"
     assert reports[0].article_count == 2
+    assert reports[0].report_status is ReportStatus.FINAL
     assert repo.list_calls == [(date(2026, 7, 6), None, 10)]
 
 
@@ -76,6 +87,7 @@ def test_article_daily_report_query_service_gets_detail() -> None:
 
     assert report is not None
     assert report.markdown_body.startswith("# 行业观察")
+    assert report.generation_trigger is GenerationTrigger.COMPENSATION
     assert repo.get_calls == [(date(2026, 7, 6), "行业观察")]
 
 

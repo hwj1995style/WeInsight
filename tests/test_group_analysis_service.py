@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from app.domain.group_analysis import AnalyzedGroupMessage, DailyReportDraft, DailyReportStats
 from app.domain.group_analysis_rules import AnalysisRuleSet
 from app.domain.group_cleaning import CleanGroupMessage
+from app.domain.report_lifecycle import ReportLifecycle, ReportStatus
 from app.pipelines.group_analysis_service import GroupAnalysisService, GroupDailyReportService
+
+
+LIFECYCLE = ReportLifecycle.provisional(
+    cutoff=datetime(2026, 7, 3, 18, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+    generated_by="admin",
+)
 
 
 class FakeAnalysisRepo:
@@ -37,6 +45,7 @@ class FakeDailyReportRepo:
         self.stats = stats
         self.expected_group_name = expected_group_name
         self.reports: list[DailyReportDraft] = []
+        self.lifecycles: list[ReportLifecycle] = []
         self.successes: list[date] = []
 
     def list_daily_report_stats(self, report_date: date, group_name: str | None) -> list[DailyReportStats]:
@@ -44,8 +53,9 @@ class FakeDailyReportRepo:
         assert group_name == self.expected_group_name
         return self.stats
 
-    def upsert_daily_report(self, report: DailyReportDraft) -> None:
+    def upsert_daily_report(self, report: DailyReportDraft, lifecycle: ReportLifecycle) -> None:
         self.reports.append(report)
+        self.lifecycles.append(lifecycle)
 
     def mark_daily_report_task_success(self, report_date: date) -> None:
         self.successes.append(report_date)
@@ -148,6 +158,7 @@ def test_group_daily_report_service_generates_markdown_drafts() -> None:
         report_date=date(2026, 7, 3),
         group_name="核心群A",
         generate_time=datetime(2026, 7, 3, 18, 0, 0),
+        lifecycle=LIFECYCLE,
     )
 
     assert result.report_date == date(2026, 7, 3)
@@ -155,6 +166,7 @@ def test_group_daily_report_service_generates_markdown_drafts() -> None:
     assert repo.reports[0].title == "核心群A 2026-07-03 群日报草稿"
     assert "消息数：3" in repo.reports[0].markdown_body
     assert "可疑商机数：1" in repo.reports[0].markdown_body
+    assert repo.lifecycles[0].report_status is ReportStatus.PROVISIONAL
     assert repo.successes == []
 
 
@@ -181,6 +193,7 @@ def test_group_daily_report_service_marks_global_date_task_success() -> None:
         report_date=date(2026, 7, 3),
         group_name=None,
         generate_time=datetime(2026, 7, 3, 18, 0, 0),
+        lifecycle=LIFECYCLE,
     )
 
     assert result.generated_count == 1

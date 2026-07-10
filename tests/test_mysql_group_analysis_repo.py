@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from app.domain.group_analysis import AnalyzedGroupMessage, DailyReportDraft
+from app.domain.report_lifecycle import ReportLifecycle
 from app.storage.group_analysis_repo import MysqlGroupAnalysisRepo
 
 
@@ -200,9 +202,26 @@ def test_mysql_group_analysis_repo_builds_daily_stats_and_upserts_report() -> No
         report_version="v1",
         generate_time=datetime(2026, 7, 3, 18, 0, 0),
     )
-    repo.upsert_daily_report(report)
+    lifecycle = ReportLifecycle.provisional(
+        cutoff=datetime(2026, 7, 3, 18, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+        generated_by="admin",
+    )
+    repo.upsert_daily_report(report, lifecycle)
 
     report_sql, report_params = engine.connection.executions[-1]
     assert "INSERT INTO wechat_group_daily_report" in report_sql
     assert "ON DUPLICATE KEY UPDATE" in report_sql
     assert report_params["markdown_body"].startswith("# 核心群A")
+    for column in (
+        "report_status",
+        "data_cutoff_time",
+        "generation_trigger",
+        "last_generated_by",
+    ):
+        assert column in report_sql
+        assert f"{column} = VALUES({column})" in report_sql
+    assert report_params["report_status"] == "provisional"
+    assert report_params["data_cutoff_time"] == datetime(2026, 7, 3, 18, 0)
+    assert report_params["data_cutoff_time"].tzinfo is None
+    assert report_params["generation_trigger"] == "manual"
+    assert report_params["last_generated_by"] == "admin"

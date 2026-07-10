@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 
+from app.domain.report_lifecycle import GenerationTrigger, ReportStatus
+
 
 @dataclass(frozen=True)
 class DailyReportSummary:
@@ -16,6 +18,10 @@ class DailyReportSummary:
     contact_count: int
     peak_hour: int | None
     generate_time: datetime
+    report_status: ReportStatus
+    data_cutoff_time: datetime
+    generation_trigger: GenerationTrigger
+    last_generated_by: str
 
 
 @dataclass(frozen=True)
@@ -33,3 +39,7 @@ class DailyReportDetail:
     top_keywords: str
     report_version: str
     generate_time: datetime
+    report_status: ReportStatus
+    data_cutoff_time: datetime
+    generation_trigger: GenerationTrigger
+    last_generated_by: str

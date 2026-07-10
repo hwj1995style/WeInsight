@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Protocol
 
+from app.domain.report_lifecycle import ReportLifecycle
+
 
 @dataclass(frozen=True)
 class PipelineStageResult:
@@ -37,7 +39,13 @@ class GroupPipelineAnalysisService(Protocol):
 
 
 class GroupPipelineDailyReportService(Protocol):
-    def generate_once(self, report_date: date, group_name: str | None, generate_time: datetime):
+    def generate_once(
+        self,
+        report_date: date,
+        group_name: str | None,
+        generate_time: datetime,
+        lifecycle: ReportLifecycle,
+    ):
         ...
 
 
@@ -64,6 +72,7 @@ class GroupPipelineService:
         limit: int,
         run_time: datetime,
         batch_id: str,
+        lifecycle: ReportLifecycle,
     ) -> GroupPipelineResult:
         stages: list[PipelineStageResult] = []
 
@@ -113,6 +122,7 @@ class GroupPipelineService:
                 report_date=report_date,
                 group_name=group_name,
                 generate_time=run_time,
+                lifecycle=lifecycle,
             )
             stages.append(
                 PipelineStageResult(

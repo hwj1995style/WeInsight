@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
+from app.domain.report_lifecycle import GenerationTrigger, ReportStatus
 from app.pipelines.group_daily_report_query_service import (
     DailyReportDetail,
     DailyReportSummary,
@@ -29,6 +31,10 @@ class FakeDailyReportQueryRepo:
                 contact_count=0,
                 peak_hour=10,
                 generate_time=datetime(2026, 7, 3, 18, 0, 0),
+                report_status=ReportStatus.FINAL,
+                data_cutoff_time=datetime(2026, 7, 4, 0, 10, tzinfo=ZoneInfo("Asia/Shanghai")),
+                generation_trigger=GenerationTrigger.COMPENSATION,
+                last_generated_by="system",
             )
         ]
 
@@ -52,6 +58,10 @@ def _detail() -> DailyReportDetail:
         top_keywords='[{"keyword":"深圳","count":2}]',
         report_version="v1",
         generate_time=datetime(2026, 7, 3, 18, 0, 0),
+        report_status=ReportStatus.FINAL,
+        data_cutoff_time=datetime(2026, 7, 4, 0, 10, tzinfo=ZoneInfo("Asia/Shanghai")),
+        generation_trigger=GenerationTrigger.COMPENSATION,
+        last_generated_by="system",
     )
 
 
@@ -64,6 +74,7 @@ def test_group_daily_report_query_service_lists_summaries() -> None:
     assert len(reports) == 1
     assert reports[0].group_name == "核心群A"
     assert reports[0].message_count == 14
+    assert reports[0].report_status is ReportStatus.FINAL
     assert repo.list_calls == [(date(2026, 7, 3), None, 20)]
 
 
@@ -75,6 +86,7 @@ def test_group_daily_report_query_service_gets_detail() -> None:
 
     assert report is not None
     assert report.markdown_body.startswith("# 核心群A")
+    assert report.data_cutoff_time.tzinfo == ZoneInfo("Asia/Shanghai")
     assert repo.get_calls == [(date(2026, 7, 3), "核心群A")]
 
 

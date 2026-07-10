@@ -6,6 +6,8 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Protocol
 
+from app.domain.report_lifecycle import GenerationTrigger, ReportStatus
+
 
 @dataclass(frozen=True)
 class ArticleDailyReportSummary:
@@ -15,6 +17,10 @@ class ArticleDailyReportSummary:
     article_count: int
     avg_content_length: int
     generate_time: datetime
+    report_status: ReportStatus
+    data_cutoff_time: datetime
+    generation_trigger: GenerationTrigger
+    last_generated_by: str
 
 
 @dataclass(frozen=True)
@@ -29,6 +35,10 @@ class ArticleDailyReportDetail:
     top_keywords_json: str
     report_version: str
     generate_time: datetime
+    report_status: ReportStatus
+    data_cutoff_time: datetime
+    generation_trigger: GenerationTrigger
+    last_generated_by: str
 
 
 @dataclass(frozen=True)

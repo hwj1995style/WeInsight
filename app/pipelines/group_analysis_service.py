@@ -13,6 +13,7 @@ from app.domain.group_analysis import (
 )
 from app.domain.group_analysis_rules import AnalysisRuleSet, DEFAULT_ANALYSIS_RULE_SET
 from app.domain.group_cleaning import CleanGroupMessage
+from app.domain.report_lifecycle import ReportLifecycle
 
 
 @dataclass(frozen=True)
@@ -49,7 +50,7 @@ class GroupDailyReportRepo(Protocol):
     def list_daily_report_stats(self, report_date: date, group_name: str | None) -> list[DailyReportStats]:
         ...
 
-    def upsert_daily_report(self, report: DailyReportDraft) -> None:
+    def upsert_daily_report(self, report: DailyReportDraft, lifecycle: ReportLifecycle) -> None:
         ...
 
     def mark_daily_report_task_success(self, report_date: date) -> None:
@@ -98,11 +99,12 @@ class GroupDailyReportService:
         report_date: date,
         group_name: str | None,
         generate_time: datetime,
+        lifecycle: ReportLifecycle,
     ) -> GroupDailyReportResult:
         stats_rows = self.repo.list_daily_report_stats(report_date=report_date, group_name=group_name)
         for stats in stats_rows:
             report = build_group_daily_report(stats, generate_time=generate_time)
-            self.repo.upsert_daily_report(report)
+            self.repo.upsert_daily_report(report, lifecycle)
         if group_name is None:
             self.repo.mark_daily_report_task_success(report_date)
         return GroupDailyReportResult(report_date=report_date, generated_count=len(stats_rows))

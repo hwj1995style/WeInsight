@@ -8,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from app.domain.article_daily_report import ArticleDailyReportDraft, ArticleDailyReportStats
+from app.domain.report_lifecycle import ReportLifecycle
 
 
 class MysqlArticleDailyReportRepo:
@@ -35,7 +36,11 @@ class MysqlArticleDailyReportRepo:
 
         return self._stats_from_rows(report_date, rows)
 
-    def upsert_daily_report(self, report: ArticleDailyReportDraft) -> None:
+    def upsert_daily_report(
+        self,
+        report: ArticleDailyReportDraft,
+        lifecycle: ReportLifecycle,
+    ) -> None:
         statement = text(
             """
             INSERT INTO wechat_article_daily_report (
@@ -48,7 +53,11 @@ class MysqlArticleDailyReportRepo:
                 top_tags_json,
                 top_keywords_json,
                 report_version,
-                generate_time
+                generate_time,
+                report_status,
+                data_cutoff_time,
+                generation_trigger,
+                last_generated_by
             ) VALUES (
                 :report_date,
                 :account_name,
@@ -59,7 +68,11 @@ class MysqlArticleDailyReportRepo:
                 :top_tags_json,
                 :top_keywords_json,
                 :report_version,
-                :generate_time
+                :generate_time,
+                :report_status,
+                :data_cutoff_time,
+                :generation_trigger,
+                :last_generated_by
             )
             ON DUPLICATE KEY UPDATE
                 title = VALUES(title),
@@ -70,6 +83,10 @@ class MysqlArticleDailyReportRepo:
                 top_keywords_json = VALUES(top_keywords_json),
                 report_version = VALUES(report_version),
                 generate_time = VALUES(generate_time),
+                report_status = VALUES(report_status),
+                data_cutoff_time = VALUES(data_cutoff_time),
+                generation_trigger = VALUES(generation_trigger),
+                last_generated_by = VALUES(last_generated_by),
                 update_time = CURRENT_TIMESTAMP
             """
         )
@@ -84,6 +101,10 @@ class MysqlArticleDailyReportRepo:
             "top_keywords_json": report.top_keywords_json(),
             "report_version": report.report_version,
             "generate_time": report.generate_time,
+            "report_status": lifecycle.report_status.value,
+            "data_cutoff_time": lifecycle.data_cutoff_time.replace(tzinfo=None),
+            "generation_trigger": lifecycle.generation_trigger.value,
+            "last_generated_by": lifecycle.last_generated_by,
         }
         with self.engine.begin() as connection:
             connection.execute(statement, params)
