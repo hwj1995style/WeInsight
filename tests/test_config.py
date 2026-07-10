@@ -65,6 +65,13 @@ def test_admin_web_config_defaults_are_explicit() -> None:
     assert config.auth.login_lock_minutes == 15
 
 
+def test_admin_web_uses_secure_multipart_dependency() -> None:
+    requirements = Path("requirements.txt").read_text(encoding="utf-8").splitlines()
+
+    assert "python-multipart==0.0.32" in requirements
+    assert "python-multipart==0.0.20" not in requirements
+
+
 def test_prod_example_config_loads_without_plaintext_password(monkeypatch) -> None:
     path = Path("config/config.prod.example.yaml")
     content = path.read_text(encoding="utf-8")
