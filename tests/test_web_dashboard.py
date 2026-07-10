@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import Iterator
 
@@ -219,6 +220,80 @@ def test_dashboard_sql_uses_only_aggregates_and_safe_control_tables() -> None:
         "screenshot_path",
     ):
         assert forbidden not in sql
+
+
+@pytest.mark.parametrize(
+    "statement_factory",
+    (
+        dashboard_repo._group_collection_statement,
+        dashboard_repo._article_collection_statement,
+    ),
+)
+def test_dashboard_collection_sql_counts_only_explicit_terminal_statuses(
+    statement_factory,
+) -> None:
+    _assert_terminal_status_contract(str(statement_factory()))
+
+
+def test_terminal_projection_excludes_unknown_and_running_from_skipped_and_total() -> None:
+    connection = sqlite3.connect(":memory:")
+    connection.execute("CREATE TABLE collect_log (status TEXT NOT NULL)")
+    connection.executemany(
+        "INSERT INTO collect_log (status) VALUES (?)",
+        [
+            ("success",),
+            ("failed",),
+            ("skipped",),
+            ("interrupted",),
+            ("unknown",),
+            ("running",),
+        ],
+    )
+
+    row = connection.execute(
+        f"SELECT {dashboard_repo._terminal_outcome_projection()} FROM collect_log"
+    ).fetchone()
+
+    assert row == (1, 1, 2, 4)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda sql: sql.replace(
+            "status IN ('skipped', 'interrupted')",
+            "status NOT IN ('success', 'failed')",
+        ),
+        lambda sql: sql.replace(
+            "COALESCE(SUM(CASE WHEN status IN ('success', 'failed', 'skipped', 'interrupted') THEN 1 ELSE 0 END), 0) AS total_count",
+            "COUNT(*) AS total_count",
+        ),
+    ),
+)
+def test_terminal_status_contract_rejects_broad_bucket_mutations(mutation) -> None:
+    canonical = """
+        SELECT
+            COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) AS success_count,
+            COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_count,
+            COALESCE(SUM(CASE WHEN status IN ('skipped', 'interrupted') THEN 1 ELSE 0 END), 0) AS skipped_count,
+            COALESCE(SUM(CASE WHEN status IN ('success', 'failed', 'skipped', 'interrupted') THEN 1 ELSE 0 END), 0) AS total_count
+    """
+
+    with pytest.raises(AssertionError):
+        _assert_terminal_status_contract(mutation(canonical))
+
+
+def _assert_terminal_status_contract(sql: str) -> None:
+    normalized = " ".join(sql.split())
+    assert "status NOT IN" not in normalized
+    assert (
+        "status IN ('skipped', 'interrupted') THEN 1 ELSE 0 END" in normalized
+    )
+    assert "COUNT(*) AS total_count" not in normalized
+    assert (
+        "status IN ('success', 'failed', 'skipped', 'interrupted') "
+        "THEN 1 ELSE 0 END), 0) AS total_count" in normalized
+    )
 
 
 def test_dashboard_outcome_counts_reject_non_conserving_data() -> None:

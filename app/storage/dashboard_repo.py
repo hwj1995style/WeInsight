@@ -71,31 +71,31 @@ def group_row_value(row, key: str):
 
 
 def _group_collection_statement():
-    return text(
-        """
-        SELECT
-            COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) AS success_count,
-            COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_count,
-            COALESCE(SUM(CASE WHEN status NOT IN ('success', 'failed') THEN 1 ELSE 0 END), 0) AS skipped_count,
-            COUNT(*) AS total_count
-        FROM wechat_group_collect_log
-        WHERE start_time >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL :hours HOUR)
-        """
-    )
+    return _collection_statement("wechat_group_collect_log")
 
 
 def _article_collection_statement():
+    return _collection_statement("wechat_article_collect_log")
+
+
+def _collection_statement(table_name: str):
     return text(
-        """
+        f"""
         SELECT
-            COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) AS success_count,
-            COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_count,
-            COALESCE(SUM(CASE WHEN status NOT IN ('success', 'failed') THEN 1 ELSE 0 END), 0) AS skipped_count,
-            COUNT(*) AS total_count
-        FROM wechat_article_collect_log
+            {_terminal_outcome_projection()}
+        FROM {table_name}
         WHERE start_time >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL :hours HOUR)
         """
     )
+
+
+def _terminal_outcome_projection() -> str:
+    return """
+            COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) AS success_count,
+            COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_count,
+            COALESCE(SUM(CASE WHEN status IN ('skipped', 'interrupted') THEN 1 ELSE 0 END), 0) AS skipped_count,
+            COALESCE(SUM(CASE WHEN status IN ('success', 'failed', 'skipped', 'interrupted') THEN 1 ELSE 0 END), 0) AS total_count
+    """
 
 
 def _config_count_statement():

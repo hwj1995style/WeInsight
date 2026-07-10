@@ -35,7 +35,8 @@ async def dashboard(request: Request) -> Response:
         ],
     }
     chart_summary = (
-        f"最近 24 小时采集结果构成：微信群成功 {snapshot.group_collection.success}，"
+        f"最近 24 小时采集结果构成（仅明确终态）："
+        f"微信群成功 {snapshot.group_collection.success}，"
         f"失败 {snapshot.group_collection.failed}，跳过 {snapshot.group_collection.skipped}；"
         f"公众号成功 {snapshot.article_collection.success}，"
         f"失败 {snapshot.article_collection.failed}，跳过 {snapshot.article_collection.skipped}。"
