@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone, tzinfo
 from time import perf_counter
 from zoneinfo import ZoneInfo
 
@@ -15,6 +15,16 @@ from app.services.collection_schedule import (
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+
+class SpoofedShanghaiTimezone(tzinfo):
+    key = "Asia/Shanghai"
+
+    def utcoffset(self, value: datetime | None) -> timedelta:
+        return timedelta(hours=-7)
+
+    def dst(self, value: datetime | None) -> timedelta:
+        return timedelta(0)
 
 
 def dt(value: str, *, tz: ZoneInfo = SHANGHAI) -> datetime:
@@ -73,6 +83,36 @@ def test_schedule_rejects_naive_effective_datetime(field: str) -> None:
         make_spec(**values)
 
 
+@pytest.mark.parametrize("bad_value", ["2026-07-10", object(), True])
+@pytest.mark.parametrize("field", ["effective_start", "effective_end"])
+def test_schedule_rejects_non_datetime_effective_value(
+    field: str,
+    bad_value: object,
+) -> None:
+    values: dict[str, object] = {
+        "effective_start": dt("2026-07-10 00:00"),
+        "effective_end": dt("2026-07-13 00:00"),
+    }
+    values[field] = bad_value
+
+    with pytest.raises(TypeError, match=f"{field}_at must be a datetime"):
+        make_spec(**values)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("field", ["effective_start", "effective_end"])
+def test_schedule_rejects_tzinfo_that_spoofs_shanghai_key(field: str) -> None:
+    values = {
+        "effective_start": dt("2026-07-10 00:00"),
+        "effective_end": dt("2026-07-13 00:00"),
+    }
+    values[field] = datetime(2026, 7, 10, tzinfo=SpoofedShanghaiTimezone())
+    if field == "effective_end":
+        values[field] = datetime(2026, 7, 14, tzinfo=SpoofedShanghaiTimezone())
+
+    with pytest.raises(ValueError, match="ZoneInfo"):
+        make_spec(**values)
+
+
 @pytest.mark.parametrize("timezone_name", ["UTC", "Europe/London", "PRC"])
 def test_schedule_rejects_non_canonical_application_timezone(timezone_name: str) -> None:
     with pytest.raises(ValueError, match="Asia/Shanghai"):
@@ -105,6 +145,19 @@ def test_schedule_rejects_time_with_tzinfo(field: str) -> None:
 
     with pytest.raises(ValueError, match="must not include tzinfo"):
         make_spec(**values)
+
+
+@pytest.mark.parametrize("bad_value", ["09:00", object(), True])
+@pytest.mark.parametrize("field", ["window_start", "window_end"])
+def test_schedule_rejects_non_time_daily_window_value(
+    field: str,
+    bad_value: object,
+) -> None:
+    values: dict[str, object] = {"window_start": time(9), "window_end": time(18)}
+    values[field] = bad_value
+
+    with pytest.raises(TypeError, match=f"daily_{field} must be a time"):
+        make_spec(**values)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -322,6 +375,30 @@ def test_next_run_rejects_naive_arguments(argument: str) -> None:
         next_run_at(spec, **values)
 
 
+@pytest.mark.parametrize("argument", ["after", "anchor"])
+def test_next_run_rejects_non_datetime_arguments(argument: str) -> None:
+    values: dict[str, object] = {
+        "after": dt("2026-07-10 09:00"),
+        "anchor": dt("2026-07-10 09:00"),
+    }
+    values[argument] = "2026-07-10 09:00"
+
+    with pytest.raises(TypeError, match=f"{argument} must be a datetime"):
+        next_run_at(spec=make_spec(), **values)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("argument", ["after", "anchor"])
+def test_next_run_rejects_spoofed_shanghai_tzinfo(argument: str) -> None:
+    values = {
+        "after": dt("2026-07-10 09:00"),
+        "anchor": dt("2026-07-10 09:00"),
+    }
+    values[argument] = datetime(2026, 7, 10, 9, tzinfo=SpoofedShanghaiTimezone())
+
+    with pytest.raises(ValueError, match=f"{argument} must use .*ZoneInfo"):
+        next_run_at(spec=make_spec(), **values)
+
+
 def test_next_run_rejects_argument_in_another_zone() -> None:
     spec = make_spec()
 
@@ -442,6 +519,30 @@ def test_coalesce_rejects_naive_arguments(argument: str) -> None:
     values[argument] = values[argument].replace(tzinfo=None)
 
     with pytest.raises(ValueError, match="timezone-aware"):
+        coalesced_scheduled_at(make_spec(), **values)
+
+
+@pytest.mark.parametrize("argument", ["now", "previous_next_run"])
+def test_coalesce_rejects_non_datetime_arguments(argument: str) -> None:
+    values: dict[str, object] = {
+        "now": dt("2026-07-10 09:30"),
+        "previous_next_run": dt("2026-07-10 09:00"),
+    }
+    values[argument] = object()
+
+    with pytest.raises(TypeError, match=f"{argument} must be a datetime"):
+        coalesced_scheduled_at(make_spec(), **values)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("argument", ["now", "previous_next_run"])
+def test_coalesce_rejects_spoofed_shanghai_tzinfo(argument: str) -> None:
+    values = {
+        "now": dt("2026-07-10 09:30"),
+        "previous_next_run": dt("2026-07-10 09:00"),
+    }
+    values[argument] = datetime(2026, 7, 10, 9, tzinfo=SpoofedShanghaiTimezone())
+
+    with pytest.raises(ValueError, match=f"{argument} must use .*ZoneInfo"):
         coalesced_scheduled_at(make_spec(), **values)
 
 

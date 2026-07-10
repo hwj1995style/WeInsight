@@ -33,12 +33,19 @@ class RunStatus(str, Enum):
     ABORTED = "aborted"
 
 
-def ensure_schedule_datetime(value: datetime, *, field_name: str) -> None:
+def ensure_schedule_datetime(value: object, *, field_name: str) -> None:
     """Validate the one timezone contract used by persisted collection schedules."""
+    if not isinstance(value, datetime):
+        raise TypeError(f"{field_name} must be a datetime")
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field_name} must be timezone-aware")
-    if getattr(value.tzinfo, "key", None) != APPLICATION_TIMEZONE:
-        raise ValueError(f"{field_name} must use {APPLICATION_TIMEZONE}")
+    if (
+        not isinstance(value.tzinfo, ZoneInfo)
+        or value.tzinfo.key != APPLICATION_TIMEZONE
+    ):
+        raise ValueError(
+            f"{field_name} must use {APPLICATION_TIMEZONE} ZoneInfo"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +76,10 @@ class ScheduleSpec:
         if self.effective_start_at >= self.effective_end_at:
             raise ValueError("effective_start_at must be before effective_end_at")
 
+        if not isinstance(self.daily_window_start, time):
+            raise TypeError("daily_window_start must be a time")
+        if not isinstance(self.daily_window_end, time):
+            raise TypeError("daily_window_end must be a time")
         if self.daily_window_start.tzinfo is not None:
             raise ValueError("daily_window_start must not include tzinfo")
         if self.daily_window_end.tzinfo is not None:
