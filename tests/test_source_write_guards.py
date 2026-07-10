@@ -35,7 +35,10 @@ class Connection:
     def execute(self, statement, params=None):
         sql = str(statement)
         self.executions.append((sql, params))
-        if "FOR SHARE" in sql:
+        if (
+            "FROM wechat_group_config" in sql
+            or "FROM wechat_public_account_config" in sql
+        ) and ("FOR SHARE" in sql or "FOR UPDATE" in sql):
             return Result(
                 rows=[{"id": 1, "source_name": self.source_name, "enabled": 1}]
             )
@@ -65,6 +68,14 @@ def _assert_first_history_lock(engine: Engine, table: str) -> None:
     sql, _ = engine.connection.executions[0]
     assert f"FROM {table}" in sql
     assert "FOR SHARE" in sql
+
+
+def _assert_first_exclusive_config_lock(engine: Engine, table: str) -> None:
+    assert engine.begin_count == 1
+    sql, _ = engine.connection.executions[0]
+    assert f"FROM {table}" in sql
+    assert "FOR UPDATE" in sql
+    assert all("FOR SHARE" not in statement for statement, _ in engine.connection.executions)
 
 
 def test_group_raw_and_cursor_lock_current_group_name_before_writing() -> None:
@@ -217,4 +228,6 @@ def test_article_progress_writes_lock_current_account_name() -> None:
         "行业观察",
         success_time=datetime(2026, 7, 6, 9, 0),
     )
-    _assert_first_history_lock(success_engine, "wechat_public_account_config")
+    _assert_first_exclusive_config_lock(
+        success_engine, "wechat_public_account_config"
+    )

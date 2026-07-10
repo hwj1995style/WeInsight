@@ -129,7 +129,7 @@ class MysqlArticleProgressRepo:
         )
         success_time = success_time or datetime.now()
         with self.engine.begin() as connection:
-            _SOURCE_WRITE_GUARD.lock_for_history_write(
+            _SOURCE_WRITE_GUARD.lock_for_history_and_config_update(
                 connection, "article", account_name
             )
             connection.execute(progress_statement, {"crawl_date": crawl_date, "account_name": account_name})

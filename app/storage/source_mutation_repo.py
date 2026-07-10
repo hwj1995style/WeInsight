@@ -69,6 +69,16 @@ class MysqlSourceWriteGuard:
         ).mappings().first()
         return _guard_record(row, source_type, source_name)
 
+    def lock_for_history_and_config_update(
+        self, connection: Connection, source_type: str, source_name: str
+    ) -> SourceGuardRecord:
+        """Locks identity exclusively when the same transaction updates config."""
+        statement = _source_lock_statement(source_type, by_name=True, for_update=True)
+        row = connection.execute(
+            statement, {"source_name": source_name}
+        ).mappings().first()
+        return _guard_record(row, source_type, source_name)
+
 
 class MysqlSourceMutationRepo:
     def __init__(self, engine: Engine) -> None:

@@ -238,7 +238,7 @@ def test_mysql_article_progress_repo_writes_article_progress_without_group_table
         def execute(self, statement, params=None):
             sql = str(statement)
             self.executions.append((sql, params))
-            if "FOR SHARE" in sql:
+            if "FOR SHARE" in sql or "FOR UPDATE" in sql:
                 return FakeResult(
                     rows=[
                         {
