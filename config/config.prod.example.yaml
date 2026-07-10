@@ -1,0 +1,78 @@
+app:
+  env: prod
+  timezone: Asia/Shanghai
+  log_level: INFO
+
+wechat:
+  pc_version: "4.1.8.107"
+  window_title: "微信"
+  fixed_window: true
+  check_login_interval_seconds: 300
+
+runtime:
+  log_dir: runtime/logs
+  screenshot_dir: runtime/screenshots
+  report_dir: runtime/reports
+
+pipelines:
+  group:
+    enabled: true
+    core_group_limit: 5
+    poll_interval_seconds: 30
+    max_group_per_round: 5
+    rpa_timeout_seconds: 60
+    target_round_seconds: 60
+  article:
+    enabled: false
+    account_limit: 20
+    crawl_time: "07:30"
+    account_poll_interval_minutes: 60
+    max_articles_per_account: 5
+    max_accounts_per_ui_slice: 1
+    collect_today_only: true
+    dedup_enabled: true
+    dedup_key: article_hash
+    ui_slice_timeout_seconds: 30
+    rpa_timeout_seconds: 180
+    browser_executable_path: auto
+    state_machine_enabled: true
+    parse_after_release_ui: true
+    resume_from_progress: true
+    min_article_ui_window_seconds: 20
+    low_peak_windows:
+      - "07:30-19:30"
+    route_cache_enabled: true
+    route_probe_enabled: true
+    route_probe_failure_threshold: 3
+    route_entry_labels:
+      - 历史消息
+      - 全部消息
+      - 往期文章
+      - 文章
+      - 资讯
+      - 蛋价资讯
+      - 今日价格
+      - 闽融平台
+    link_extract_methods:
+      - copy_link_menu
+      - uia_value
+      - visible_text
+    egg_price_extraction_enabled: true
+    price_items_json_preview_limit: 20
+    image_quote_note_enabled: true
+  ui_resource:
+    mode: exclusive
+    group_priority: true
+    max_core_group_block_seconds: 10
+    lock_acquire_timeout_seconds: 5
+    lock_lease_seconds: 120
+    lock_heartbeat_interval_seconds: 10
+    stale_lock_recover_seconds: 180
+    metrics_enabled: true
+
+mysql:
+  host: prod-mysql.internal
+  port: 3306
+  database: weinsight_prod
+  username: weinsight_prod
+  password: ${WEINSIGHT_MYSQL_PASSWORD}

@@ -1,0 +1,11 @@
+ai:
+  enabled: false
+  dry_run: true
+  provider: "none"
+  prompt_version: "poc-v1"
+  model_version: "dry-run"
+  allowed_sources:
+    - "summary_daily_report"
+    - "group_daily_report"
+    - "article_daily_report"
+  max_input_chars: 2000

@@ -1,0 +1,10 @@
+APScheduler==3.10.4
+PyMySQL==1.1.1
+PyYAML==6.0.2
+SQLAlchemy==2.0.32
+freezegun==1.5.1
+pytest==8.3.2
+python-dotenv==1.0.1
+playwright==1.46.0
+pywinauto==0.6.8
+wxauto4==41.1.2
