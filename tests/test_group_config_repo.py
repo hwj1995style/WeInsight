@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
+import pytest
+
 from app.storage.group_repo import GroupConfigRecord, MysqlGroupConfigRepo
 
 
@@ -152,6 +154,45 @@ def test_mysql_group_config_repo_pages_with_limit_and_offset() -> None:
     assert "LIMIT :limit" in sql
     assert "OFFSET :offset" in sql
     assert params == {"limit": 21, "offset": 40}
+
+
+def test_mysql_group_config_repo_lists_enabled_job_choices_with_sql_limit() -> None:
+    engine = FakeEngine(
+        rows=[
+            {
+                "id": 7,
+                "group_name": "核心群A",
+                "enabled": 1,
+                "priority": 1,
+                "poll_interval_seconds": 30,
+                "backtrack_pages": 1,
+                "extra_backtrack_pages": 3,
+                "is_core_group": 1,
+                "remark": None,
+            }
+        ]
+    )
+
+    groups = MysqlGroupConfigRepo(engine).list_enabled_groups_for_job(limit=100)
+
+    assert groups[0].id == 7
+    sql, params = engine.connection.executions[0]
+    assert "FROM wechat_group_config" in sql
+    assert "WHERE enabled = 1" in sql
+    assert "ORDER BY priority ASC, group_name ASC, id ASC" in sql
+    assert "LIMIT :limit" in sql
+    assert "OFFSET" not in sql
+    assert params == {"limit": 100}
+
+
+@pytest.mark.parametrize("limit", [0, 101, True, "10"])
+def test_mysql_group_config_repo_rejects_invalid_job_choice_limit(limit) -> None:
+    engine = FakeEngine()
+
+    with pytest.raises(ValueError, match="limit"):
+        MysqlGroupConfigRepo(engine).list_enabled_groups_for_job(limit=limit)
+
+    assert engine.connection.executions == []
 
 
 def test_mysql_group_config_repo_disables_group_config() -> None:

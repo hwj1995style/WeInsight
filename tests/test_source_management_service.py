@@ -63,6 +63,7 @@ class FakeGroupRepo:
         self.create_error: Exception | None = None
         self.page_records = [self.record]
         self.page_calls: list[tuple[int, int]] = []
+        self.enabled_job_calls: list[int] = []
 
     def list_groups(self):
         return [self.record]
@@ -70,6 +71,10 @@ class FakeGroupRepo:
     def list_groups_page(self, *, limit: int, offset: int):
         self.page_calls.append((limit, offset))
         return self.page_records
+
+    def list_enabled_groups_for_job(self, *, limit: int):
+        self.enabled_job_calls.append(limit)
+        return [self.record]
 
     def get_group(self, source_id: int):
         return self.record if source_id == 7 else None
@@ -117,6 +122,7 @@ class FakeArticleRepo:
         self.delete_rowcount = 1
         self.page_records = [self.record]
         self.page_calls: list[tuple[int, int]] = []
+        self.enabled_job_calls: list[int] = []
 
     def list_accounts(self):
         return [self.record]
@@ -124,6 +130,10 @@ class FakeArticleRepo:
     def list_accounts_page(self, *, limit: int, offset: int):
         self.page_calls.append((limit, offset))
         return self.page_records
+
+    def list_enabled_articles_for_job(self, *, limit: int):
+        self.enabled_job_calls.append(limit)
+        return [self.record]
 
     def get_account(self, source_id: int):
         return self.record if source_id == 9 else None
@@ -232,6 +242,31 @@ def test_article_page_and_public_get_by_id_are_symmetric(
         service.get_group(999)
     with pytest.raises(SourceNotFoundError):
         service.get_article(999)
+
+
+def test_job_source_choices_use_dedicated_bounded_enabled_queries(
+    service, group_repo, article_repo
+) -> None:
+    groups = service.list_enabled_groups_for_job(limit=100)
+    articles = service.list_enabled_articles_for_job(limit=17)
+
+    assert groups == (group_repo.record,)
+    assert articles == (article_repo.record,)
+    assert group_repo.enabled_job_calls == [100]
+    assert article_repo.enabled_job_calls == [17]
+
+
+@pytest.mark.parametrize("limit", [0, 101, True, "10", None])
+def test_job_source_choices_reject_invalid_limits_without_querying(
+    service, group_repo, article_repo, limit
+) -> None:
+    with pytest.raises(ValueError, match="limit"):
+        service.list_enabled_groups_for_job(limit=limit)
+    with pytest.raises(ValueError, match="limit"):
+        service.list_enabled_articles_for_job(limit=limit)
+
+    assert group_repo.enabled_job_calls == []
+    assert article_repo.enabled_job_calls == []
 
 
 @pytest.mark.parametrize(

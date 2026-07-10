@@ -217,6 +217,38 @@ class MysqlArticleAccountConfigRepo:
             ).mappings().all()
         return [self._record_from_row(row) for row in rows]
 
+    def list_enabled_articles_for_job(
+        self, *, limit: int
+    ) -> list[ArticleAccountConfigRecord]:
+        _validate_job_choice_limit(limit)
+        statement = text(
+            """
+            SELECT
+                id,
+                account_name,
+                account_type,
+                enabled,
+                priority,
+                poll_interval_minutes,
+                daily_window_start,
+                daily_window_end,
+                max_articles_per_round,
+                collect_today_only,
+                dedup_key,
+                last_success_collect_time,
+                remark
+            FROM wechat_public_account_config
+            WHERE enabled = 1
+            ORDER BY priority ASC, account_name ASC, id ASC
+            LIMIT :limit
+            """
+        )
+        with self.engine.begin() as connection:
+            rows = connection.execute(
+                statement, {"limit": limit}
+            ).mappings().all()
+        return [self._record_from_row(row) for row in rows]
+
     def get_account(self, source_id: int) -> ArticleAccountConfigRecord | None:
         statement = text(
             """
@@ -382,3 +414,8 @@ def _format_time_value(value) -> str:
     if len(parts) == 3 and len(parts[0]) == 1:
         return f"0{text}"
     return text
+
+
+def _validate_job_choice_limit(limit: int) -> None:
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+        raise ValueError("limit must be between 1 and 100")

@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}采集任务 · WeInsight{% endblock %}
+{% block content %}
+  <section class="page-heading">
+    <div>
+      <h1>采集任务</h1>
+      <p>按任务级时间窗口和频率统一调度微信群或公众号采集。</p>
+    </div>
+    <a class="button" href="/jobs/new?pipeline=group">创建任务</a>
+  </section>
+  {% if error %}<p class="notice error" role="alert">{{ error }}</p>{% endif %}
+  <form class="filter-panel job-filters" method="get" action="/jobs">
+    <div>
+      <label for="job-pipeline-filter">采集链路</label>
+      <select id="job-pipeline-filter" name="pipeline">
+        <option value="">全部链路</option>
+        <option value="group" {% if values.pipeline == "group" %}selected{% endif %}>微信群</option>
+        <option value="article" {% if values.pipeline == "article" %}selected{% endif %}>公众号</option>
+      </select>
+    </div>
+    <div>
+      <label for="job-status-filter">任务状态</label>
+      <select id="job-status-filter" name="status">
+        <option value="">全部状态</option>
+        {% for status, label in status_labels.items() %}
+          <option value="{{ status.value }}" {% if values.status == status.value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="job-name-filter">任务名称</label>
+      <input id="job-name-filter" name="name" maxlength="200" value="{{ values.name }}" placeholder="输入名称关键词">
+    </div>
+    <input type="hidden" name="page_size" value="{{ values.page_size }}">
+    <button type="submit">筛选</button>
+  </form>
+  <section class="content-panel source-panel" aria-label="采集任务列表">
+    {% if jobs %}
+      <div class="table-scroll" tabindex="0" aria-label="采集任务表，可横向滚动">
+        <table class="data-table job-table">
+          <thead>
+            <tr>
+              <th scope="col">任务名称</th>
+              <th scope="col">链路</th>
+              <th scope="col">状态</th>
+              <th scope="col">目标数</th>
+              <th scope="col">下次运行</th>
+              <th scope="col">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for job in jobs %}
+              <tr>
+                <th scope="row">{{ job.job_name }}</th>
+                <td>{{ pipeline_labels[job.pipeline_type] }}</td>
+                <td><span class="job-status status-{{ job.status.value }}">{{ status_labels[job.status] }}</span></td>
+                <td>{{ job.target_count }}</td>
+                <td>{{ job.next_run_at.strftime("%Y-%m-%d %H:%M") if job.next_run_at else "—" }}</td>
+                <td><a class="button compact secondary" href="/jobs/{{ job.id }}">查看详情</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty-state">
+        <h2>没有符合条件的采集任务</h2>
+        <p>调整筛选条件，或创建一个新的采集任务。</p>
+      </div>
+    {% endif %}
+  </section>
+  {% if previous_url or next_url %}
+    <nav class="pagination" aria-label="采集任务分页">
+      {% if previous_url %}<a class="button secondary" href="{{ previous_url }}">上一页</a>{% endif %}
+      <span>第 {{ page.page }} 页 · 共 {{ page.total_count }} 条</span>
+      {% if next_url %}<a class="button secondary" href="{{ next_url }}">下一页</a>{% endif %}
+    </nav>
+  {% endif %}
+{% endblock %}

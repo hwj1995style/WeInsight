@@ -92,6 +92,10 @@ class GroupConfigRepo(Protocol):
         self, *, limit: int, offset: int
     ) -> list[GroupConfigRecord]: ...
 
+    def list_enabled_groups_for_job(
+        self, *, limit: int
+    ) -> list[GroupConfigRecord]: ...
+
     def get_group(self, source_id: int) -> GroupConfigRecord | None: ...
 
     def create_group_config(self, **values) -> int: ...
@@ -108,6 +112,10 @@ class ArticleConfigRepo(Protocol):
 
     def list_accounts_page(
         self, *, limit: int, offset: int
+    ) -> list[ArticleAccountConfigRecord]: ...
+
+    def list_enabled_articles_for_job(
+        self, *, limit: int
     ) -> list[ArticleAccountConfigRecord]: ...
 
     def get_account(self, source_id: int) -> ArticleAccountConfigRecord | None: ...
@@ -199,6 +207,18 @@ class SourceManagementService:
             has_previous=page > 1,
             has_next=len(rows) > page_size,
         )
+
+    def list_enabled_groups_for_job(
+        self, limit: int = 100
+    ) -> tuple[GroupConfigRecord, ...]:
+        self._validate_job_choice_limit(limit)
+        return tuple(self.group_repo.list_enabled_groups_for_job(limit=limit))
+
+    def list_enabled_articles_for_job(
+        self, limit: int = 100
+    ) -> tuple[ArticleAccountConfigRecord, ...]:
+        self._validate_job_choice_limit(limit)
+        return tuple(self.article_repo.list_enabled_articles_for_job(limit=limit))
 
     def get_group(self, source_id: int) -> GroupConfigRecord:
         self._validate_source_id(source_id)
@@ -516,6 +536,10 @@ class SourceManagementService:
     def _validate_page(cls, page: int, page_size: int) -> None:
         cls._validate_integer(page, "page", minimum=1)
         cls._validate_integer(page_size, "page_size", minimum=1, maximum=100)
+
+    @classmethod
+    def _validate_job_choice_limit(cls, limit: int) -> None:
+        cls._validate_integer(limit, "limit", minimum=1, maximum=100)
 
     @staticmethod
     def _raise_if_foreign_key_conflict(exc: IntegrityError) -> None:

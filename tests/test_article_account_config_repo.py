@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
+import pytest
+
 from app.storage.article_config_repo import ArticleAccountConfigRecord, MysqlArticleAccountConfigRepo
 
 
@@ -178,6 +180,53 @@ def test_mysql_article_account_config_repo_pages_with_limit_and_offset() -> None
     assert "LIMIT :limit" in sql
     assert "OFFSET :offset" in sql
     assert params == {"limit": 11, "offset": 20}
+
+
+def test_mysql_article_config_repo_lists_enabled_job_choices_with_sql_limit() -> None:
+    engine = FakeEngine(
+        rows=[
+            {
+                "id": 9,
+                "account_name": "行业观察",
+                "account_type": "subscription",
+                "enabled": 1,
+                "priority": 2,
+                "poll_interval_minutes": 10,
+                "daily_window_start": "07:30:00",
+                "daily_window_end": "19:30:00",
+                "max_articles_per_round": 5,
+                "collect_today_only": 1,
+                "dedup_key": "article_hash",
+                "last_success_collect_time": None,
+                "remark": None,
+            }
+        ]
+    )
+
+    accounts = MysqlArticleAccountConfigRepo(engine).list_enabled_articles_for_job(
+        limit=100
+    )
+
+    assert accounts[0].id == 9
+    sql, params = engine.connection.executions[0]
+    assert "FROM wechat_public_account_config" in sql
+    assert "WHERE enabled = 1" in sql
+    assert "ORDER BY priority ASC, account_name ASC, id ASC" in sql
+    assert "LIMIT :limit" in sql
+    assert "OFFSET" not in sql
+    assert params == {"limit": 100}
+
+
+@pytest.mark.parametrize("limit", [0, 101, True, "10"])
+def test_mysql_article_config_repo_rejects_invalid_job_choice_limit(limit) -> None:
+    engine = FakeEngine()
+
+    with pytest.raises(ValueError, match="limit"):
+        MysqlArticleAccountConfigRepo(engine).list_enabled_articles_for_job(
+            limit=limit
+        )
+
+    assert engine.connection.executions == []
 
 
 def test_mysql_article_account_config_repo_lists_due_accounts_from_article_config_only() -> None:
