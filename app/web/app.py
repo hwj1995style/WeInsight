@@ -11,14 +11,24 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import Config
 from app.security.passwords import PasswordHasher
 from app.services.auth_service import AuthService
+from app.services.dashboard_service import DashboardService
+from app.services.result_query_service import ResultQueryService
 from app.services.source_management_service import SourceManagementService
 from app.storage.admin_auth_repo import MysqlAdminAuthRepo
 from app.storage.article_config_repo import MysqlArticleAccountConfigRepo
+from app.storage.article_daily_report_query_repo import MysqlArticleDailyReportQueryRepo
 from app.storage.db import create_mysql_engine
+from app.storage.dashboard_repo import MysqlDashboardRepo
 from app.storage.group_repo import MysqlGroupConfigRepo
+from app.storage.group_daily_report_query_repo import MysqlGroupDailyReportQueryRepo
+from app.storage.safe_result_query_repo import MysqlSafeResultQueryRepo
 from app.storage.source_reference_repo import MysqlSourceReferenceRepo
+from app.storage.summary_daily_report_query_repo import MysqlSummaryDailyReportQueryRepo
+from app.pipelines.article_daily_report_query_service import ArticleDailyReportQueryService
+from app.pipelines.group_daily_report_query_service import GroupDailyReportQueryService
+from app.pipelines.summary_daily_report_query_service import SummaryDailyReportQueryService
 from app.web.middleware import AdminSessionMiddleware
-from app.web.routes import auth, sources
+from app.web.routes import auth, dashboard, reports, results, sources
 from app.web.routes.auth import LoginAttemptLimiter, MAX_CONCURRENT_LOGIN_HASHES
 
 
@@ -38,6 +48,11 @@ def create_app(
     config: Config,
     auth_service: AuthService | None = None,
     source_service: SourceManagementService | None = None,
+    result_service: ResultQueryService | None = None,
+    group_report_service: GroupDailyReportQueryService | None = None,
+    article_report_service: ArticleDailyReportQueryService | None = None,
+    summary_report_service: SummaryDailyReportQueryService | None = None,
+    dashboard_service: DashboardService | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="WeInsight Admin",
@@ -47,10 +62,38 @@ def create_app(
     )
     app.state.config = config
     engine = None
-    if auth_service is None or source_service is None:
+    if any(
+        service is None
+        for service in (
+            auth_service,
+            source_service,
+            result_service,
+            group_report_service,
+            article_report_service,
+            summary_report_service,
+            dashboard_service,
+        )
+    ):
         engine = create_mysql_engine(config.mysql)
     app.state.auth_service = auth_service or _build_auth_service(config, engine)
     app.state.source_service = source_service or _build_source_service(engine)
+    app.state.result_service = result_service or ResultQueryService(
+        MysqlSafeResultQueryRepo(engine)
+    )
+    app.state.group_report_service = group_report_service or GroupDailyReportQueryService(
+        repo=MysqlGroupDailyReportQueryRepo(engine)
+    )
+    app.state.article_report_service = (
+        article_report_service
+        or ArticleDailyReportQueryService(repo=MysqlArticleDailyReportQueryRepo(engine))
+    )
+    app.state.summary_report_service = (
+        summary_report_service
+        or SummaryDailyReportQueryService(repo=MysqlSummaryDailyReportQueryRepo(engine))
+    )
+    app.state.dashboard_service = dashboard_service or DashboardService(
+        MysqlDashboardRepo(engine)
+    )
     app.state.login_attempt_limiter = LoginAttemptLimiter(
         config.auth.login_failure_limit,
         config.auth.login_lock_minutes,
@@ -63,6 +106,9 @@ def create_app(
     )
     app.include_router(auth.router)
     app.include_router(sources.router)
+    app.include_router(results.router)
+    app.include_router(reports.router)
+    app.include_router(dashboard.router)
     return app
 
 

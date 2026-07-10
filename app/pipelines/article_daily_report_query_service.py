@@ -47,6 +47,7 @@ class ArticleDailyReportQueryRepo(Protocol):
         report_date: date,
         account_name: str | None,
         limit: int,
+        offset: int = 0,
     ) -> list[ArticleDailyReportSummary]:
         ...
 
@@ -69,8 +70,20 @@ class ArticleDailyReportQueryService:
         report_date: date,
         account_name: str | None,
         limit: int,
+        offset: int = 0,
     ) -> list[ArticleDailyReportSummary]:
-        return self.repo.list_daily_reports(report_date=report_date, account_name=account_name, limit=limit)
+        if offset == 0:
+            return self.repo.list_daily_reports(
+                report_date=report_date,
+                account_name=account_name,
+                limit=limit,
+            )
+        return self.repo.list_daily_reports(
+            report_date=report_date,
+            account_name=account_name,
+            limit=limit,
+            offset=offset,
+        )
 
     def get_report(self, report_date: date, account_name: str) -> ArticleDailyReportDetail | None:
         return self.repo.get_daily_report(report_date=report_date, account_name=account_name)

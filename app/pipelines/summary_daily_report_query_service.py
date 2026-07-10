@@ -37,10 +37,14 @@ class SummaryDailyReportSourceBundle:
 
 
 class SummaryDailyReportQueryRepo(Protocol):
-    def list_group_reports(self, report_date: date) -> list[SummaryGroupDailyReport]:
+    def list_group_reports(
+        self, report_date: date, limit: int = 100, offset: int = 0
+    ) -> list[SummaryGroupDailyReport]:
         ...
 
-    def list_article_reports(self, report_date: date) -> list[SummaryArticleDailyReport]:
+    def list_article_reports(
+        self, report_date: date, limit: int = 100, offset: int = 0
+    ) -> list[SummaryArticleDailyReport]:
         ...
 
 
@@ -48,9 +52,25 @@ class SummaryDailyReportQueryService:
     def __init__(self, *, repo: SummaryDailyReportQueryRepo) -> None:
         self.repo = repo
 
-    def load_sources(self, report_date: date) -> SummaryDailyReportSourceBundle:
+    def load_sources(
+        self,
+        report_date: date,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> SummaryDailyReportSourceBundle:
+        if limit is None and offset == 0:
+            group_reports = self.repo.list_group_reports(report_date)
+            article_reports = self.repo.list_article_reports(report_date)
+        else:
+            bounded_limit = 100 if limit is None else limit
+            group_reports = self.repo.list_group_reports(
+                report_date, bounded_limit, offset
+            )
+            article_reports = self.repo.list_article_reports(
+                report_date, bounded_limit, offset
+            )
         return SummaryDailyReportSourceBundle(
             report_date=report_date,
-            group_reports=self.repo.list_group_reports(report_date),
-            article_reports=self.repo.list_article_reports(report_date),
+            group_reports=group_reports,
+            article_reports=article_reports,
         )

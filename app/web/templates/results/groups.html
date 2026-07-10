@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}微信群结果 · WeInsight{% endblock %}
+{% block content %}
+  <div class="page-heading">
+    <div><h1>微信群结果明细</h1><p>仅显示脱敏 clean 与 analysis 字段，不读取原始消息。</p></div>
+  </div>
+  <nav class="section-tabs" aria-label="结果类型">
+    <a href="/results/groups" aria-current="page">群消息</a><a href="/results/articles">文章</a><a href="/results/prices">报价</a>
+  </nav>
+  <form class="filter-panel" method="get" action="/results/groups">
+    <div><label for="group_name">群名</label><input id="group_name" name="group_name" value="{{ values.get('group_name', '') }}"></div>
+    <div><label for="start_at">开始时间</label><input id="start_at" type="datetime-local" name="start_at" value="{{ values.get('start_at', '') }}"></div>
+    <div><label for="end_at">结束时间</label><input id="end_at" type="datetime-local" name="end_at" value="{{ values.get('end_at', '') }}"></div>
+    <div><label for="intent_type">供需类型</label><select id="intent_type" name="intent_type"><option value="">全部</option>{% for value, label in [('demand','需求'),('supply','供应'),('neutral','中性'),('empty','空内容')] %}<option value="{{ value }}" {% if values.get('intent_type') == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div><label for="page_size">每页</label><select id="page_size" name="page_size">{% for size in [20, 50, 100] %}<option value="{{ size }}" {% if page.page_size == size %}selected{% endif %}>{{ size }}</option>{% endfor %}</select></div>
+    <button type="submit">查询</button>
+  </form>
+  <section class="content-panel result-panel">
+      <div class="table-scroll" tabindex="0" aria-label="微信群结果明细">
+    {% if groups %}
+        <table class="data-table results-table"><thead><tr><th scope="col">时间</th><th scope="col">群名</th><th scope="col">发送人</th><th scope="col">脱敏内容</th><th scope="col">供需</th><th scope="col">地区 / 品类</th><th scope="col">关键词</th><th scope="col">评分</th><th scope="col">联系方式</th></tr></thead>
+        <tbody>{% for row in groups %}<tr><td>{{ row.msg_time_inferred or '-' }}</td><th scope="row">{{ row.group_name }}</th><td>{{ row.sender_display or '-' }}</td><td class="content-cell">{{ row.clean_content }}</td><td>{{ row.intent_type }}</td><td>{{ row.region_hits | join('、') or '-' }} / {{ row.category_hits | join('、') or '-' }}</td><td>{{ row.keyword_hits | join('、') or '-' }}</td><td>{{ row.opportunity_score }}</td><td>{{ '有' if row.has_contact else '无' }}</td></tr>{% endfor %}</tbody></table>
+    {% else %}<div class="empty-state"><h2>暂无符合条件的群明细</h2><p>调整筛选条件后重试。</p></div>{% endif %}
+      </div>
+  </section>
+  {% include "results/pagination.html" %}
+{% endblock %}

@@ -20,6 +20,7 @@ class MysqlArticleDailyReportQueryRepo:
         report_date: date,
         account_name: str | None,
         limit: int,
+        offset: int = 0,
     ) -> list[ArticleDailyReportSummary]:
         account_filter = "AND account_name = :account_name" if account_name else ""
         statement = text(
@@ -36,9 +37,15 @@ class MysqlArticleDailyReportQueryRepo:
               {account_filter}
             ORDER BY report_date DESC, account_name ASC
             LIMIT :limit
+            OFFSET :offset
             """
         )
-        params = {"report_date": report_date, "account_name": account_name, "limit": limit}
+        params = {
+            "report_date": report_date,
+            "account_name": account_name,
+            "limit": limit,
+            "offset": offset,
+        }
         with self.engine.begin() as connection:
             rows = connection.execute(statement, params).mappings().all()
         return [self._summary_from_row(row) for row in rows]

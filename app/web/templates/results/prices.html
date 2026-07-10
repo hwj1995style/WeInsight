@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}报价结果 · WeInsight{% endblock %}
+{% block content %}
+  <div class="page-heading"><div><h1>统一报价明细</h1><p>核对原始报价文本、标准化价格与换算置信度。</p></div></div>
+  <nav class="section-tabs" aria-label="结果类型"><a href="/results/groups">群消息</a><a href="/results/articles">文章</a><a href="/results/prices" aria-current="page">报价</a></nav>
+  <form class="filter-panel" method="get" action="/results/prices">
+    <div><label for="account_name">公众号</label><input id="account_name" name="account_name" value="{{ values.get('account_name', '') }}"></div>
+    <div><label for="quote_date">报价日期</label><input id="quote_date" type="date" name="quote_date" value="{{ values.get('quote_date', '') }}"></div>
+    <div><label for="region">地区</label><input id="region" name="region" value="{{ values.get('region', '') }}"></div>
+    <div><label for="product_family">产品族</label><select id="product_family" name="product_family"><option value="">全部</option>{% for value in ['chicken_egg','duck_egg','quail_egg','preserved_egg','salted_egg','other_egg'] %}<option value="{{ value }}" {% if values.get('product_family') == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></div>
+    <div><label for="page_size">每页</label><select id="page_size" name="page_size">{% for size in [20, 50, 100] %}<option value="{{ size }}" {% if page.page_size == size %}selected{% endif %}>{{ size }}</option>{% endfor %}</select></div>
+    <button type="submit">查询</button>
+  </form>
+  <section class="content-panel result-panel">
+    {% if prices %}<div class="table-scroll" tabindex="0" aria-label="报价结果明细"><table class="data-table results-table"><thead><tr><th scope="col">公众号 / 日期</th><th scope="col">地区 / 市场</th><th scope="col">产品 / 规格</th><th scope="col">原始报价</th><th scope="col">标准价格</th><th scope="col">涨跌</th><th scope="col">换算 / 置信度</th></tr></thead><tbody>{% for row in prices %}<tr><th scope="row">{{ row.account_name }}<br>{{ row.quote_date or '-' }}</th><td>{{ row.region or '-' }} / {{ row.market_name or '-' }}</td><td>{{ row.product_family }} / {{ row.product_name or '-' }} / {{ row.spec_text or '-' }}</td><td>{{ row.price_text or '-' }}<br>{{ row.price_low or '-' }}–{{ row.price_high or '-' }} {{ row.price_unit_text or '' }}</td><td>{{ row.standard_price_low or '-' }}–{{ row.standard_price_high or '-' }} {{ row.standard_price_unit }}</td><td>{{ row.change_text or '-' }} / {{ row.change_value or '-' }} / {{ row.trend }}</td><td>{{ row.conversion_method }} / {{ row.conversion_confidence }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state"><h2>暂无符合条件的报价明细</h2><p>调整筛选条件后重试。</p></div>{% endif %}
+  </section>
+  {% include "results/pagination.html" %}
+{% endblock %}

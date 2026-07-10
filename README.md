@@ -551,3 +551,12 @@ docs/operations/微信群链路运行手册与验收清单.md
 ```
 
 当前第三阶段从运行手册、任务补偿、失败任务管理、试运行监控、日报质量、生产配置、数据库升级脚本、长稳运行、安全回归和公众号/订阅号启动前复核逐项推进。
+
+## 管理后台本地前端依赖
+
+管理后台固定使用以下官方发行文件，运行时只从 `/static/vendor/` 提供，不依赖外部 CDN：
+
+- HTMX 2.0.4，来源 `https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js`，许可证 BSD 2-Clause，SHA256 `e209dda5c8235479f3166defc7750e1dbcd5a5c1808b7792fc2e6733768fb447`。
+- ECharts 5.6.0，来源 `https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js`，许可证 Apache License 2.0，SHA256 `bf4a223524e40b77c304bec67e1222cf551f14880cf42c69dc046558e11c07b1`。
+
+HTMX 资产已本地保留以供后续局部交互使用；当前页面未实际使用 HTMX，因此未全局加载。ECharts 仅在基础总览页面加载。

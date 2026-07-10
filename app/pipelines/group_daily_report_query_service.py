@@ -20,7 +20,13 @@ class DailyReportNotFoundError(Exception):
 
 
 class GroupDailyReportQueryRepo(Protocol):
-    def list_daily_reports(self, report_date: date, group_name: str | None, limit: int) -> list[DailyReportSummary]:
+    def list_daily_reports(
+        self,
+        report_date: date,
+        group_name: str | None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[DailyReportSummary]:
         ...
 
     def get_daily_report(self, report_date: date, group_name: str) -> DailyReportDetail | None:
@@ -31,8 +37,25 @@ class GroupDailyReportQueryService:
     def __init__(self, *, repo: GroupDailyReportQueryRepo) -> None:
         self.repo = repo
 
-    def list_reports(self, report_date: date, group_name: str | None, limit: int) -> list[DailyReportSummary]:
-        return self.repo.list_daily_reports(report_date=report_date, group_name=group_name, limit=limit)
+    def list_reports(
+        self,
+        report_date: date,
+        group_name: str | None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[DailyReportSummary]:
+        if offset == 0:
+            return self.repo.list_daily_reports(
+                report_date=report_date,
+                group_name=group_name,
+                limit=limit,
+            )
+        return self.repo.list_daily_reports(
+            report_date=report_date,
+            group_name=group_name,
+            limit=limit,
+            offset=offset,
+        )
 
     def get_report(self, report_date: date, group_name: str) -> DailyReportDetail | None:
         return self.repo.get_daily_report(report_date=report_date, group_name=group_name)

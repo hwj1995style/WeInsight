@@ -12,7 +12,13 @@ class MysqlGroupDailyReportQueryRepo:
     def __init__(self, engine: Engine) -> None:
         self.engine = engine
 
-    def list_daily_reports(self, report_date: date, group_name: str | None, limit: int) -> list[DailyReportSummary]:
+    def list_daily_reports(
+        self,
+        report_date: date,
+        group_name: str | None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[DailyReportSummary]:
         group_filter = "AND group_name = :group_name" if group_name else ""
         statement = text(
             f"""
@@ -32,9 +38,15 @@ class MysqlGroupDailyReportQueryRepo:
               {group_filter}
             ORDER BY report_date DESC, group_name ASC
             LIMIT :limit
+            OFFSET :offset
             """
         )
-        params = {"report_date": report_date, "group_name": group_name, "limit": limit}
+        params = {
+            "report_date": report_date,
+            "group_name": group_name,
+            "limit": limit,
+            "offset": offset,
+        }
         with self.engine.begin() as connection:
             rows = connection.execute(statement, params).mappings().all()
         return [self._summary_from_row(row) for row in rows]

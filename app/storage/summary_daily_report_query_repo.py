@@ -15,7 +15,9 @@ class MysqlSummaryDailyReportQueryRepo:
     def __init__(self, engine: Engine) -> None:
         self.engine = engine
 
-    def list_group_reports(self, report_date: date) -> list[SummaryGroupDailyReport]:
+    def list_group_reports(
+        self, report_date: date, limit: int = 100, offset: int = 0
+    ) -> list[SummaryGroupDailyReport]:
         statement = text(
             """
             SELECT
@@ -32,13 +34,19 @@ class MysqlSummaryDailyReportQueryRepo:
             FROM wechat_group_daily_report
             WHERE report_date = :report_date
             ORDER BY group_name ASC
+            LIMIT :limit OFFSET :offset
             """
         )
         with self.engine.begin() as connection:
-            rows = connection.execute(statement, {"report_date": report_date}).mappings().all()
+            rows = connection.execute(
+                statement,
+                {"report_date": report_date, "limit": limit, "offset": offset},
+            ).mappings().all()
         return [self._group_report_from_row(row) for row in rows]
 
-    def list_article_reports(self, report_date: date) -> list[SummaryArticleDailyReport]:
+    def list_article_reports(
+        self, report_date: date, limit: int = 100, offset: int = 0
+    ) -> list[SummaryArticleDailyReport]:
         statement = text(
             """
             SELECT
@@ -51,10 +59,14 @@ class MysqlSummaryDailyReportQueryRepo:
             FROM wechat_article_daily_report
             WHERE report_date = :report_date
             ORDER BY account_name ASC
+            LIMIT :limit OFFSET :offset
             """
         )
         with self.engine.begin() as connection:
-            rows = connection.execute(statement, {"report_date": report_date}).mappings().all()
+            rows = connection.execute(
+                statement,
+                {"report_date": report_date, "limit": limit, "offset": offset},
+            ).mappings().all()
         return [self._article_report_from_row(row) for row in rows]
 
     def _group_report_from_row(self, row) -> SummaryGroupDailyReport:
