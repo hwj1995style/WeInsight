@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import threading
 from collections.abc import Callable
 from datetime import datetime
@@ -138,50 +139,76 @@ class ManagedModeGuard:
         if acquired is not True:
             raise WechatUiBusyError("WeChat UI is busy")
 
-        stop = threading.Event()
-        lease_lost = threading.Event()
-
-        def renew_lease() -> None:
-            while not stop.wait(self.ui_heartbeat_interval_seconds):
-                try:
-                    heartbeat_now = self.now_provider()
-                    _require_now(heartbeat_now)
-                    renewed = self.ui_lock_repo.heartbeat(
-                        "wechat_ui",
-                        pipeline,
-                        owner_task_id,
-                        heartbeat_now,
-                    )
-                except Exception:
-                    lease_lost.set()
-                    return
-                if renewed is not True:
-                    lease_lost.set()
-                    return
-
-        renewer = threading.Thread(
-            target=renew_lease,
-            name=f"wechat-ui-lease-{pipeline}",
-            daemon=True,
-        )
+        stop = None
+        lease_lost = None
+        renewer = None
+        renewer_started = False
+        operation_error: BaseException | None = None
+        cleanup_error: BaseException | None = None
+        released = False
         try:
+            stop = threading.Event()
+            lease_lost = threading.Event()
+
+            def renew_lease() -> None:
+                while not stop.wait(self.ui_heartbeat_interval_seconds):
+                    try:
+                        heartbeat_now = self.now_provider()
+                        _require_now(heartbeat_now)
+                        renewed = self.ui_lock_repo.heartbeat(
+                            "wechat_ui",
+                            pipeline,
+                            owner_task_id,
+                            heartbeat_now,
+                        )
+                    except Exception:
+                        lease_lost.set()
+                        return
+                    if renewed is not True:
+                        lease_lost.set()
+                        return
+
+            renewer = threading.Thread(
+                target=renew_lease,
+                name=f"wechat-ui-lease-{pipeline}",
+                daemon=True,
+            )
             renewer.start()
-        except BaseException:
-            self._release(pipeline, owner_task_id)
-            raise
-
-        try:
+            renewer_started = True
             result = action()
-        except BaseException:
-            stop.set()
-            renewer.join()
-            self._release(pipeline, owner_task_id)
-            raise
+        except BaseException as exc:
+            operation_error = exc
+        finally:
+            if stop is not None:
+                try:
+                    stop.set()
+                except BaseException as exc:
+                    cleanup_error = exc
+            should_join = renewer_started
+            if renewer is not None and not should_join:
+                try:
+                    should_join = renewer.is_alive()
+                except BaseException as exc:
+                    if cleanup_error is None:
+                        cleanup_error = exc
+                    should_join = False
+            if renewer is not None and should_join:
+                try:
+                    renewer.join()
+                except BaseException as exc:
+                    if cleanup_error is None:
+                        cleanup_error = exc
+                    try:
+                        renewer.join()
+                    except BaseException:
+                        pass
+            released = self._release(pipeline, owner_task_id)
 
-        stop.set()
-        renewer.join()
-        released = self._release(pipeline, owner_task_id)
-        if lease_lost.is_set():
+        if operation_error is not None:
+            raise operation_error
+        if cleanup_error is not None:
+            raise cleanup_error
+        if lease_lost is not None and lease_lost.is_set():
             raise WechatUiLeaseLostError("WeChat UI lease was lost")
         if not released:
             raise WechatUiReleaseError("failed to release WeChat UI lock")
@@ -257,6 +284,7 @@ def _positive_number(value: object, field: str) -> None:
     if (
         isinstance(value, bool)
         or not isinstance(value, (int, float))
+        or not math.isfinite(value)
         or value <= 0
     ):
         raise ValueError(f"{field} must be a positive number")

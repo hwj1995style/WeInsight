@@ -37,6 +37,10 @@ Scheduler 查询同 hostname 的 live collector，沿用 Task 4 的 `starting/ru
 
 Guard 使用 daemon 线程按配置周期刷新 UI lease；后台线程只调用锁 Repo heartbeat，不执行 RPA。heartbeat 返回 False 或抛异常时标记 lease lost，action 完成后固定抛出 `WechatUiLeaseLostError`，并仍尝试释放锁。action 自身异常保持原样传播，即使 release 同时失败也不覆盖 action 异常；成功 action 若 release 失败则抛 `WechatUiReleaseError`，不会伪报成功。
 
+acquire 成功后立即进入统一清理边界，Event/Thread 构造、Thread start、action、stop、join 及 release 均由同一个 `try/finally` 覆盖。Thread 首次 join 异常时再次 join，随后仍执行 release；setup/action 异常优先于清理错误，其中 action 原异常优先级最高。测试对每条故障路径检查 release 次数和续租线程残留。
+
+heartbeat 周期接受配置中的正整数，也允许测试使用有限正浮点数；`math.isfinite` 会在进入周期比较或线程等待前拒绝 `NaN/+Inf/-Inf`。
+
 人工 article 的 `ArticlePollingRunner` 原本会自行获取同一非重入锁。本任务给 POC builder 注入严格 `HeldUiLockAdapter("article")`：只接受 `wechat_ui/article` 和合法 owner/time/lease，内部 acquire/release 为 no-op，不让真实 `MysqlUiLockRepo` 二次加锁。外层 Guard 仍负责真实锁、续租和释放。
 
 ## Article aware checkpoint 修复
@@ -64,6 +68,7 @@ Guard 使用 daemon 线程按配置周期刷新 UI lease；后台线程只调用
 2. CLI 筛选测试最初为 `13 failed / 4 passed`，失败分别证明四条命令未调用 Guard、manual 在锁外构造 RPA、scheduler 未在 builder 前拒绝、group 未逐轮复查及安全错误输出缺失；实现后全部通过。
 3. aware builder 补充测试最初 3 项失败：article scheduler 仅检查一次 Guard，两个真实 builder 均在首 checkpoint 触发 offset-naive/offset-aware 比较错误；修复后 3 项通过。
 4. 首轮全量发现一个旧 article scheduler CLI 测试未注入 Guard，表现为 `1297 passed / 1 failed`；更新兼容测试并验证构造前后两次 Guard 后，全量恢复通过。
+5. 清理审查补充测试最初为 `5 failed / 25 passed`：Event/Thread 构造失败未 release、join 异常未重试且未 release、NaN 未拒绝、正无穷落入错误分支；统一清理和有限数校验完成后 Guard 30 项全部通过。Thread start、heartbeat 异常和 action+release 双异常也分别验证了无活线程、恰当 release 及 action 原异常优先。
 
 ## 真实 MySQL 8.4 验证
 
@@ -78,8 +83,8 @@ Guard 使用 daemon 线程按配置周期刷新 UI lease；后台线程只调用
 
 ## 最终验证
 
-- Task 7 + main/UI lock/heartbeat/Task 6 Worker/article/group runner 定向回归：`221 passed`。
-- 全量测试：`1300 passed`。
+- Guard + main + article scheduler CLI 定向回归：`88 passed`。
+- 全量测试：`1310 passed`。
 - `python -m compileall -q app tests`：通过。
 - `git diff --check`：通过。
 - UTF-8 替换字符扫描：通过。
