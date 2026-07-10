@@ -95,6 +95,10 @@ CREATE TABLE IF NOT EXISTS wechat_group_daily_report (
     top_keywords TEXT NULL COMMENT '高频关键词，JSON数组',
     report_version VARCHAR(20) DEFAULT 'v1' COMMENT '日报模板版本',
     generate_time DATETIME NOT NULL COMMENT '生成时间',
+    report_status VARCHAR(20) NOT NULL DEFAULT 'final' COMMENT 'provisional/final',
+    data_cutoff_time DATETIME NULL COMMENT '统计数据截止时间',
+    generation_trigger VARCHAR(20) NOT NULL DEFAULT 'legacy' COMMENT 'manual/automatic/compensation/legacy',
+    last_generated_by VARCHAR(100) NOT NULL DEFAULT 'system' COMMENT 'admin/system',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_group_daily_report (report_date, group_name),
@@ -318,11 +322,36 @@ CREATE TABLE IF NOT EXISTS wechat_article_daily_report (
     top_keywords_json TEXT NULL COMMENT '关键词TOP JSON',
     report_version VARCHAR(20) DEFAULT 'v1' COMMENT '日报模板版本',
     generate_time DATETIME NOT NULL COMMENT '生成时间',
+    report_status VARCHAR(20) NOT NULL DEFAULT 'final' COMMENT 'provisional/final',
+    data_cutoff_time DATETIME NULL COMMENT '统计数据截止时间',
+    generation_trigger VARCHAR(20) NOT NULL DEFAULT 'legacy' COMMENT 'manual/automatic/compensation/legacy',
+    last_generated_by VARCHAR(100) NOT NULL DEFAULT 'system' COMMENT 'admin/system',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_article_daily_report (report_date, account_name),
     KEY idx_article_daily_report_date (report_date),
     KEY idx_article_daily_report_generate_time (generate_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS wechat_report_generation_request (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '日报生成请求主键',
+    idempotency_key VARCHAR(100) NOT NULL COMMENT '请求幂等键',
+    report_type VARCHAR(20) NOT NULL COMMENT 'group/article/summary/all',
+    report_date DATE NOT NULL COMMENT '日报业务日期',
+    source_name VARCHAR(200) NULL COMMENT '可选群名或公众号名称',
+    generation_trigger VARCHAR(20) NOT NULL COMMENT 'manual/automatic/compensation',
+    data_cutoff_time DATETIME NOT NULL COMMENT '统计数据截止时间',
+    requested_by VARCHAR(100) NOT NULL COMMENT 'admin/system',
+    status VARCHAR(30) NOT NULL DEFAULT 'pending' COMMENT 'pending/running/success/partial_success/failed',
+    worker_id VARCHAR(100) NULL COMMENT '领取请求的Worker',
+    lease_expires_at DATETIME NULL COMMENT '运行租约截止时间',
+    error_summary TEXT NULL COMMENT '安全失败摘要',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    start_time DATETIME NULL COMMENT '开始时间',
+    end_time DATETIME NULL COMMENT '结束时间',
+    UNIQUE KEY uk_report_request_idempotency (idempotency_key),
+    KEY idx_report_request_pending (status, create_time),
+    KEY idx_report_request_date (report_date, report_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS wechat_article_process_task (
