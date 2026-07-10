@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import fields
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -8,8 +9,10 @@ import pytest
 
 from app.domain.admin_results import (
     ArticleDetailFilter,
+    ArticleDetailRow,
     EggPriceDetailRow,
     GroupDetailFilter,
+    GroupDetailRow,
     PriceDetailFilter,
 )
 from app.storage.safe_result_query_repo import MysqlSafeResultQueryRepo
@@ -61,65 +64,77 @@ class Engine:
         return self.connection
 
 
-GROUP_COLUMNS = {
-    "row_id",
-    "msg_hash",
-    "group_name",
-    "sender_display",
-    "msg_time_inferred",
-    "clean_content",
-    "intent_type",
-    "region_hits",
-    "category_hits",
-    "keyword_hits",
-    "opportunity_score",
-    "has_contact",
-}
-ARTICLE_COLUMNS = {
-    "row_id",
-    "article_hash",
-    "account_name",
-    "title",
-    "publish_time",
-    "quote_date",
-    "collect_time",
-    "summary_text",
-    "topic_tags_json",
-    "content_length",
-    "analysis_version",
-}
-PRICE_COLUMNS = {
-    "row_id",
-    "account_name",
-    "quote_date",
-    "region",
-    "market_name",
-    "product_family",
-    "product_name",
-    "spec_text",
-    "price_text",
-    "price_low",
-    "price_high",
-    "price_unit_text",
-    "standard_price_low",
-    "standard_price_high",
-    "standard_price_unit",
-    "change_text",
-    "change_value",
-    "trend",
-    "conversion_method",
-    "conversion_confidence",
-}
+GROUP_SOURCES = (
+    ("wechat_group_msg_clean", "c"),
+    ("wechat_group_msg_analysis", "a"),
+)
+GROUP_SELECT_MAPPING = (
+    ("a", "id", "row_id"),
+    ("c", "msg_hash", "msg_hash"),
+    ("c", "group_name", "group_name"),
+    ("c", "sender_display", "sender_display"),
+    ("a", "msg_time_inferred", "msg_time_inferred"),
+    ("c", "clean_content", "clean_content"),
+    ("a", "intent_type", "intent_type"),
+    ("a", "region_hits", "region_hits"),
+    ("a", "category_hits", "category_hits"),
+    ("a", "keyword_hits", "keyword_hits"),
+    ("a", "opportunity_score", "opportunity_score"),
+    ("a", "has_contact", "has_contact"),
+)
+ARTICLE_SOURCES = (("wechat_article_analysis", "a"),)
+ARTICLE_SELECT_MAPPING = (
+    ("a", "id", "row_id"),
+    ("a", "article_hash", "article_hash"),
+    ("a", "account_name", "account_name"),
+    ("a", "title", "title"),
+    ("a", "publish_time", "publish_time"),
+    ("a", "quote_date", "quote_date"),
+    ("a", "collect_time", "collect_time"),
+    ("a", "summary_text", "summary_text"),
+    ("a", "topic_tags_json", "topic_tags_json"),
+    ("a", "content_length", "content_length"),
+    ("a", "analysis_version", "analysis_version"),
+)
+PRICE_SOURCES = (("wechat_article_egg_price_item", "p"),)
+PRICE_SELECT_MAPPING = (
+    ("p", "id", "row_id"),
+    ("p", "account_name", "account_name"),
+    ("p", "quote_date", "quote_date"),
+    ("p", "region", "region"),
+    ("p", "market_name", "market_name"),
+    ("p", "product_family", "product_family"),
+    ("p", "product_name", "product_name"),
+    ("p", "spec_text", "spec_text"),
+    ("p", "price_text", "price_text"),
+    ("p", "price_low", "price_low"),
+    ("p", "price_high", "price_high"),
+    ("p", "price_unit_text", "price_unit_text"),
+    ("p", "standard_price_low", "standard_price_low"),
+    ("p", "standard_price_high", "standard_price_high"),
+    ("p", "standard_price_unit", "standard_price_unit"),
+    ("p", "change_text", "change_text"),
+    ("p", "change_value", "change_value"),
+    ("p", "trend", "trend"),
+    ("p", "conversion_method", "conversion_method"),
+    ("p", "conversion_confidence", "conversion_confidence"),
+)
 
 
 @pytest.mark.parametrize(
-    ("method_name", "filters", "table", "allowed", "forbidden"),
+    (
+        "method_name",
+        "filters",
+        "expected_sources",
+        "expected_mapping",
+        "forbidden",
+    ),
     [
         (
             "list_group_details",
             GroupDetailFilter(),
-            "wechat_group_msg_clean",
-            GROUP_COLUMNS,
+            GROUP_SOURCES,
+            GROUP_SELECT_MAPPING,
             {
                 "wechat_group_msg_raw",
                 "raw_content",
@@ -131,8 +146,8 @@ PRICE_COLUMNS = {
         (
             "list_article_details",
             ArticleDetailFilter(),
-            "wechat_article_analysis",
-            ARTICLE_COLUMNS,
+            ARTICLE_SOURCES,
+            ARTICLE_SELECT_MAPPING,
             {
                 "article_url",
                 "body_text",
@@ -146,8 +161,8 @@ PRICE_COLUMNS = {
         (
             "list_price_details",
             PriceDetailFilter(),
-            "wechat_article_egg_price_item",
-            PRICE_COLUMNS,
+            PRICE_SOURCES,
+            PRICE_SELECT_MAPPING,
             {
                 "article_url",
                 "body_text",
@@ -162,8 +177,8 @@ PRICE_COLUMNS = {
         ),
     ],
 )
-def test_detail_queries_use_exact_safe_select_allowlists(
-    method_name, filters, table, allowed, forbidden
+def test_detail_queries_use_exact_sources_and_ordered_column_mappings(
+    method_name, filters, expected_sources, expected_mapping, forbidden
 ) -> None:
     engine = Engine()
 
@@ -172,11 +187,13 @@ def test_detail_queries_use_exact_safe_select_allowlists(
     )
 
     count_sql, data_sql = [sql for sql, _ in engine.connection.executions]
-    assert table in count_sql
-    assert table in data_sql
-    assert _selected_output_names(data_sql) == allowed
-    _assert_forbidden_identifiers_absent(count_sql, forbidden)
-    _assert_forbidden_identifiers_absent(data_sql, forbidden)
+    _assert_query_shape(
+        count_sql,
+        data_sql,
+        expected_sources=expected_sources,
+        expected_mapping=expected_mapping,
+        forbidden=forbidden,
+    )
 
 
 @pytest.mark.parametrize(
@@ -400,38 +417,253 @@ def test_price_row_maps_only_display_fields_and_numeric_values() -> None:
     assert "raw_row_json" not in row.__dataclass_fields__
 
 
-def test_allowlist_assertion_rejects_a_forbidden_select_mutation() -> None:
-    engine = Engine()
-    MysqlSafeResultQueryRepo(engine).list_article_details(
-        ArticleDetailFilter(), page=1, page_size=20
-    )
-    data_sql = engine.connection.executions[1][0]
+def test_article_shape_rejects_safe_alias_spoofing_and_an_extra_join() -> None:
+    data_sql = _captured_data_sql("list_article_details", ArticleDetailFilter())
     mutated = data_sql.replace(
-        "a.summary_text AS summary_text,",
-        "a.summary_text AS summary_text, a.body_text AS body_text,",
+        "a.summary_text AS summary_text",
+        "p.source_context_json AS summary_text",
+    ).replace(
+        "FROM wechat_article_analysis AS a",
+        """FROM wechat_article_analysis AS a
+           JOIN wechat_article_egg_price_item AS p
+             ON p.article_hash = a.article_hash""",
+    )
+    assert mutated != data_sql
+
+    with pytest.raises(AssertionError):
+        _assert_data_query_shape(
+            mutated,
+            expected_sources=ARTICLE_SOURCES,
+            expected_mapping=ARTICLE_SELECT_MAPPING,
+        )
+
+
+@pytest.mark.parametrize("mutation", ["remove_analysis", "add_extra_table"])
+def test_group_shape_requires_only_clean_and_analysis_sources(mutation) -> None:
+    data_sql = _captured_data_sql("list_group_details", GroupDetailFilter())
+    if mutation == "remove_analysis":
+        mutated = data_sql.replace(
+            """INNER JOIN wechat_group_msg_analysis AS a
+                ON a.msg_hash = c.msg_hash""",
+            "",
+        )
+    else:
+        mutated = data_sql.replace(
+            "ON a.msg_hash = c.msg_hash",
+            """ON a.msg_hash = c.msg_hash
+               JOIN wechat_article_analysis AS x
+                 ON x.article_hash = c.msg_hash""",
+        )
+    assert mutated != data_sql
+
+    with pytest.raises(AssertionError):
+        _assert_data_query_shape(
+            mutated,
+            expected_sources=GROUP_SOURCES,
+            expected_mapping=GROUP_SELECT_MAPPING,
+        )
+
+
+@pytest.mark.parametrize(
+    ("safe_expression", "unsafe_expression"),
+    [
+        ("p.price_text AS price_text", "p.raw_row_json AS price_text"),
+        ("p.spec_text AS spec_text", "p.raw_headers_json AS spec_text"),
+    ],
+)
+def test_price_shape_rejects_raw_columns_spoofing_safe_aliases(
+    safe_expression, unsafe_expression
+) -> None:
+    data_sql = _captured_data_sql("list_price_details", PriceDetailFilter())
+    mutated = data_sql.replace(safe_expression, unsafe_expression)
+    assert mutated != data_sql
+
+    with pytest.raises(AssertionError):
+        _assert_data_query_shape(
+            mutated,
+            expected_sources=PRICE_SOURCES,
+            expected_mapping=PRICE_SELECT_MAPPING,
+        )
+
+
+def test_query_shape_parser_ignores_comments_case_and_token_whitespace() -> None:
+    data_sql = _captured_data_sql("list_article_details", ArticleDetailFilter())
+    variant = (
+        "/* harmless BODY_TEXT mention in a comment */\n"
+        + data_sql.upper()
+        .replace("A.ID", "A /*column owner*/ . ID")
+        .replace(" AS ", "\n AS\t")
     )
 
-    assert _selected_output_names(mutated) != ARTICLE_COLUMNS
-    with pytest.raises(AssertionError):
-        _assert_forbidden_identifiers_absent(mutated, {"body_text"})
+    _assert_data_query_shape(
+        variant,
+        expected_sources=ARTICLE_SOURCES,
+        expected_mapping=ARTICLE_SELECT_MAPPING,
+    )
 
 
-def _selected_output_names(sql: str) -> set[str]:
-    match = re.search(r"\bSELECT\b(?P<select>.*?)\bFROM\b", sql, re.I | re.S)
+def test_result_dto_fields_are_exact_for_all_three_query_types() -> None:
+    assert {field.name for field in fields(GroupDetailRow)} == {
+        "msg_hash",
+        "group_name",
+        "sender_display",
+        "msg_time_inferred",
+        "clean_content",
+        "intent_type",
+        "region_hits",
+        "category_hits",
+        "keyword_hits",
+        "opportunity_score",
+        "has_contact",
+    }
+    assert {field.name for field in fields(ArticleDetailRow)} == {
+        "article_hash",
+        "account_name",
+        "title",
+        "publish_time",
+        "quote_date",
+        "collect_time",
+        "summary_text",
+        "topic_tags",
+        "content_length",
+        "analysis_version",
+    }
+    assert {field.name for field in fields(EggPriceDetailRow)} == {
+        "account_name",
+        "quote_date",
+        "region",
+        "market_name",
+        "product_family",
+        "product_name",
+        "spec_text",
+        "price_text",
+        "price_low",
+        "price_high",
+        "price_unit_text",
+        "standard_price_low",
+        "standard_price_high",
+        "standard_price_unit",
+        "change_text",
+        "change_value",
+        "trend",
+        "conversion_method",
+        "conversion_confidence",
+    }
+
+
+def _captured_data_sql(method_name: str, filters: object) -> str:
+    engine = Engine()
+    getattr(MysqlSafeResultQueryRepo(engine), method_name)(
+        filters, page=1, page_size=20
+    )
+    return engine.connection.executions[1][0]
+
+
+def _assert_query_shape(
+    count_sql: str,
+    data_sql: str,
+    *,
+    expected_sources: tuple[tuple[str, str], ...],
+    expected_mapping: tuple[tuple[str, str, str], ...],
+    forbidden: set[str],
+) -> None:
+    assert _source_tables(count_sql) == expected_sources
+    assert _source_tables(data_sql) == expected_sources
+    assert _normalized_select_list(count_sql) == "count(*) as total_count"
+    _assert_data_query_shape(
+        data_sql,
+        expected_sources=expected_sources,
+        expected_mapping=expected_mapping,
+    )
+    _assert_forbidden_identifiers_absent(count_sql, forbidden)
+    _assert_forbidden_identifiers_absent(data_sql, forbidden)
+
+
+def _assert_data_query_shape(
+    sql: str,
+    *,
+    expected_sources: tuple[tuple[str, str], ...],
+    expected_mapping: tuple[tuple[str, str, str], ...],
+) -> None:
+    assert _source_tables(sql) == expected_sources
+    assert _selected_column_mapping(sql) == expected_mapping
+
+
+def _source_tables(sql: str) -> tuple[tuple[str, str], ...]:
+    normalized = _normalize_sql(sql)
+    identifier = r"[a-z_][a-z0-9_]*"
+    reserved = (
+        "inner|left|right|full|cross|join|on|where|group|order|having|limit|offset"
+    )
+    pattern = re.compile(
+        rf"\b(?:from|join)\s+"
+        rf"(?P<table>{identifier})"
+        rf"(?:\s+(?:as\s+)?(?P<alias>(?!(?:{reserved})\b){identifier}))?"
+    )
+    return tuple(
+        (match.group("table"), match.group("alias") or "")
+        for match in pattern.finditer(normalized)
+    )
+
+
+def _selected_column_mapping(sql: str) -> tuple[tuple[str, str, str], ...]:
+    expressions = _split_select_expressions(_normalized_select_list(sql))
+    mapping: list[tuple[str, str, str]] = []
+    for expression in expressions:
+        match = re.fullmatch(
+            r"(?P<table>[a-z_][a-z0-9_]*)\s*\.\s*"
+            r"(?P<column>[a-z_][a-z0-9_]*)\s+as\s+"
+            r"(?P<output>[a-z_][a-z0-9_]*)",
+            expression,
+        )
+        assert match is not None, f"non-canonical SELECT expression: {expression}"
+        mapping.append(
+            (match.group("table"), match.group("column"), match.group("output"))
+        )
+    return tuple(mapping)
+
+
+def _normalized_select_list(sql: str) -> str:
+    normalized = _normalize_sql(sql)
+    match = re.search(r"\bselect\s+(?P<select>.*?)\s+from\b", normalized)
     assert match is not None
-    names: set[str] = set()
-    for expression in match.group("select").split(","):
-        normalized = " ".join(expression.split())
-        alias = re.search(r"\bAS\s+([a-z_][a-z0-9_]*)$", normalized, re.I)
-        if alias:
-            names.add(alias.group(1).lower())
-        else:
-            names.add(normalized.rsplit(".", 1)[-1].lower())
-    return names
+    return match.group("select").strip()
+
+
+def _split_select_expressions(select_list: str) -> tuple[str, ...]:
+    expressions: list[str] = []
+    start = 0
+    depth = 0
+    for index, character in enumerate(select_list):
+        if character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+            assert depth >= 0, "unbalanced SELECT expression parentheses"
+        elif character == "," and depth == 0:
+            expressions.append(select_list[start:index].strip())
+            start = index + 1
+    assert depth == 0, "unbalanced SELECT expression parentheses"
+    expressions.append(select_list[start:].strip())
+    assert all(expressions), "empty SELECT expression"
+    return tuple(expressions)
 
 
 def _assert_forbidden_identifiers_absent(
     sql: str, forbidden: set[str]
 ) -> None:
-    identifiers = set(re.findall(r"[a-z_][a-z0-9_]*", sql.lower()))
+    identifiers = set(
+        re.findall(r"[a-z_][a-z0-9_]*", _normalize_sql(sql))
+    )
     assert identifiers.isdisjoint(forbidden), identifiers & forbidden
+
+
+def _normalize_sql(sql: str) -> str:
+    without_comments = re.sub(
+        r"/\*.*?\*/|--[^\r\n]*|#[^\r\n]*",
+        " ",
+        sql,
+        flags=re.S,
+    )
+    without_identifier_quotes = without_comments.replace("`", "")
+    return " ".join(without_identifier_quotes.lower().split())
