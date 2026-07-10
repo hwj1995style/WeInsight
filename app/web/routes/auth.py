@@ -23,22 +23,44 @@ from app.services.auth_service import (
 LOGIN_CSRF_COOKIE = "login_csrf"
 LOGIN_CSRF_MAX_AGE_SECONDS = 20 * 60
 MAX_CONCURRENT_LOGIN_HASHES = 2
+MAX_TRACKED_LOGIN_IPS = 4096
+LOGIN_LIMITER_CLEANUP_INTERVAL = timedelta(minutes=1)
 TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 router = APIRouter()
 
 
 class LoginAttemptLimiter:
-    def __init__(self, limit: int, window_minutes: int) -> None:
+    def __init__(
+        self,
+        limit: int,
+        window_minutes: int,
+        max_tracked_ips: int = MAX_TRACKED_LOGIN_IPS,
+    ) -> None:
         self.limit = limit
         self.window = timedelta(minutes=window_minutes)
+        self.max_tracked_ips = max_tracked_ips
         self._attempts: dict[str, deque[datetime]] = {}
         self._lock = Lock()
+        self._next_cleanup_at: datetime | None = None
 
     def reserve(self, client_ip: str, now: datetime) -> bool:
         cutoff = now - self.window
         with self._lock:
-            attempts = self._attempts.setdefault(client_ip, deque())
+            if self._next_cleanup_at is None or now >= self._next_cleanup_at:
+                self._prune_expired(cutoff)
+                self._next_cleanup_at = now + min(
+                    self.window,
+                    LOGIN_LIMITER_CLEANUP_INTERVAL,
+                )
+            attempts = self._attempts.get(client_ip)
+            if attempts is None:
+                if len(self._attempts) >= self.max_tracked_ips:
+                    self._prune_expired(cutoff)
+                    if len(self._attempts) >= self.max_tracked_ips:
+                        return False
+                attempts = deque()
+                self._attempts[client_ip] = attempts
             while attempts and attempts[0] <= cutoff:
                 attempts.popleft()
             if len(attempts) >= self.limit:
@@ -49,6 +71,18 @@ class LoginAttemptLimiter:
     def reset(self, client_ip: str) -> None:
         with self._lock:
             self._attempts.pop(client_ip, None)
+
+    @property
+    def tracked_ip_count(self) -> int:
+        with self._lock:
+            return len(self._attempts)
+
+    def _prune_expired(self, cutoff: datetime) -> None:
+        for client_ip, attempts in list(self._attempts.items()):
+            while attempts and attempts[0] <= cutoff:
+                attempts.popleft()
+            if not attempts:
+                self._attempts.pop(client_ip, None)
 
 
 @router.get("/healthz")

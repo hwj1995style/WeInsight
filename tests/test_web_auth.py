@@ -4,6 +4,7 @@ import asyncio
 import secrets
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -472,12 +473,76 @@ def test_login_hash_concurrency_is_globally_bounded(
             return response.status_code
 
     async def run_attempts() -> list[int]:
-        return list(await asyncio.gather(*(attempt() for _ in range(4))))
+        async with application.router.lifespan_context(application):
+            return list(await asyncio.gather(*(attempt() for _ in range(4))))
 
     statuses = asyncio.run(run_attempts())
 
     assert statuses == [303, 303, 303, 303]
     assert service.max_active == 2
+
+
+def test_login_hash_gate_is_recreated_for_each_application_lifespan(
+    config: Config,
+) -> None:
+    class SlowAuthService(FakeAuthService):
+        def login(self, *args, **kwargs):
+            time.sleep(0.04)
+            return super().login(*args, **kwargs)
+
+    application = create_app(config, auth_service=SlowAuthService())
+
+    async def run_batch() -> list[int]:
+        async with application.router.lifespan_context(application):
+            async def attempt() -> int:
+                async with AsyncClient(
+                    transport=ASGITransport(app=application),
+                    base_url="http://testserver",
+                ) as async_client:
+                    await async_client.get("/login")
+                    response = await async_client.post(
+                        "/login",
+                        data={
+                            "username": "admin",
+                            "password": "admin123456",
+                            "login_csrf": async_client.cookies["login_csrf"],
+                        },
+                        follow_redirects=False,
+                    )
+                    return response.status_code
+
+            return list(await asyncio.gather(*(attempt() for _ in range(4))))
+
+    assert asyncio.run(run_batch()) == [303, 303, 303, 303]
+    assert asyncio.run(run_batch()) == [303, 303, 303, 303]
+
+
+def test_login_attempt_limiter_is_atomic_for_one_ip() -> None:
+    limiter = auth_routes.LoginAttemptLimiter(limit=5, window_minutes=15)
+    now = datetime(2026, 7, 10, 9, 0)
+
+    with ThreadPoolExecutor(max_workers=20) as pool:
+        accepted = list(pool.map(lambda _: limiter.reserve("10.0.0.1", now), range(20)))
+
+    assert accepted.count(True) == 5
+    assert accepted.count(False) == 15
+
+
+def test_login_attempt_limiter_prunes_expired_ips_and_fails_closed_at_capacity() -> None:
+    limiter = auth_routes.LoginAttemptLimiter(
+        limit=5,
+        window_minutes=15,
+        max_tracked_ips=2,
+    )
+    now = datetime(2026, 7, 10, 9, 0)
+
+    assert limiter.reserve("10.0.0.1", now)
+    assert limiter.reserve("10.0.0.2", now)
+    assert limiter.reserve("10.0.0.3", now) is False
+    assert limiter.tracked_ip_count == 2
+
+    assert limiter.reserve("10.0.0.3", now + timedelta(minutes=16))
+    assert limiter.tracked_ip_count == 1
 
 
 def test_default_admin_can_login_without_forced_change(client: TestClient) -> None:
