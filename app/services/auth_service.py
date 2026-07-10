@@ -57,12 +57,16 @@ class AdminAuthRepo(Protocol):
     def create_user_if_missing(self, username: str, password_hash: str) -> bool: ...
 
     def record_login_failure(
-        self, user_id: int, locked_until: datetime | None
-    ) -> None: ...
+        self,
+        user_id: int,
+        now: datetime,
+        failure_limit: int,
+        lock_minutes: int,
+    ) -> datetime | None: ...
 
     def record_login_success(self, user_id: int, now: datetime) -> None: ...
 
-    def update_password(
+    def update_password_and_revoke_sessions(
         self, user_id: int, password_hash: str, now: datetime
     ) -> None: ...
 
@@ -77,8 +81,6 @@ class AdminAuthRepo(Protocol):
     ) -> None: ...
 
     def revoke_session(self, token_hash: str, now: datetime) -> None: ...
-
-    def revoke_user_sessions(self, user_id: int, now: datetime) -> None: ...
 
 
 class AuthService:
@@ -110,11 +112,12 @@ class AuthService:
         if user.locked_until is not None and user.locked_until > now:
             raise LoginLockedError(user.locked_until)
         if not self.password_hasher.verify(user.password_hash, password):
-            failed_count = user.failed_login_count + 1
-            locked_until = None
-            if failed_count >= self.config.login_failure_limit:
-                locked_until = now + timedelta(minutes=self.config.login_lock_minutes)
-            self.repo.record_login_failure(user.id, locked_until)
+            self.repo.record_login_failure(
+                user.id,
+                now,
+                self.config.login_failure_limit,
+                self.config.login_lock_minutes,
+            )
             raise InvalidCredentialsError("invalid username or password")
 
         self.repo.record_login_success(user.id, now)
@@ -193,8 +196,11 @@ class AuthService:
             or not self.password_hasher.verify(user.password_hash, current_password)
         ):
             raise InvalidCredentialsError("current password is invalid")
-        self.repo.update_password(user.id, self.password_hasher.hash(new_password), now)
-        self.repo.revoke_user_sessions(user.id, now)
+        self.repo.update_password_and_revoke_sessions(
+            user.id,
+            self.password_hasher.hash(new_password),
+            now,
+        )
 
 
 def _sha256(value: str) -> str:

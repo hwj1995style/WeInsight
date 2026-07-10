@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
@@ -88,9 +88,11 @@ class MysqlAdminAuthRepo:
             INSERT IGNORE INTO weinsight_admin_user (
                 username,
                 password_hash
-            ) VALUES (
-                :username,
-                :password_hash
+            )
+            SELECT :username, :password_hash
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM weinsight_admin_user
             )
             """
         )
@@ -102,22 +104,55 @@ class MysqlAdminAuthRepo:
         return bool(result.rowcount)
 
     def record_login_failure(
-        self, user_id: int, locked_until: datetime | None
-    ) -> None:
-        statement = text(
+        self,
+        user_id: int,
+        now: datetime,
+        failure_limit: int,
+        lock_minutes: int,
+    ) -> datetime | None:
+        select_statement = text(
+            """
+            SELECT
+                failed_login_count,
+                locked_until
+            FROM weinsight_admin_user
+            WHERE id = :user_id
+            FOR UPDATE
+            """
+        )
+        update_statement = text(
             """
             UPDATE weinsight_admin_user
-            SET failed_login_count = failed_login_count + 1,
+            SET failed_login_count = :failed_login_count,
                 locked_until = :locked_until,
-                update_time = CURRENT_TIMESTAMP
+                update_time = :now
             WHERE id = :user_id
             """
         )
         with self.engine.begin() as connection:
+            row = connection.execute(
+                select_statement, {"user_id": user_id}
+            ).mappings().one_or_none()
+            if row is None:
+                return None
+            failed_login_count = int(row["failed_login_count"] or 0) + 1
+            existing_lock = row["locked_until"]
+            if existing_lock is not None and existing_lock > now:
+                locked_until = existing_lock
+            elif failed_login_count >= failure_limit:
+                locked_until = now + timedelta(minutes=lock_minutes)
+            else:
+                locked_until = None
             connection.execute(
-                statement,
-                {"user_id": user_id, "locked_until": locked_until},
+                update_statement,
+                {
+                    "user_id": user_id,
+                    "failed_login_count": failed_login_count,
+                    "locked_until": locked_until,
+                    "now": now,
+                },
             )
+        return locked_until
 
     def record_login_success(self, user_id: int, now: datetime) -> None:
         statement = text(
@@ -133,10 +168,10 @@ class MysqlAdminAuthRepo:
         with self.engine.begin() as connection:
             connection.execute(statement, {"user_id": user_id, "now": now})
 
-    def update_password(
+    def update_password_and_revoke_sessions(
         self, user_id: int, password_hash: str, now: datetime
     ) -> None:
-        statement = text(
+        password_statement = text(
             """
             UPDATE weinsight_admin_user
             SET password_hash = :password_hash,
@@ -145,11 +180,20 @@ class MysqlAdminAuthRepo:
             WHERE id = :user_id
             """
         )
+        revoke_statement = text(
+            """
+            UPDATE weinsight_admin_session
+            SET revoked_at = :now
+            WHERE user_id = :user_id
+              AND revoked_at IS NULL
+            """
+        )
         with self.engine.begin() as connection:
             connection.execute(
-                statement,
+                password_statement,
                 {"user_id": user_id, "password_hash": password_hash, "now": now},
             )
+            connection.execute(revoke_statement, {"user_id": user_id, "now": now})
 
     def create_session(self, record: NewAdminSessionRecord) -> None:
         statement = text(
@@ -258,18 +302,6 @@ class MysqlAdminAuthRepo:
         )
         with self.engine.begin() as connection:
             connection.execute(statement, {"token_hash": token_hash, "now": now})
-
-    def revoke_user_sessions(self, user_id: int, now: datetime) -> None:
-        statement = text(
-            """
-            UPDATE weinsight_admin_session
-            SET revoked_at = :now
-            WHERE user_id = :user_id
-              AND revoked_at IS NULL
-            """
-        )
-        with self.engine.begin() as connection:
-            connection.execute(statement, {"user_id": user_id, "now": now})
 
     def _find_user(self, statement, params: dict[str, object]) -> AdminUserRecord | None:
         with self.engine.begin() as connection:
