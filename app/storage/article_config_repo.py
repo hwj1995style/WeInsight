@@ -21,6 +21,7 @@ class ArticleAccountConfigRecord:
     dedup_key: str = "article_hash"
     last_success_collect_time: datetime | None = None
     remark: str | None = None
+    id: int | None = None
 
 
 class MysqlArticleAccountConfigRepo:
@@ -99,10 +100,72 @@ class MysqlArticleAccountConfigRepo:
         with self.engine.begin() as connection:
             connection.execute(statement, params)
 
+    def create_account_config(
+        self,
+        *,
+        account_name: str,
+        account_type: str,
+        enabled: bool,
+        priority: int,
+        poll_interval_minutes: int,
+        daily_window_start: str,
+        daily_window_end: str,
+        max_articles_per_round: int,
+        collect_today_only: bool,
+        dedup_key: str,
+        remark: str | None,
+    ) -> int:
+        statement = text(
+            """
+            INSERT INTO wechat_public_account_config (
+                account_name,
+                account_type,
+                enabled,
+                priority,
+                poll_interval_minutes,
+                daily_window_start,
+                daily_window_end,
+                max_articles_per_round,
+                collect_today_only,
+                dedup_key,
+                remark
+            ) VALUES (
+                :account_name,
+                :account_type,
+                :enabled,
+                :priority,
+                :poll_interval_minutes,
+                :daily_window_start,
+                :daily_window_end,
+                :max_articles_per_round,
+                :collect_today_only,
+                :dedup_key,
+                :remark
+            )
+            """
+        )
+        params = {
+            "account_name": account_name,
+            "account_type": account_type,
+            "enabled": 1 if enabled else 0,
+            "priority": priority,
+            "poll_interval_minutes": poll_interval_minutes,
+            "daily_window_start": daily_window_start,
+            "daily_window_end": daily_window_end,
+            "max_articles_per_round": max_articles_per_round,
+            "collect_today_only": 1 if collect_today_only else 0,
+            "dedup_key": dedup_key,
+            "remark": remark,
+        }
+        with self.engine.begin() as connection:
+            result = connection.execute(statement, params)
+            return int(result.lastrowid)
+
     def list_accounts(self) -> list[ArticleAccountConfigRecord]:
         statement = text(
             """
             SELECT
+                id,
                 account_name,
                 account_type,
                 enabled,
@@ -123,10 +186,108 @@ class MysqlArticleAccountConfigRepo:
             rows = connection.execute(statement).mappings().all()
         return [self._record_from_row(row) for row in rows]
 
+    def get_account(self, source_id: int) -> ArticleAccountConfigRecord | None:
+        statement = text(
+            """
+            SELECT
+                id,
+                account_name,
+                account_type,
+                enabled,
+                priority,
+                poll_interval_minutes,
+                daily_window_start,
+                daily_window_end,
+                max_articles_per_round,
+                collect_today_only,
+                dedup_key,
+                last_success_collect_time,
+                remark
+            FROM wechat_public_account_config
+            WHERE id = :source_id
+            """
+        )
+        with self.engine.begin() as connection:
+            row = connection.execute(statement, {"source_id": source_id}).mappings().first()
+        return None if row is None else self._record_from_row(row)
+
+    def update_account_config(
+        self,
+        source_id: int,
+        *,
+        account_name: str,
+        account_type: str,
+        priority: int,
+        poll_interval_minutes: int,
+        daily_window_start: str,
+        daily_window_end: str,
+        max_articles_per_round: int,
+        collect_today_only: bool,
+        remark: str | None,
+    ) -> int:
+        statement = text(
+            """
+            UPDATE wechat_public_account_config
+            SET account_name = :account_name,
+                account_type = :account_type,
+                priority = :priority,
+                poll_interval_minutes = :poll_interval_minutes,
+                daily_window_start = :daily_window_start,
+                daily_window_end = :daily_window_end,
+                max_articles_per_round = :max_articles_per_round,
+                collect_today_only = :collect_today_only,
+                remark = :remark,
+                update_time = CURRENT_TIMESTAMP
+            WHERE id = :source_id
+            """
+        )
+        params = {
+            "source_id": source_id,
+            "account_name": account_name,
+            "account_type": account_type,
+            "priority": priority,
+            "poll_interval_minutes": poll_interval_minutes,
+            "daily_window_start": daily_window_start,
+            "daily_window_end": daily_window_end,
+            "max_articles_per_round": max_articles_per_round,
+            "collect_today_only": 1 if collect_today_only else 0,
+            "remark": remark,
+        }
+        with self.engine.begin() as connection:
+            result = connection.execute(statement, params)
+            return int(result.rowcount or 0)
+
+    def set_account_enabled(self, source_id: int, enabled: bool) -> int:
+        statement = text(
+            """
+            UPDATE wechat_public_account_config
+            SET enabled = :enabled,
+                update_time = CURRENT_TIMESTAMP
+            WHERE id = :source_id
+            """
+        )
+        params = {"source_id": source_id, "enabled": 1 if enabled else 0}
+        with self.engine.begin() as connection:
+            result = connection.execute(statement, params)
+            return int(result.rowcount or 0)
+
+    def delete_account(self, source_id: int) -> int:
+        statement = text(
+            """
+            DELETE FROM wechat_public_account_config
+            WHERE id = :source_id
+              AND enabled = 0
+            """
+        )
+        with self.engine.begin() as connection:
+            result = connection.execute(statement, {"source_id": source_id})
+            return int(result.rowcount or 0)
+
     def list_due_accounts(self, now: datetime, limit: int) -> list[ArticleAccountConfigRecord]:
         statement = text(
             """
             SELECT
+                id,
                 account_name,
                 account_type,
                 enabled,
@@ -180,6 +341,7 @@ class MysqlArticleAccountConfigRepo:
             dedup_key=str(row["dedup_key"]),
             last_success_collect_time=row["last_success_collect_time"],
             remark=row["remark"],
+            id=None if row.get("id") is None else int(row["id"]),
         )
 
 

@@ -28,6 +28,7 @@ class GroupConfigRecord:
     backtrack_pages: int = 10
     extra_backtrack_pages: int = 30
     remark: str | None = None
+    id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -275,10 +276,60 @@ class MysqlGroupConfigRepo:
         with self.engine.begin() as connection:
             connection.execute(statement, params)
 
+    def create_group_config(
+        self,
+        *,
+        group_name: str,
+        enabled: bool,
+        priority: int,
+        poll_interval_seconds: int,
+        backtrack_pages: int,
+        extra_backtrack_pages: int,
+        is_core_group: bool,
+        remark: str | None,
+    ) -> int:
+        statement = text(
+            """
+            INSERT INTO wechat_group_config (
+                group_name,
+                enabled,
+                priority,
+                poll_interval_seconds,
+                backtrack_pages,
+                extra_backtrack_pages,
+                is_core_group,
+                remark
+            ) VALUES (
+                :group_name,
+                :enabled,
+                :priority,
+                :poll_interval_seconds,
+                :backtrack_pages,
+                :extra_backtrack_pages,
+                :is_core_group,
+                :remark
+            )
+            """
+        )
+        params = {
+            "group_name": group_name,
+            "enabled": 1 if enabled else 0,
+            "priority": priority,
+            "poll_interval_seconds": poll_interval_seconds,
+            "backtrack_pages": backtrack_pages,
+            "extra_backtrack_pages": extra_backtrack_pages,
+            "is_core_group": 1 if is_core_group else 0,
+            "remark": remark,
+        }
+        with self.engine.begin() as connection:
+            result = connection.execute(statement, params)
+            return int(result.lastrowid)
+
     def list_groups(self) -> list[GroupConfigRecord]:
         statement = text(
             """
             SELECT
+                id,
                 group_name,
                 enabled,
                 priority,
@@ -294,6 +345,93 @@ class MysqlGroupConfigRepo:
         with self.engine.begin() as connection:
             rows = connection.execute(statement).mappings().all()
         return [self._record_from_row(row) for row in rows]
+
+    def get_group(self, source_id: int) -> GroupConfigRecord | None:
+        statement = text(
+            """
+            SELECT
+                id,
+                group_name,
+                enabled,
+                priority,
+                poll_interval_seconds,
+                backtrack_pages,
+                extra_backtrack_pages,
+                is_core_group,
+                remark
+            FROM wechat_group_config
+            WHERE id = :source_id
+            """
+        )
+        with self.engine.begin() as connection:
+            row = connection.execute(statement, {"source_id": source_id}).mappings().first()
+        return None if row is None else self._record_from_row(row)
+
+    def update_group_config(
+        self,
+        source_id: int,
+        *,
+        group_name: str,
+        priority: int,
+        poll_interval_seconds: int,
+        backtrack_pages: int,
+        extra_backtrack_pages: int,
+        is_core_group: bool,
+        remark: str | None,
+    ) -> int:
+        statement = text(
+            """
+            UPDATE wechat_group_config
+            SET group_name = :group_name,
+                priority = :priority,
+                poll_interval_seconds = :poll_interval_seconds,
+                backtrack_pages = :backtrack_pages,
+                extra_backtrack_pages = :extra_backtrack_pages,
+                is_core_group = :is_core_group,
+                remark = :remark,
+                update_time = CURRENT_TIMESTAMP
+            WHERE id = :source_id
+            """
+        )
+        params = {
+            "source_id": source_id,
+            "group_name": group_name,
+            "priority": priority,
+            "poll_interval_seconds": poll_interval_seconds,
+            "backtrack_pages": backtrack_pages,
+            "extra_backtrack_pages": extra_backtrack_pages,
+            "is_core_group": 1 if is_core_group else 0,
+            "remark": remark,
+        }
+        with self.engine.begin() as connection:
+            result = connection.execute(statement, params)
+            return int(result.rowcount or 0)
+
+    def set_group_enabled(self, source_id: int, enabled: bool) -> int:
+        statement = text(
+            """
+            UPDATE wechat_group_config
+            SET enabled = :enabled,
+                update_time = CURRENT_TIMESTAMP
+            WHERE id = :source_id
+            """
+        )
+        params = {"source_id": source_id, "enabled": 1 if enabled else 0}
+        with self.engine.begin() as connection:
+            result = connection.execute(statement, params)
+            return int(result.rowcount or 0)
+
+    def delete_group(self, source_id: int) -> int:
+        statement = text(
+            """
+            DELETE FROM wechat_group_config
+            WHERE id = :source_id
+              AND enabled = 0
+            """
+        )
+        with self.engine.begin() as connection:
+            result = connection.execute(statement, {"source_id": source_id})
+            return int(result.rowcount or 0)
 
     def disable_group(self, group_name: str) -> None:
         statement = text(
@@ -311,6 +449,7 @@ class MysqlGroupConfigRepo:
         statement = text(
             """
             SELECT
+                cfg.id,
                 cfg.group_name,
                 cfg.priority,
                 cfg.poll_interval_seconds
@@ -344,6 +483,7 @@ class MysqlGroupConfigRepo:
             backtrack_pages=int(row.get("backtrack_pages", 10)),
             extra_backtrack_pages=int(row.get("extra_backtrack_pages", 30)),
             remark=row.get("remark"),
+            id=None if row.get("id") is None else int(row["id"]),
         )
 
 

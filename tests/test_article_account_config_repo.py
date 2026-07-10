@@ -9,12 +9,16 @@ class FakeResult:
     def __init__(self, rows=None) -> None:
         self._rows = rows or []
         self.rowcount = 1
+        self.lastrowid = 9
 
     def mappings(self):
         return self
 
     def all(self):
         return self._rows
+
+    def first(self):
+        return self._rows[0] if self._rows else None
 
 
 class FakeConnection:
@@ -71,11 +75,35 @@ def test_mysql_article_account_config_repo_upserts_account_config() -> None:
     assert params["collect_today_only"] == 1
 
 
+def test_mysql_article_account_config_repo_creates_without_name_upsert() -> None:
+    engine = FakeEngine()
+
+    source_id = MysqlArticleAccountConfigRepo(engine).create_account_config(
+        account_name="行业观察",
+        account_type="subscription",
+        enabled=True,
+        priority=2,
+        poll_interval_minutes=10,
+        daily_window_start="07:30",
+        daily_window_end="19:30",
+        max_articles_per_round=5,
+        collect_today_only=True,
+        dedup_key="article_hash",
+        remark=None,
+    )
+
+    assert source_id == 9
+    sql, _ = engine.connection.executions[0]
+    assert "INSERT INTO wechat_public_account_config" in sql
+    assert "ON DUPLICATE KEY UPDATE" not in sql
+
+
 def test_mysql_article_account_config_repo_lists_accounts() -> None:
     last_success = datetime(2026, 7, 3, 8, 30)
     engine = FakeEngine(
         rows=[
             {
+                "id": 9,
                 "account_name": "行业观察",
                 "account_type": "subscription",
                 "enabled": 1,
@@ -109,18 +137,21 @@ def test_mysql_article_account_config_repo_lists_accounts() -> None:
             dedup_key="article_hash",
             last_success_collect_time=last_success,
             remark="授权账号",
+            id=9,
         )
     ]
     sql, _ = engine.connection.executions[0]
     assert "FROM wechat_public_account_config" in sql
     assert "ORDER BY priority ASC" in sql
     assert "wechat_group_config" not in sql
+    assert "id" in sql
 
 
 def test_mysql_article_account_config_repo_lists_due_accounts_from_article_config_only() -> None:
     engine = FakeEngine(
         rows=[
             {
+                "id": 9,
                 "account_name": "行业观察",
                 "account_type": "subscription",
                 "enabled": 1,
@@ -170,6 +201,7 @@ def test_mysql_article_account_config_repo_normalizes_time_fields() -> None:
     engine = FakeEngine(
         rows=[
             {
+                "id": 9,
                 "account_name": "行业观察",
                 "account_type": "subscription",
                 "enabled": 1,
@@ -191,3 +223,76 @@ def test_mysql_article_account_config_repo_normalizes_time_fields() -> None:
 
     assert accounts[0].daily_window_start == "07:30:00"
     assert accounts[0].daily_window_end == "19:30:00"
+
+
+def test_mysql_article_account_config_repo_gets_account_by_stable_id() -> None:
+    engine = FakeEngine(
+        rows=[
+            {
+                "id": 9,
+                "account_name": "行业观察",
+                "account_type": "subscription",
+                "enabled": 1,
+                "priority": 2,
+                "poll_interval_minutes": 60,
+                "daily_window_start": "07:30:00",
+                "daily_window_end": "19:30:00",
+                "max_articles_per_round": 5,
+                "collect_today_only": 1,
+                "dedup_key": "article_hash",
+                "last_success_collect_time": None,
+                "remark": None,
+            }
+        ]
+    )
+
+    record = MysqlArticleAccountConfigRepo(engine).get_account(9)
+
+    assert record is not None and record.id == 9
+    sql, params = engine.connection.executions[0]
+    assert "WHERE id = :source_id" in sql
+    assert params == {"source_id": 9}
+
+
+def test_mysql_article_account_config_repo_updates_account_by_stable_id() -> None:
+    engine = FakeEngine()
+    repo = MysqlArticleAccountConfigRepo(engine)
+
+    affected = repo.update_account_config(
+        9,
+        account_name="新账号",
+        account_type="official",
+        priority=3,
+        poll_interval_minutes=10,
+        daily_window_start="08:00",
+        daily_window_end="20:00",
+        max_articles_per_round=10,
+        collect_today_only=False,
+        remark="更新",
+    )
+
+    assert affected == 1
+    sql, params = engine.connection.executions[0]
+    assert "UPDATE wechat_public_account_config" in sql
+    assert "ON DUPLICATE KEY UPDATE" not in sql
+    assert "WHERE id = :source_id" in sql
+    assert params["source_id"] == 9
+    assert params["account_name"] == "新账号"
+    assert params["collect_today_only"] == 0
+
+
+def test_mysql_article_account_config_repo_sets_enabled_and_deletes_disabled_by_id() -> None:
+    engine = FakeEngine()
+    repo = MysqlArticleAccountConfigRepo(engine)
+
+    assert repo.set_account_enabled(9, False) == 1
+    assert repo.delete_account(9) == 1
+
+    enable_sql, enable_params = engine.connection.executions[0]
+    delete_sql, delete_params = engine.connection.executions[1]
+    assert "WHERE id = :source_id" in enable_sql
+    assert enable_params == {"source_id": 9, "enabled": 0}
+    assert "DELETE FROM wechat_public_account_config" in delete_sql
+    assert "WHERE id = :source_id" in delete_sql
+    assert "enabled = 0" in delete_sql
+    assert delete_params == {"source_id": 9}
