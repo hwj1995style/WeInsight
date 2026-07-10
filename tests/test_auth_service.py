@@ -7,11 +7,14 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 
 import pytest
+from argon2 import PasswordHasher as Argon2PasswordHasher
+from argon2 import extract_parameters
 
 from app.core.config import AuthConfig
 from app.security.passwords import PasswordHasher
 from app.services.auth_service import (
     AuthService,
+    DUMMY_PASSWORD_HASH,
     InvalidCredentialsError,
     LoginLockedError,
     PasswordValidationError,
@@ -423,6 +426,21 @@ def test_missing_user_runs_dummy_verification_before_rejection(
         service.login("missing", "anything", "127.0.0.1", "pytest", NOW)
 
     assert len(hasher.verify_calls) == 1
+
+
+def test_dummy_password_hash_is_valid_and_matches_production_cost() -> None:
+    hasher = Argon2PasswordHasher()
+    parameters = extract_parameters(DUMMY_PASSWORD_HASH)
+
+    assert hasher.verify(
+        DUMMY_PASSWORD_HASH,
+        "weinsight-dummy-password-check",
+    )
+    assert parameters.memory_cost == hasher.memory_cost
+    assert parameters.time_cost == hasher.time_cost
+    assert parameters.parallelism == hasher.parallelism
+    assert parameters.hash_len == hasher.hash_len
+    assert parameters.salt_len == hasher.salt_len
 
 
 def test_absolute_session_expiry_rejects_authentication(auth_service: AuthService) -> None:

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import secrets
+from collections import deque
 from datetime import datetime
+from datetime import timedelta
 from pathlib import Path
+from threading import Lock
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
@@ -18,9 +22,33 @@ from app.services.auth_service import (
 
 LOGIN_CSRF_COOKIE = "login_csrf"
 LOGIN_CSRF_MAX_AGE_SECONDS = 20 * 60
+MAX_CONCURRENT_LOGIN_HASHES = 2
 TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 router = APIRouter()
+
+
+class LoginAttemptLimiter:
+    def __init__(self, limit: int, window_minutes: int) -> None:
+        self.limit = limit
+        self.window = timedelta(minutes=window_minutes)
+        self._attempts: dict[str, deque[datetime]] = {}
+        self._lock = Lock()
+
+    def reserve(self, client_ip: str, now: datetime) -> bool:
+        cutoff = now - self.window
+        with self._lock:
+            attempts = self._attempts.setdefault(client_ip, deque())
+            while attempts and attempts[0] <= cutoff:
+                attempts.popleft()
+            if len(attempts) >= self.limit:
+                return False
+            attempts.append(now)
+            return True
+
+    def reset(self, client_ip: str) -> None:
+        with self._lock:
+            self._attempts.pop(client_ip, None)
 
 
 @router.get("/healthz")
@@ -67,14 +95,30 @@ async def login(request: Request) -> Response:
 
     username = str(form.get("username", ""))
     password = str(form.get("password", ""))
-    try:
-        session = request.app.state.auth_service.login(
-            username,
-            password,
-            request.client.host if request.client else "unknown",
-            request.headers.get("user-agent", ""),
-            _now(request),
+    now = _now(request)
+    client_ip = request.client.host if request.client else "unknown"
+    limiter = request.app.state.login_attempt_limiter
+    if not limiter.reserve(client_ip, now):
+        response = _login_response(
+            request,
+            login_csrf=cookie_token,
+            error="用户名或密码错误，或账户暂时不可用",
+            status_code=429,
         )
+        response.headers["Retry-After"] = str(
+            request.app.state.config.auth.login_lock_minutes * 60
+        )
+        return response
+    try:
+        async with request.app.state.login_hash_semaphore:
+            session = await run_in_threadpool(
+                request.app.state.auth_service.login,
+                username,
+                password,
+                client_ip,
+                request.headers.get("user-agent", ""),
+                now,
+            )
     except (InvalidCredentialsError, LoginLockedError):
         return _login_response(
             request,
@@ -84,6 +128,7 @@ async def login(request: Request) -> Response:
         )
 
     config = request.app.state.config
+    limiter.reset(client_ip)
     response = RedirectResponse("/", status_code=303)
     max_age = max(0, int((session.expires_at - _now(request)).total_seconds()))
     response.set_cookie(

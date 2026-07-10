@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import secrets
+import threading
+import time
 from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterator
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -360,6 +364,120 @@ def test_locked_login_uses_the_same_non_disclosing_message(
     assert response.status_code == 401
     assert "用户名或密码错误，或账户暂时不可用" in response.text
     assert "2026-07-10" not in response.text
+
+
+def test_login_rate_limit_stops_hash_work_before_sixth_unknown_attempt(
+    client: TestClient,
+    auth_service: FakeAuthService,
+    config: Config,
+) -> None:
+    auth_service.login_error = InvalidCredentialsError("invalid credentials")
+    for attempt in range(config.auth.login_failure_limit):
+        response = _login(
+            client,
+            username=f"missing-{attempt}",
+            password="wrong-password",
+        )
+        assert response.status_code == 401
+
+    limited = _login(
+        client,
+        username="another-missing-user",
+        password="wrong-password",
+    )
+
+    assert limited.status_code == 429
+    assert "用户名或密码错误，或账户暂时不可用" in limited.text
+    assert limited.headers["retry-after"] == str(config.auth.login_lock_minutes * 60)
+    assert len(auth_service.login_calls) == config.auth.login_failure_limit
+
+
+def test_successful_login_resets_the_client_ip_attempt_limit(
+    client: TestClient,
+    auth_service: FakeAuthService,
+    config: Config,
+) -> None:
+    auth_service.login_error = InvalidCredentialsError("invalid credentials")
+    for attempt in range(config.auth.login_failure_limit - 1):
+        assert _login(client, username=f"missing-{attempt}", password="wrong").status_code == 401
+
+    auth_service.login_error = None
+    assert _login(client, username="admin", password="admin123456").status_code == 303
+    client.get("/login")
+    auth_service.login_error = InvalidCredentialsError("invalid credentials")
+
+    assert _login(client, username="missing-after-success", password="wrong").status_code == 401
+    assert len(auth_service.login_calls) == config.auth.login_failure_limit + 1
+
+
+def test_login_hashing_runs_through_bounded_threadpool_gate(
+    client: TestClient,
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    async def tracked_run_in_threadpool(function, *args):
+        calls.append(function.__name__)
+        return function(*args)
+
+    monkeypatch.setattr(auth_routes, "run_in_threadpool", tracked_run_in_threadpool)
+
+    response = _login(client, username="admin", password="admin123456")
+
+    assert response.status_code == 303
+    assert calls == ["login"]
+    assert app.state.login_hash_semaphore._value == 2
+
+
+def test_login_hash_concurrency_is_globally_bounded(
+    config: Config,
+) -> None:
+    class SlowAuthService(FakeAuthService):
+        def __init__(self) -> None:
+            super().__init__()
+            self.active = 0
+            self.max_active = 0
+            self.lock = threading.Lock()
+
+        def login(self, *args, **kwargs):
+            with self.lock:
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+            try:
+                time.sleep(0.08)
+                return super().login(*args, **kwargs)
+            finally:
+                with self.lock:
+                    self.active -= 1
+
+    service = SlowAuthService()
+    application = create_app(config, auth_service=service)
+
+    async def attempt() -> int:
+        async with AsyncClient(
+            transport=ASGITransport(app=application),
+            base_url="http://testserver",
+        ) as async_client:
+            await async_client.get("/login")
+            response = await async_client.post(
+                "/login",
+                data={
+                    "username": "admin",
+                    "password": "admin123456",
+                    "login_csrf": async_client.cookies["login_csrf"],
+                },
+                follow_redirects=False,
+            )
+            return response.status_code
+
+    async def run_attempts() -> list[int]:
+        return list(await asyncio.gather(*(attempt() for _ in range(4))))
+
+    statuses = asyncio.run(run_attempts())
+
+    assert statuses == [303, 303, 303, 303]
+    assert service.max_active == 2
 
 
 def test_default_admin_can_login_without_forced_change(client: TestClient) -> None:
