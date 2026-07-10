@@ -199,3 +199,21 @@ class MysqlUiLockRepo:
                 },
             )
             return int(result.rowcount or 0) == 1
+
+    def current_owner(self, lock_name: str) -> str | None:
+        statement = text(
+            """
+            SELECT owner_pipeline
+            FROM wechat_ui_lock
+            WHERE lock_name = :lock_name
+            """
+        )
+        with self.engine.begin() as connection:
+            owner = connection.execute(
+                statement, {"lock_name": lock_name}
+            ).scalar_one_or_none()
+        if owner is None:
+            return None
+        if not isinstance(owner, str) or not owner:
+            raise ValueError("owner_pipeline must be a non-empty string")
+        return owner

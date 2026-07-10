@@ -6,18 +6,23 @@ from app.storage.lock_repo import MysqlUiLockRepo
 
 
 class FakeResult:
-    def __init__(self, rowcount: int) -> None:
+    def __init__(self, rowcount: int, scalar=None) -> None:
         self.rowcount = rowcount
+        self.scalar = scalar
+
+    def scalar_one_or_none(self):
+        return self.scalar
 
 
 class FakeConnection:
-    def __init__(self, rowcount: int = 1) -> None:
+    def __init__(self, rowcount: int = 1, scalar=None) -> None:
         self.rowcount = rowcount
+        self.scalar = scalar
         self.executions: list[tuple[str, object]] = []
 
     def execute(self, statement, params=None):
         self.executions.append((str(statement), params))
-        return FakeResult(self.rowcount)
+        return FakeResult(self.rowcount, self.scalar)
 
     def __enter__(self):
         return self
@@ -27,8 +32,8 @@ class FakeConnection:
 
 
 class FakeEngine:
-    def __init__(self, rowcount: int = 1) -> None:
-        self.connection = FakeConnection(rowcount)
+    def __init__(self, rowcount: int = 1, scalar=None) -> None:
+        self.connection = FakeConnection(rowcount, scalar)
 
     def begin(self):
         return self.connection
@@ -69,3 +74,15 @@ def test_mysql_ui_lock_release_deletes_only_matching_owner() -> None:
     assert "owner_pipeline = :owner_pipeline" in sql
     assert "owner_task_id = :owner_task_id" in sql
     assert params["owner_task_id"] == "batch-1"
+
+
+def test_mysql_ui_lock_current_owner_is_read_only_and_bound() -> None:
+    engine = FakeEngine(scalar="group")
+
+    owner = MysqlUiLockRepo(engine).current_owner("wechat_ui")
+
+    assert owner == "group"
+    sql, params = engine.connection.executions[0]
+    assert "SELECT owner_pipeline" in sql
+    assert "WHERE lock_name = :lock_name" in sql
+    assert params == {"lock_name": "wechat_ui"}

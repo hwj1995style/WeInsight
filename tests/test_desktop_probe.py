@@ -36,7 +36,12 @@ def test_health_not_found_when_no_wechat_process() -> None:
 
     health = probe.check()
 
-    assert health.status == WechatHealthStatus.NOT_FOUND
+    assert health.status == WechatHealthStatus.NOT_RUNNING
+    assert health.status.value == "not_running"
+
+
+def test_legacy_not_found_status_is_not_running_alias() -> None:
+    assert WechatHealthStatus.NOT_FOUND is WechatHealthStatus.NOT_RUNNING
 
 
 def test_health_prefers_weixin_main_process_over_app_runtime() -> None:
