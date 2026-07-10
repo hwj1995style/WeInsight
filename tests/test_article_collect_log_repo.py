@@ -6,13 +6,27 @@ from datetime import datetime
 class FakeResult:
     rowcount = 1
 
+    def __init__(self, rows=None) -> None:
+        self._rows = rows or []
+
+    def mappings(self):
+        return self
+
+    def first(self):
+        return self._rows[0] if self._rows else None
+
 
 class FakeConnection:
     def __init__(self) -> None:
         self.executions: list[tuple[str, object]] = []
 
     def execute(self, statement, params=None):
-        self.executions.append((str(statement), params))
+        sql = str(statement)
+        self.executions.append((sql, params))
+        if "FOR SHARE" in sql:
+            return FakeResult(
+                [{"id": 9, "source_name": "行业观察", "enabled": 1}]
+            )
         return FakeResult()
 
     def __enter__(self):
@@ -49,7 +63,7 @@ def test_mysql_article_collect_log_repo_inserts_article_log_without_group_tables
         )
     )
 
-    sql, params = engine.connection.executions[0]
+    sql, params = engine.connection.executions[1]
     assert "INSERT INTO wechat_article_collect_log" in sql
     assert "wechat_group_" not in sql
     assert params["batch_id"] == "article-batch-1"

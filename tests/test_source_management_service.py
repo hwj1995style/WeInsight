@@ -295,6 +295,9 @@ def test_group_command_is_strictly_validated(service, command) -> None:
         replace(ARTICLE_COMMAND, priority=True),
         replace(ARTICLE_COMMAND, poll_interval_minutes=9),
         replace(ARTICLE_COMMAND, daily_window_start="24:00"),
+        replace(ARTICLE_COMMAND, daily_window_start="7:30"),
+        replace(ARTICLE_COMMAND, daily_window_start="07:30:00.123"),
+        replace(ARTICLE_COMMAND, daily_window_start="07:30+08:00"),
         replace(ARTICLE_COMMAND, daily_window_end="noon"),
         replace(ARTICLE_COMMAND, max_articles_per_round=0),
         replace(ARTICLE_COMMAND, max_articles_per_round=21),
@@ -356,6 +359,23 @@ def test_reference_repo_uses_fixed_columns_and_active_statuses() -> None:
     assert params == {"source_id": 7}
 
 
+def test_reference_repo_supports_article_and_all_statuses() -> None:
+    engine = QueryEngine([QueryResult(rows=[{"job_name": "历史任务"}])])
+    repo = MysqlSourceReferenceRepo(engine)
+
+    assert repo.list_referencing_jobs("article", 9, active_only=False) == ["历史任务"]
+    sql, params = engine.connection.executions[0]
+    assert "target.article_config_id = :source_id" in sql
+    assert "job.status IN" not in sql
+    assert params == {"source_id": 9}
+
+
+def test_reference_repo_rejects_invalid_source_type() -> None:
+    repo = MysqlSourceReferenceRepo(QueryEngine([]))
+    with pytest.raises(ValueError):
+        repo.list_referencing_jobs("invalid", 1, active_only=False)
+
+
 def test_reference_repo_checks_all_business_history_tables() -> None:
     group_engine = QueryEngine([QueryResult(scalar=1)])
     assert MysqlSourceReferenceRepo(group_engine).has_group_history("核心群A") is True
@@ -374,6 +394,7 @@ def test_reference_repo_checks_all_business_history_tables() -> None:
     assert MysqlSourceReferenceRepo(article_engine).has_article_history("行业观察") is False
     article_sql, _ = article_engine.connection.executions[0]
     for table in (
+        "wechat_article_route_cache",
         "wechat_article_raw",
         "wechat_article_clean",
         "wechat_article_analysis",
@@ -383,3 +404,63 @@ def test_reference_repo_checks_all_business_history_tables() -> None:
         "wechat_article_collect_progress",
     ):
         assert table in article_sql
+
+
+def test_article_history_route_cache_deletion_mutation_guard() -> None:
+    engine = QueryEngine([QueryResult(scalar=0)])
+
+    MysqlSourceReferenceRepo(engine).has_article_history("行业观察")
+
+    sql, _ = engine.connection.executions[0]
+    assert "EXISTS(" in sql
+    assert "FROM wechat_article_route_cache" in sql
+
+
+def test_non_foreign_key_integrity_error_is_not_mapped(service, group_repo) -> None:
+    group_repo.record = replace(group_repo.record, enabled=False)
+    error = IntegrityError("DELETE", {}, Exception(1062, "duplicate entry"))
+    group_repo.delete_error = error
+
+    with pytest.raises(IntegrityError) as exc:
+        service.delete_group(7)
+    assert exc.value is error
+
+
+def test_non_foreign_key_integrity_error_from_transaction_repo_is_not_mapped(
+    group_repo, article_repo, refs
+) -> None:
+    error = IntegrityError("DELETE", {}, Exception(1062, "duplicate entry"))
+
+    class FailingMutationRepo:
+        def delete_group(self, source_id: int) -> None:
+            raise error
+
+    service = SourceManagementService(
+        group_repo,
+        article_repo,
+        refs,
+        mutation_repo=FailingMutationRepo(),
+    )
+
+    with pytest.raises(IntegrityError) as exc:
+        service.delete_group(7)
+    assert exc.value is error
+
+
+def test_same_state_enable_is_idempotent(service, group_repo, article_repo) -> None:
+    def no_group_change(source_id: int, enabled: bool):
+        group_repo.enabled_calls.append((source_id, enabled))
+        return 0
+
+    def no_article_change(source_id: int, enabled: bool):
+        article_repo.enabled_calls.append((source_id, enabled))
+        return 0
+
+    group_repo.set_group_enabled = no_group_change
+    article_repo.set_account_enabled = no_article_change
+
+    service.set_group_enabled(7, True)
+    service.set_article_enabled(9, True)
+
+    assert group_repo.enabled_calls == [(7, True)]
+    assert article_repo.enabled_calls == [(9, True)]

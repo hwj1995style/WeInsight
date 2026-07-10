@@ -22,7 +22,13 @@ class FakeConnection:
         self.executions: list[tuple[str, dict]] = []
 
     def execute(self, statement, params=None):
-        self.executions.append((str(statement), params or {}))
+        sql = str(statement)
+        self.executions.append((sql, params or {}))
+        if "FOR SHARE" in sql:
+            source_name = (params or {}).get("source_name", "一箱蛋")
+            return FakeResult(
+                [{"id": 9, "source_name": source_name, "enabled": 1}]
+            )
         return FakeResult(self.rows)
 
     def __enter__(self):
@@ -84,7 +90,7 @@ def test_upsert_success_resets_failure_count() -> None:
         success_time=now,
     )
 
-    sql, params = engine.connection.executions[0]
+    sql, params = engine.connection.executions[1]
     assert "INSERT INTO wechat_article_route_cache" in sql
     assert "failure_count = 0" in sql
     assert params["account_name"] == "一箱蛋"
@@ -105,7 +111,7 @@ def test_mark_failure_invalidates_after_threshold() -> None:
         failure_threshold=3,
     )
 
-    sql, params = engine.connection.executions[0]
+    sql, params = engine.connection.executions[1]
     assert "UPDATE wechat_article_route_cache" in sql
     assert "cache_status = CASE" in sql
     assert params["failure_threshold"] == 3
@@ -125,5 +131,5 @@ def test_mark_failure_sanitizes_url_like_error_messages() -> None:
         failure_threshold=3,
     )
 
-    _, params = engine.connection.executions[0]
+    _, params = engine.connection.executions[1]
     assert params["error_msg"] == "menu [redacted-url] has issue"

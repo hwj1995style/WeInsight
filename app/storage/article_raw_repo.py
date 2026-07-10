@@ -7,6 +7,11 @@ from typing import Iterable
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from app.storage.source_mutation_repo import MysqlSourceWriteGuard
+
+
+_SOURCE_WRITE_GUARD = MysqlSourceWriteGuard()
+
 
 @dataclass(frozen=True)
 class RawArticleRecord:
@@ -45,9 +50,23 @@ class MysqlArticleRawRepo:
         duplicate_count = 0
         skipped_count = 0
         task_created_count = 0
+        article_records = list(articles)
 
         with self.engine.begin() as connection:
-            for article in articles:
+            account_names = sorted(
+                {
+                    article.account_name
+                    for article in article_records
+                    if article.publish_time is not None
+                    and article.publish_time.date() == crawl_date
+                }
+            )
+            for account_name in account_names:
+                _SOURCE_WRITE_GUARD.lock_for_history_write(
+                    connection, "article", account_name
+                )
+
+            for article in article_records:
                 read_count += 1
                 if article.publish_time is None or article.publish_time.date() != crawl_date:
                     skipped_count += 1

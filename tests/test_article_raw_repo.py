@@ -17,6 +17,9 @@ class FakeResult:
     def first(self):
         return self._rows[0] if self._rows else None
 
+    def mappings(self):
+        return self
+
 
 class FakeConnection:
     def __init__(self, rowcounts: list[int], existing_url_results=None) -> None:
@@ -27,6 +30,11 @@ class FakeConnection:
     def execute(self, statement, params=None):
         sql = str(statement)
         self.executions.append((sql, params))
+        if "FOR SHARE" in sql:
+            return FakeResult(
+                rowcount=1,
+                rows=[{"id": 9, "source_name": "行业观察", "enabled": 1}],
+            )
         if "SELECT 1" in sql and "wechat_article_raw" in sql:
             rows = self.existing_url_results.pop(0) if self.existing_url_results else []
             return FakeResult(rowcount=len(rows), rows=rows)
@@ -104,11 +112,11 @@ def test_mysql_article_raw_repo_inserts_today_articles_and_creates_clean_task() 
     assert result.duplicate_count == 0
     assert result.skipped_count == 2
     assert result.task_created_count == 1
-    assert len(engine.connection.executions) == 3
+    assert len(engine.connection.executions) == 4
 
-    duplicate_sql, duplicate_params = engine.connection.executions[0]
-    raw_sql, raw_params = engine.connection.executions[1]
-    task_sql, task_params = engine.connection.executions[2]
+    duplicate_sql, duplicate_params = engine.connection.executions[1]
+    raw_sql, raw_params = engine.connection.executions[2]
+    task_sql, task_params = engine.connection.executions[3]
     assert "SELECT 1" in duplicate_sql
     assert duplicate_params["account_name"] == "行业观察"
     assert duplicate_params["publish_date"] == crawl_date
@@ -152,7 +160,7 @@ def test_mysql_article_raw_repo_does_not_create_task_for_duplicate_article() -> 
     assert result.duplicate_count == 1
     assert result.skipped_count == 0
     assert result.task_created_count == 0
-    assert len(engine.connection.executions) == 2
+    assert len(engine.connection.executions) == 3
 
 
 def test_mysql_article_raw_repo_treats_existing_account_day_url_as_duplicate() -> None:
@@ -175,8 +183,8 @@ def test_mysql_article_raw_repo_treats_existing_account_day_url_as_duplicate() -
     assert result.duplicate_count == 1
     assert result.skipped_count == 0
     assert result.task_created_count == 0
-    assert len(engine.connection.executions) == 1
-    duplicate_sql, duplicate_params = engine.connection.executions[0]
+    assert len(engine.connection.executions) == 2
+    duplicate_sql, duplicate_params = engine.connection.executions[1]
     assert "SELECT 1" in duplicate_sql
     assert duplicate_params["account_name"] == "行业观察"
     assert duplicate_params["publish_date"] == date(2026, 7, 6)

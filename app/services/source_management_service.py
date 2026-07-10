@@ -1,13 +1,25 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import time
 from typing import Protocol
 
 from sqlalchemy.exc import IntegrityError
 
-from app.storage.article_config_repo import ArticleAccountConfigRecord
-from app.storage.group_repo import GroupConfigRecord
+from app.storage.article_config_repo import (
+    ArticleAccountConfigRecord,
+    MysqlArticleAccountConfigRepo,
+)
+from app.storage.group_repo import GroupConfigRecord, MysqlGroupConfigRepo
+from app.storage.source_mutation_repo import (
+    MysqlSourceMutationRepo,
+    SourceMutationInUseError,
+    SourceMutationMustBeDisabledError,
+    SourceMutationNotFoundError,
+    SourceMutationRenameBlockedError,
+)
+from app.storage.source_reference_repo import MysqlSourceReferenceRepo
 
 
 @dataclass(frozen=True)
@@ -95,16 +107,36 @@ class SourceReferenceRepo(Protocol):
     def has_article_history(self, account_name: str) -> bool: ...
 
 
+class SourceMutationRepo(Protocol):
+    def update_group(self, source_id: int, **values) -> None: ...
+
+    def update_article(self, source_id: int, **values) -> None: ...
+
+    def set_group_enabled(self, source_id: int, enabled: bool) -> None: ...
+
+    def set_article_enabled(self, source_id: int, enabled: bool) -> None: ...
+
+    def delete_group(self, source_id: int) -> None: ...
+
+    def delete_article(self, source_id: int) -> None: ...
+
+
 class SourceManagementService:
     def __init__(
         self,
         group_repo: GroupConfigRepo,
         article_repo: ArticleConfigRepo,
         reference_repo: SourceReferenceRepo,
+        mutation_repo: SourceMutationRepo | None = None,
     ) -> None:
         self.group_repo = group_repo
         self.article_repo = article_repo
         self.reference_repo = reference_repo
+        self.mutation_repo = mutation_repo
+        if self.mutation_repo is None:
+            self.mutation_repo = self._mysql_mutation_repo(
+                group_repo, article_repo, reference_repo
+            )
 
     def list_groups(self) -> list[GroupConfigRecord]:
         return self.group_repo.list_groups()
@@ -130,6 +162,15 @@ class SourceManagementService:
     def update_group(self, source_id: int, command: GroupSourceCommand) -> None:
         self._validate_source_id(source_id)
         self._validate_group_command(command)
+        if self.mutation_repo is not None:
+            self._run_mutation(
+                lambda: self.mutation_repo.update_group(
+                    source_id, **self._group_values(command)
+                )
+            )
+            return
+        # Non-MySQL adapters and test doubles use the protocol path below. Concrete
+        # MySQL repositories are always routed through MysqlSourceMutationRepo.
         current = self._get_group(source_id)
         if command.group_name != current.group_name:
             jobs = self.reference_repo.list_referencing_jobs(
@@ -145,6 +186,13 @@ class SourceManagementService:
     def update_article(self, source_id: int, command: ArticleSourceCommand) -> None:
         self._validate_source_id(source_id)
         self._validate_article_command(command)
+        if self.mutation_repo is not None:
+            self._run_mutation(
+                lambda: self.mutation_repo.update_article(
+                    source_id, **self._article_values(command)
+                )
+            )
+            return
         current = self._get_article(source_id)
         if command.account_name != current.account_name:
             jobs = self.reference_repo.list_referencing_jobs(
@@ -160,6 +208,11 @@ class SourceManagementService:
     def set_group_enabled(self, source_id: int, enabled: bool) -> None:
         self._validate_source_id(source_id)
         self._validate_enabled(enabled)
+        if self.mutation_repo is not None:
+            self._run_mutation(
+                lambda: self.mutation_repo.set_group_enabled(source_id, enabled)
+            )
+            return
         self._get_group(source_id)
         if not enabled:
             jobs = self.reference_repo.list_referencing_jobs(
@@ -168,11 +221,16 @@ class SourceManagementService:
             if jobs:
                 raise SourceInUseError(jobs)
         if self.group_repo.set_group_enabled(source_id, enabled) == 0:
-            raise SourceNotFoundError(f"group source not found: {source_id}")
+            self._get_group(source_id)
 
     def set_article_enabled(self, source_id: int, enabled: bool) -> None:
         self._validate_source_id(source_id)
         self._validate_enabled(enabled)
+        if self.mutation_repo is not None:
+            self._run_mutation(
+                lambda: self.mutation_repo.set_article_enabled(source_id, enabled)
+            )
+            return
         self._get_article(source_id)
         if not enabled:
             jobs = self.reference_repo.list_referencing_jobs(
@@ -181,10 +239,13 @@ class SourceManagementService:
             if jobs:
                 raise SourceInUseError(jobs)
         if self.article_repo.set_account_enabled(source_id, enabled) == 0:
-            raise SourceNotFoundError(f"article source not found: {source_id}")
+            self._get_article(source_id)
 
     def delete_group(self, source_id: int) -> None:
         self._validate_source_id(source_id)
+        if self.mutation_repo is not None:
+            self._run_mutation(lambda: self.mutation_repo.delete_group(source_id))
+            return
         current = self._get_group(source_id)
         if current.enabled:
             raise SourceMustBeDisabledError("group source must be disabled")
@@ -203,6 +264,9 @@ class SourceManagementService:
 
     def delete_article(self, source_id: int) -> None:
         self._validate_source_id(source_id)
+        if self.mutation_repo is not None:
+            self._run_mutation(lambda: self.mutation_repo.delete_article(source_id))
+            return
         current = self._get_article(source_id)
         if current.enabled:
             raise SourceMustBeDisabledError("article source must be disabled")
@@ -290,7 +354,10 @@ class SourceManagementService:
     @classmethod
     def _validate_article_command(cls, command: ArticleSourceCommand) -> None:
         cls._validate_name(command.account_name, "account_name")
-        if command.account_type not in {"official", "subscription"}:
+        if not isinstance(command.account_type, str) or command.account_type not in {
+            "official",
+            "subscription",
+        }:
             raise ValueError("account_type must be official or subscription")
         cls._validate_integer(command.priority, "priority", minimum=1, maximum=100)
         cls._validate_integer(
@@ -340,12 +407,16 @@ class SourceManagementService:
 
     @staticmethod
     def _validate_time(value: str, field: str) -> None:
-        if not isinstance(value, str):
+        if not isinstance(value, str) or re.fullmatch(
+            r"[0-9]{2}:[0-9]{2}(?::[0-9]{2})?", value
+        ) is None:
             raise ValueError(f"{field} must be a valid time")
         try:
-            time.fromisoformat(value)
+            parsed = time.fromisoformat(value)
         except ValueError as exc:
             raise ValueError(f"{field} must be a valid time") from exc
+        if parsed.tzinfo is not None:
+            raise ValueError(f"{field} must not include a timezone")
 
     @staticmethod
     def _validate_source_id(source_id: int) -> None:
@@ -364,3 +435,43 @@ class SourceManagementService:
         message = str(exc.orig).lower()
         if code in {1451, 1452} or "foreign key" in message:
             raise SourceInUseError() from exc
+
+    @staticmethod
+    def _mysql_mutation_repo(
+        group_repo: GroupConfigRepo,
+        article_repo: ArticleConfigRepo,
+        reference_repo: SourceReferenceRepo,
+    ) -> SourceMutationRepo | None:
+        mysql_repos = (
+            isinstance(group_repo, MysqlGroupConfigRepo),
+            isinstance(article_repo, MysqlArticleAccountConfigRepo),
+            isinstance(reference_repo, MysqlSourceReferenceRepo),
+        )
+        if not any(mysql_repos):
+            return None
+        if not all(mysql_repos):
+            raise ValueError(
+                "real MySQL source management requires all three MySQL repositories"
+            )
+        engines = (group_repo.engine, article_repo.engine, reference_repo.engine)
+        if not (engines[0] is engines[1] is engines[2]):
+            raise ValueError(
+                "real MySQL source management repositories must share one Engine"
+            )
+        return MysqlSourceMutationRepo(engines[0])
+
+    @classmethod
+    def _run_mutation(cls, action) -> None:
+        try:
+            action()
+        except SourceMutationNotFoundError as exc:
+            raise SourceNotFoundError(str(exc)) from exc
+        except SourceMutationMustBeDisabledError as exc:
+            raise SourceMustBeDisabledError(str(exc)) from exc
+        except SourceMutationInUseError as exc:
+            raise SourceInUseError(exc.job_names) from exc
+        except SourceMutationRenameBlockedError as exc:
+            raise SourceRenameBlockedError(exc.job_names) from exc
+        except IntegrityError as exc:
+            cls._raise_if_foreign_key_conflict(exc)
+            raise

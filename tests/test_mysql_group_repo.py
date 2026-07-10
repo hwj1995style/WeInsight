@@ -7,8 +7,15 @@ from app.storage.group_repo import MysqlGroupMessageRepo
 
 
 class FakeResult:
-    def __init__(self, rowcount: int) -> None:
+    def __init__(self, rowcount: int, rows=None) -> None:
         self.rowcount = rowcount
+        self._rows = rows or []
+
+    def mappings(self):
+        return self
+
+    def first(self):
+        return self._rows[0] if self._rows else None
 
 
 class FakeConnection:
@@ -16,7 +23,13 @@ class FakeConnection:
         self.executions: list[tuple[str, object]] = []
 
     def execute(self, statement, params=None):
-        self.executions.append((str(statement), params))
+        sql = str(statement)
+        self.executions.append((sql, params))
+        if "FOR SHARE" in sql:
+            return FakeResult(
+                rowcount=1,
+                rows=[{"id": 7, "source_name": "核心群A", "enabled": 1}],
+            )
         return FakeResult(rowcount=1)
 
     def __enter__(self):
@@ -52,7 +65,7 @@ def test_mysql_repo_insert_raw_uses_insert_ignore() -> None:
     inserted = repo.insert_raw_ignore_duplicates([message])
 
     assert inserted == 1
-    sql, params = engine.connection.executions[0]
+    sql, params = engine.connection.executions[1]
     assert "INSERT IGNORE INTO wechat_group_msg_raw" in sql
     assert params[0]["msg_hash"] == "h1"
 
@@ -74,7 +87,7 @@ def test_mysql_repo_insert_raw_creates_clean_tasks() -> None:
 
     repo.insert_raw_ignore_duplicates([message])
 
-    sql, params = engine.connection.executions[1]
+    sql, params = engine.connection.executions[2]
     assert "INSERT IGNORE INTO wechat_group_process_task" in sql
     assert params[0]["task_type"] == "clean_group_msg"
     assert params[0]["ref_id"] == "h1"
@@ -95,7 +108,7 @@ def test_mysql_repo_update_cursor_uses_upsert() -> None:
 
     repo.update_cursor(cursor)
 
-    sql, params = engine.connection.executions[0]
+    sql, params = engine.connection.executions[1]
     assert "INSERT INTO wechat_group_collect_cursor" in sql
     assert "ON DUPLICATE KEY UPDATE" in sql
     assert "consecutive_fail_count = 0" in sql

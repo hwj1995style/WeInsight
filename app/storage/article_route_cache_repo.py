@@ -7,6 +7,11 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from app.storage.source_mutation_repo import MysqlSourceWriteGuard
+
+
+_SOURCE_WRITE_GUARD = MysqlSourceWriteGuard()
+
 
 @dataclass(frozen=True)
 class ArticleRouteCacheRecord:
@@ -108,6 +113,9 @@ class MysqlArticleRouteCacheRepo:
             """
         )
         with self.engine.begin() as connection:
+            _SOURCE_WRITE_GUARD.lock_for_history_write(
+                connection, "article", account_name
+            )
             connection.execute(
                 statement,
                 {
@@ -145,6 +153,9 @@ class MysqlArticleRouteCacheRepo:
             """
         )
         with self.engine.begin() as connection:
+            _SOURCE_WRITE_GUARD.lock_for_history_write(
+                connection, "article", account_name
+            )
             connection.execute(
                 statement,
                 {

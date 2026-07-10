@@ -8,13 +8,27 @@ from app.storage.group_repo import GroupCollectLogRecord, MysqlGroupCollectLogRe
 class FakeResult:
     rowcount = 1
 
+    def __init__(self, rows=None) -> None:
+        self._rows = rows or []
+
+    def mappings(self):
+        return self
+
+    def first(self):
+        return self._rows[0] if self._rows else None
+
 
 class FakeConnection:
     def __init__(self) -> None:
         self.executions: list[tuple[str, object]] = []
 
     def execute(self, statement, params=None):
-        self.executions.append((str(statement), params))
+        sql = str(statement)
+        self.executions.append((sql, params))
+        if "FOR SHARE" in sql:
+            return FakeResult(
+                [{"id": 7, "source_name": "核心群A", "enabled": 1}]
+            )
         return FakeResult()
 
     def __enter__(self):
@@ -48,7 +62,7 @@ def test_mysql_group_collect_log_repo_inserts_success_log() -> None:
 
     repo.insert_collect_log(record)
 
-    sql, params = engine.connection.executions[0]
+    sql, params = engine.connection.executions[1]
     assert "INSERT INTO wechat_group_collect_log" in sql
     assert params["batch_id"] == "batch-1"
     assert params["source_name"] == "核心群A"
@@ -61,7 +75,7 @@ def test_mysql_group_collect_log_repo_marks_group_collect_failed() -> None:
 
     repo.mark_group_collect_failed("核心群A", "boom")
 
-    sql, params = engine.connection.executions[0]
+    sql, params = engine.connection.executions[1]
     assert "INSERT INTO wechat_group_collect_cursor" in sql
     assert "consecutive_fail_count = consecutive_fail_count + 1" in sql
     assert params["group_name"] == "核心群A"

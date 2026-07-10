@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+from datetime import datetime
+
 from app.storage.group_repo import GroupConfigRecord, MysqlGroupConfigRepo
 
 
@@ -122,7 +125,7 @@ def test_mysql_group_config_repo_lists_group_configs() -> None:
     sql, _ = engine.connection.executions[0]
     assert "FROM wechat_group_config" in sql
     assert "ORDER BY priority ASC" in sql
-    assert "id" in sql
+    assert re.search(r"SELECT\s+id\s*,", sql)
 
 
 def test_mysql_group_config_repo_disables_group_config() -> None:
@@ -158,6 +161,7 @@ def test_mysql_group_config_repo_gets_group_by_stable_id() -> None:
 
     assert record is not None and record.id == 7
     sql, params = engine.connection.executions[0]
+    assert re.search(r"SELECT\s+id\s*,", sql)
     assert "WHERE id = :source_id" in sql
     assert params == {"source_id": 7}
 
@@ -202,3 +206,24 @@ def test_mysql_group_config_repo_sets_enabled_and_deletes_disabled_by_id() -> No
     assert "WHERE id = :source_id" in delete_sql
     assert "enabled = 0" in delete_sql
     assert delete_params == {"source_id": 7}
+
+
+def test_mysql_group_config_repo_due_query_selects_qualified_id() -> None:
+    engine = FakeEngine(
+        rows=[
+            {
+                "id": 7,
+                "group_name": "核心群A",
+                "priority": 1,
+                "poll_interval_seconds": 30,
+            }
+        ]
+    )
+
+    groups = MysqlGroupConfigRepo(engine).list_due_groups(
+        datetime(2026, 7, 10, 9, 0), 1
+    )
+
+    assert groups[0].id == 7
+    sql, _ = engine.connection.executions[0]
+    assert re.search(r"SELECT\s+cfg\.id\s*,", sql)

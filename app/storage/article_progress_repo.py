@@ -6,6 +6,10 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from app.pipelines.article_interrupt_resume import ArticleCollectProgressRecord
+from app.storage.source_mutation_repo import MysqlSourceWriteGuard
+
+
+_SOURCE_WRITE_GUARD = MysqlSourceWriteGuard()
 
 
 class MysqlArticleProgressRepo:
@@ -81,6 +85,9 @@ class MysqlArticleProgressRepo:
             """
         )
         with self.engine.begin() as connection:
+            _SOURCE_WRITE_GUARD.lock_for_history_write(
+                connection, "article", record.account_name
+            )
             connection.execute(statement, record.__dict__)
 
     def mark_success(
@@ -122,6 +129,9 @@ class MysqlArticleProgressRepo:
         )
         success_time = success_time or datetime.now()
         with self.engine.begin() as connection:
+            _SOURCE_WRITE_GUARD.lock_for_history_write(
+                connection, "article", account_name
+            )
             connection.execute(progress_statement, {"crawl_date": crawl_date, "account_name": account_name})
             connection.execute(
                 account_statement,

@@ -8,6 +8,10 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from app.domain.group_messages import GroupCursor, RawGroupMessage
+from app.storage.source_mutation_repo import MysqlSourceWriteGuard
+
+
+_SOURCE_WRITE_GUARD = MysqlSourceWriteGuard()
 
 
 class GroupMessageRepo(Protocol):
@@ -136,6 +140,10 @@ class MysqlGroupMessageRepo:
         )
 
         with self.engine.begin() as connection:
+            for group_name in sorted({message.group_name for message in messages}):
+                _SOURCE_WRITE_GUARD.lock_for_history_write(
+                    connection, "group", group_name
+                )
             result = connection.execute(statement, params)
             task_params = [
                 {
@@ -212,6 +220,9 @@ class MysqlGroupMessageRepo:
         }
 
         with self.engine.begin() as connection:
+            _SOURCE_WRITE_GUARD.lock_for_history_write(
+                connection, "group", cursor.group_name
+            )
             connection.execute(statement, params)
 
 
@@ -524,6 +535,9 @@ class MysqlGroupCollectLogRepo:
             """
         )
         with self.engine.begin() as connection:
+            _SOURCE_WRITE_GUARD.lock_for_history_write(
+                connection, "group", record.source_name
+            )
             connection.execute(statement, record.__dict__)
 
     def mark_group_collect_failed(self, group_name: str, error_msg: str) -> None:
@@ -545,6 +559,9 @@ class MysqlGroupCollectLogRepo:
             """
         )
         with self.engine.begin() as connection:
+            _SOURCE_WRITE_GUARD.lock_for_history_write(
+                connection, "group", group_name
+            )
             connection.execute(statement, {"group_name": group_name, "error_msg": error_msg})
 
 

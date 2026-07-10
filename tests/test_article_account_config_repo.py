@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 from app.storage.article_config_repo import ArticleAccountConfigRecord, MysqlArticleAccountConfigRepo
@@ -144,7 +145,7 @@ def test_mysql_article_account_config_repo_lists_accounts() -> None:
     assert "FROM wechat_public_account_config" in sql
     assert "ORDER BY priority ASC" in sql
     assert "wechat_group_config" not in sql
-    assert "id" in sql
+    assert re.search(r"SELECT\s+id\s*,", sql)
 
 
 def test_mysql_article_account_config_repo_lists_due_accounts_from_article_config_only() -> None:
@@ -179,6 +180,7 @@ def test_mysql_article_account_config_repo_lists_due_accounts_from_article_confi
     assert "TIMESTAMPDIFF(MINUTE" in sql
     assert "ORDER BY priority ASC" in sql
     assert "LIMIT :limit" in sql
+    assert re.search(r"SELECT\s+id\s*,", sql)
     assert "wechat_group_" not in sql
     assert params["now"] == datetime(2026, 7, 6, 9, 0)
     assert params["limit"] == 1
@@ -250,6 +252,7 @@ def test_mysql_article_account_config_repo_gets_account_by_stable_id() -> None:
 
     assert record is not None and record.id == 9
     sql, params = engine.connection.executions[0]
+    assert re.search(r"SELECT\s+id\s*,", sql)
     assert "WHERE id = :source_id" in sql
     assert params == {"source_id": 9}
 
