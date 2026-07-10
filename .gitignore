@@ -26,6 +26,7 @@ wxauto_logs/
 
 # Subagent execution scratch data
 .superpowers/sdd/
+.worktrees/
 
 # Editors and operating systems
 .idea/
