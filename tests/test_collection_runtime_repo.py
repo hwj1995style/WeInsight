@@ -550,10 +550,52 @@ def test_finish_run_rejects_nonterminal_status(status) -> None:
         MysqlCollectionRuntimeRepo(Engine([])).finish_run(41, status, NOW)
 
 
-def test_finish_run_cannot_overwrite_terminal_run() -> None:
-    engine = Engine([Result(rowcount=0)])
+@pytest.mark.parametrize(
+    "status", [RunStatus.SUCCESS, RunStatus.PARTIAL_SUCCESS]
+)
+def test_repeat_same_terminal_finish_run_is_idempotent_without_extra_write(
+    status,
+) -> None:
+    engine = Engine(
+        [Result(rowcount=0), Result(rows=[{"status": status.value}])]
+    )
+
+    MysqlCollectionRuntimeRepo(engine).finish_run(41, status, NOW)
+
+    assert len(engine.connection.executions) == 2
+    lookup_sql, lookup_params = engine.connection.executions[1]
+    assert "SELECT status" in lookup_sql
+    assert lookup_params == {"run_id": 41}
+    assert all("UPDATE wechat_collection_job job" not in sql for sql, _ in engine.connection.executions)
+
+
+def test_finish_run_rejects_different_terminal_without_overwrite() -> None:
+    engine = Engine(
+        [Result(rowcount=0), Result(rows=[{"status": "failed"}])]
+    )
+    with pytest.raises(RuntimeStateError, match="run"):
+        MysqlCollectionRuntimeRepo(engine).finish_run(
+            41, RunStatus.SUCCESS, NOW
+        )
+    assert len(engine.connection.executions) == 2
+
+
+def test_finish_run_rejects_unknown_run_without_extra_write() -> None:
+    engine = Engine([Result(rowcount=0), Result(rows=[])])
+    with pytest.raises(RuntimeStateError, match="run"):
+        MysqlCollectionRuntimeRepo(engine).finish_run(
+            41, RunStatus.SUCCESS, NOW
+        )
+    assert len(engine.connection.executions) == 2
+
+
+def test_finish_run_rejects_running_run_with_unfinished_targets() -> None:
+    engine = Engine(
+        [Result(rowcount=0), Result(rows=[{"status": "running"}])]
+    )
     with pytest.raises(RuntimeStateError, match="run"):
         MysqlCollectionRuntimeRepo(engine).finish_run(41, RunStatus.SUCCESS, NOW)
+    assert len(engine.connection.executions) == 2
 
 
 def test_abort_expired_runs_locks_then_closes_only_nonterminal_rows_and_logs() -> None:

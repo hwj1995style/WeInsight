@@ -283,6 +283,12 @@ class MysqlCollectionRuntimeRepo:
                 {"run_id": run_id, "status": status.value, "now": _to_db_datetime(now)},
             )
             if int(result.rowcount or 0) != 1:
+                row = connection.execute(
+                    _GET_RUN_STATUS,
+                    {"run_id": run_id},
+                ).mappings().first()
+                if row is not None and str(row["status"]) == status.value:
+                    return
                 raise RuntimeStateError("run is not running")
             connection.execute(_SET_STOPPED_AFTER_RUN, {"run_id": run_id})
 
@@ -721,6 +727,14 @@ _FINISH_RUN = text(
           WHERE unfinished.run_id = run.id
             AND unfinished.status IN ('queued', 'running')
       )
+    """
+)
+
+_GET_RUN_STATUS = text(
+    """
+    SELECT status
+    FROM wechat_collection_job_run
+    WHERE id = :run_id
     """
 )
 

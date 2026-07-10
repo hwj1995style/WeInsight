@@ -168,7 +168,7 @@ def _canonical_metrics(value: object) -> str:
     if not isinstance(decoded, dict):
         raise ValueError("metrics_json must be a JSON object")
     try:
-        return json.dumps(
+        canonical = json.dumps(
             decoded,
             ensure_ascii=False,
             sort_keys=True,
@@ -177,6 +177,11 @@ def _canonical_metrics(value: object) -> str:
         )
     except (TypeError, ValueError) as exc:
         raise ValueError("metrics_json must contain JSON values") from exc
+    if len(canonical.encode("utf-8")) > 65_535:
+        raise ValueError(
+            "metrics_json must not exceed 65535 UTF-8 bytes"
+        )
+    return canonical
 
 
 def _event_from_row(row) -> CollectionEvent:

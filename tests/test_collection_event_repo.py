@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -8,6 +9,7 @@ import pytest
 from app.storage.collection_event_repo import (
     MysqlCollectionEventRepo,
     NewCollectionEvent,
+    _canonical_metrics,
 )
 
 
@@ -131,6 +133,37 @@ def test_append_event_rejects_non_object_or_nonstandard_metrics(metrics) -> None
         MysqlCollectionEventRepo(Engine([])).append_event(
             new_event(metrics_json=metrics)
         )
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_bytes"),
+    [
+        ("a" * 65_527, 65_535),
+        ("汉" * 21_842, 65_534),
+    ],
+    ids=("ascii", "utf8-chinese"),
+)
+def test_canonical_metrics_accepts_mysql_text_utf8_boundary(
+    value, expected_bytes
+) -> None:
+    source = json.dumps(
+        {"x": value}, ensure_ascii=False, separators=(",", ":")
+    )
+    canonical = _canonical_metrics(source)
+    assert len(canonical.encode("utf-8")) == expected_bytes
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["a" * 65_528, "汉" * 21_843],
+    ids=("ascii", "utf8-chinese"),
+)
+def test_canonical_metrics_rejects_mysql_text_utf8_overflow(value) -> None:
+    source = json.dumps(
+        {"x": value}, ensure_ascii=False, separators=(",", ":")
+    )
+    with pytest.raises(ValueError, match="65535.*UTF-8"):
+        _canonical_metrics(source)
 
 
 @pytest.mark.parametrize("field", ["job_id", "run_id", "target_run_id"])
