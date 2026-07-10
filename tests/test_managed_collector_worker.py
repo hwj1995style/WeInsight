@@ -25,7 +25,10 @@ from app.storage.collection_runtime_repo import (
     ClaimedCollectionRun,
     ClaimedTarget,
 )
-from app.workers.collector_worker import ManagedCollectorWorker
+from app.workers.collector_worker import (
+    CollectorTickResult,
+    ManagedCollectorWorker,
+)
 
 
 ZONE = ZoneInfo("Asia/Shanghai")
@@ -117,6 +120,9 @@ class RuntimeRepo:
         self.abort_calls = []
         self.claim_error = None
         self.stop_error = None
+        self.start_error = None
+        self.finish_target_error = None
+        self.finish_run_error = None
 
     def claim_next_due(self, now, worker_id, lease_seconds):
         self.claim_calls.append((now, worker_id, lease_seconds))
@@ -134,10 +140,14 @@ class RuntimeRepo:
 
     def start_target(self, run_id, job_target_id, batch_id, now):
         self.start_calls.append((run_id, job_target_id, batch_id, now))
+        if self.start_error is not None:
+            raise self.start_error
         return 500 + job_target_id
 
     def finish_target(self, target_run_id, outcome, now):
         self.finish_target_calls.append((target_run_id, outcome, now))
+        if self.finish_target_error is not None:
+            raise self.finish_target_error
 
     def cancel_queued_targets(self, run_id, now):
         self.cancel_calls.append((run_id, now))
@@ -145,6 +155,8 @@ class RuntimeRepo:
 
     def finish_run(self, run_id, status, now):
         self.finish_run_calls.append((run_id, status, now))
+        if self.finish_run_error is not None:
+            raise self.finish_run_error
 
     def heartbeat_run(self, run_id, worker_id, now, lease_seconds):
         self.heartbeat_calls.append((run_id, worker_id, now, lease_seconds))
@@ -205,11 +217,27 @@ class HeartbeatRepo:
         return self.register_result
 
 
-class EventRepo:
+class BlockingHeartbeatRepo(HeartbeatRepo):
     def __init__(self) -> None:
+        super().__init__()
+        self.running_write_entered = threading.Event()
+        self.running_write_release = threading.Event()
+
+    def upsert_heartbeat(self, record):
+        if record.status == "running" and not self.running_write_entered.is_set():
+            self.running_write_entered.set()
+            assert self.running_write_release.wait(5)
+        super().upsert_heartbeat(record)
+
+
+class EventRepo:
+    def __init__(self, error_on_type=None) -> None:
         self.events = []
+        self.error_on_type = error_on_type
 
     def append_event(self, event):
+        if event.event_type == self.error_on_type:
+            raise RuntimeError("event database temporarily unavailable")
         self.events.append(event)
         return len(self.events)
 
@@ -346,6 +374,57 @@ def test_healthy_idle_tick_claims_at_most_once_without_log_flood() -> None:
     assert first.status == second.status == "idle"
     assert len(runtime.claim_calls) == 2
     assert events.events == []
+
+
+@pytest.mark.parametrize(
+    ("fault", "runner_call_count"),
+    [
+        ("claimed_event", 0),
+        ("start_target", 0),
+        ("finish_target", 1),
+        ("finish_run", 1),
+    ],
+)
+def test_claimed_run_repo_or_event_failure_degrades_without_retrying_rpa(
+    fault, runner_call_count
+) -> None:
+    runtime = RuntimeRepo(claimed_run())
+    events = EventRepo(
+        error_on_type=(
+            "collection_run_claimed" if fault == "claimed_event" else None
+        )
+    )
+    factories = Factories()
+    runner = Runner(factories.group_result)
+    factories.group_runner = runner
+    if fault == "start_target":
+        runtime.start_error = RuntimeError("start target unavailable")
+    elif fault == "finish_target":
+        runtime.finish_target_error = RuntimeError("finish target unavailable")
+    elif fault == "finish_run":
+        runtime.finish_run_error = RuntimeError("finish run unavailable")
+    worker, _, _, _, _, _ = build_worker(
+        runtime=runtime,
+        events=events,
+        factories=factories,
+    )
+
+    result = worker.run_tick(NOW)
+    second = worker.run_tick(NOW + timedelta(seconds=5))
+
+    assert result.status == "degraded"
+    assert result.run_id == 41
+    assert result.pipeline_type is PipelineType.GROUP
+    assert second.status == "degraded"
+    assert len(runtime.claim_calls) == 1
+    assert len(runner.calls) == runner_call_count
+    assert len(runtime.finish_target_calls) == (
+        1 if fault in {"finish_target", "finish_run"} else 0
+    )
+    assert len(runtime.finish_run_calls) == (1 if fault == "finish_run" else 0)
+
+    assert worker.recover_expired_now() == 0
+    assert runtime.abort_calls == [NOW]
 
 
 def test_execute_run_uses_snapshot_and_stable_target_order() -> None:
@@ -603,6 +682,45 @@ def test_heartbeat_refreshes_thread_safe_active_run_and_clears_after_finish() ->
 
     worker.heartbeat(NOW + timedelta(seconds=20))
     assert len(runtime.heartbeat_calls) == 1
+
+
+def test_shutdown_serializes_heartbeat_writes_in_lifecycle_order() -> None:
+    heartbeat = BlockingHeartbeatRepo()
+    worker, _, _, _, _, _ = build_worker(heartbeat=heartbeat)
+    heartbeat_errors = []
+    lifecycle_errors = []
+
+    heartbeat_thread = threading.Thread(
+        target=lambda: _capture_error(
+            heartbeat_errors,
+            lambda: worker.heartbeat(NOW + timedelta(seconds=10)),
+        )
+    )
+    heartbeat_thread.start()
+    assert heartbeat.running_write_entered.wait(5)
+
+    def stop_lifecycle() -> None:
+        worker.mark_stopping(NOW + timedelta(seconds=11))
+        worker.mark_stopped(NOW + timedelta(seconds=12))
+
+    lifecycle_thread = threading.Thread(
+        target=lambda: _capture_error(lifecycle_errors, stop_lifecycle)
+    )
+    lifecycle_thread.start()
+    assert lifecycle_thread.is_alive()
+
+    heartbeat.running_write_release.set()
+    heartbeat_thread.join(5)
+    lifecycle_thread.join(5)
+
+    assert not heartbeat_thread.is_alive()
+    assert not lifecycle_thread.is_alive()
+    assert heartbeat_errors == lifecycle_errors == []
+    assert [record.status for record in heartbeat.records] == [
+        "running",
+        "stopping",
+        "stopped",
+    ]
 
 
 def _capture_error(errors, operation) -> None:
@@ -894,8 +1012,11 @@ def test_fake_runtime_factory_never_imports_or_constructs_real_adapters(
 
     monkeypatch.setattr(builtins, "__import__", guarded_import)
     from app.rpa.fake_clients import FakeArticleRpaClient, FakeGroupRpaClient
+    from app.pipelines.article_core_group_due_provider import (
+        ReadOnlyCoreGroupDueProvider,
+    )
     from app.storage.article_raw_repo import MysqlArticleRawRepo
-    from app.storage.group_repo import MysqlGroupMessageRepo
+    from app.storage.group_repo import MysqlGroupConfigRepo, MysqlGroupMessageRepo
     from app.workers.runtime_factory import build_managed_collector_worker
 
     config = load_config(Path("config/config.dev.yaml"))
@@ -923,6 +1044,20 @@ def test_fake_runtime_factory_never_imports_or_constructs_real_adapters(
     assert isinstance(article_runner.collect_service.raw_repo, MysqlArticleRawRepo)
     assert group_runner.collect_service.repo.engine is engine
     assert article_runner.collect_service.raw_repo.engine is engine
+    assert isinstance(
+        article_runner.next_core_group_due_provider,
+        ReadOnlyCoreGroupDueProvider,
+    )
+    assert isinstance(
+        article_runner.next_core_group_due_provider.group_config_repo,
+        MysqlGroupConfigRepo,
+    )
+    assert (
+        article_runner.next_core_group_due_provider.group_config_repo.engine
+        is engine
+    )
+    assert article_runner.next_core_group_due_provider.now_provider() == NOW
+    assert article_runner.checkpoint_now_provider() == NOW
     assert worker.runtime_repo.engine is engine
     assert worker.heartbeat_repo.engine is engine
     assert worker.health_monitor.health_repo.engine is engine
@@ -1063,6 +1198,52 @@ def test_collector_main_once_registers_health_before_main_thread_rpa() -> None:
     assert names.index("register") < names.index("health") < names.index("run")
     assert worker.run_thread_ids == [main_thread]
     assert names[-2:] == ["stopping", "stopped"]
+
+
+def test_collector_main_keeps_scheduler_running_after_degraded_tick(
+    monkeypatch,
+) -> None:
+    from app.workers import collector_main
+
+    class DegradedThenInterruptWorker(MainWorker):
+        def __init__(self) -> None:
+            super().__init__()
+            self.tick_count = 0
+            self.scheduler_was_running = False
+
+        def run_tick(self, now):
+            self.calls.append(("run", now))
+            self.tick_count += 1
+            if self.tick_count == 1:
+                return CollectorTickResult(
+                    "degraded", 41, PipelineType.GROUP, 0
+                )
+            scheduler = Scheduler.instances[-1]
+            self.scheduler_was_running = (
+                scheduler.started and scheduler.shutdown_wait is None
+            )
+            self.recover_expired_now()
+            raise KeyboardInterrupt
+
+    Scheduler.instances.clear()
+    monkeypatch.setattr(
+        collector_main,
+        "_bounded_tick_delay",
+        lambda status, failures, base: 0,
+    )
+    worker = DegradedThenInterruptWorker()
+
+    result = collector_main.main(
+        ["--config", "config/config.dev.yaml"],
+        runtime_builder=lambda config: worker,
+        scheduler_factory=Scheduler,
+        now_provider=lambda: NOW,
+    )
+
+    assert result == 0
+    assert worker.tick_count == 2
+    assert worker.scheduler_was_running is True
+    assert ("recover",) in worker.calls
 
 
 def test_collector_main_duplicate_instance_exits_before_health_or_scheduler() -> None:

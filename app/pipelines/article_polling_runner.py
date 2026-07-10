@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
+from app.domain.collection_jobs import ensure_schedule_datetime
 from app.pipelines.article_collect_service import ArticleCollectResult
 from app.pipelines.article_interrupt_resume import (
     ArticleCollectProgressRecord,
@@ -113,6 +114,7 @@ class ArticlePollingRunner:
         next_core_group_due_provider: Callable[[], datetime | None] | None = None,
         max_core_group_block_seconds: int = 10,
         stop_requested_provider: Callable[[], bool] | None = None,
+        checkpoint_now_provider: Callable[[], datetime] | None = None,
     ) -> None:
         self.collect_service = collect_service
         self.lock_repo = lock_repo
@@ -128,6 +130,7 @@ class ArticlePollingRunner:
         self.next_core_group_due_provider = next_core_group_due_provider
         self.max_core_group_block_seconds = max_core_group_block_seconds
         self.stop_requested_provider = stop_requested_provider
+        self.checkpoint_now_provider = checkpoint_now_provider
 
     def run_once(self, now: datetime) -> ArticlePollingRunResult:
         targets = sorted(
@@ -388,15 +391,25 @@ class ArticlePollingRunner:
                 or self.next_core_group_due_provider is None
             ):
                 return
+            checkpoint_time = now
+            if self.checkpoint_now_provider is not None:
+                checkpoint_time = self.checkpoint_now_provider()
+                ensure_schedule_datetime(
+                    checkpoint_time,
+                    field_name="checkpoint_time",
+                )
             next_core_group_due = self.next_core_group_due_provider()
             decision = should_interrupt_article_for_core_group(
-                checkpoint_time=now,
+                checkpoint_time=checkpoint_time,
                 next_core_group_due=next_core_group_due,
             )
             if decision == ArticleUiDecision.RUN:
                 return
 
-            blocked_seconds = core_group_block_seconds(now, next_core_group_due)
+            blocked_seconds = core_group_block_seconds(
+                checkpoint_time,
+                next_core_group_due,
+            )
             self.progress_repo.upsert_progress(
                 ArticleCollectProgressRecord(
                     crawl_date=now.date(),

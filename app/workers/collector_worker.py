@@ -149,6 +149,7 @@ class ManagedCollectorWorker:
         self.batch_id_factory = batch_id_factory or _default_batch_id
         self.now_provider = now_provider or _shanghai_now
         self._state_lock = threading.Lock()
+        self._heartbeat_write_lock = threading.Lock()
         self._active_run_id: int | None = None
         self._lease_lost = False
         self._degraded = False
@@ -169,14 +170,15 @@ class ManagedCollectorWorker:
     def register_start(self, now: datetime, ttl_seconds: int) -> bool:
         _require_now(now)
         _positive_integer(ttl_seconds, "ttl_seconds")
-        record = self._heartbeat_record(now, status="starting")
-        registered = self.heartbeat_repo.register_collector_start(
-            record, now, ttl_seconds
-        )
-        with self._state_lock:
-            self._registered = registered is True
-            if self._registered:
-                self._heartbeat_status = "running"
+        with self._heartbeat_write_lock:
+            record = self._heartbeat_record(now, status="starting")
+            registered = self.heartbeat_repo.register_collector_start(
+                record, now, ttl_seconds
+            )
+            with self._state_lock:
+                self._registered = registered is True
+                if self._registered:
+                    self._heartbeat_status = "running"
         return registered is True
 
     def run_tick(self, now: datetime) -> CollectorTickResult:
@@ -201,15 +203,32 @@ class ManagedCollectorWorker:
             return _tick("degraded")
         if run is None:
             return _tick("idle")
-        self._append_event(
-            run,
-            level="info",
-            event_type="collection_run_claimed",
-            stage="claim",
-            message="collection run claimed by managed worker",
-            metrics={"target_count": len(run.targets)},
-        )
-        return self.execute_run(run, now)
+        try:
+            self._append_event(
+                run,
+                level="info",
+                event_type="collection_run_claimed",
+                stage="claim",
+                message="collection run claimed by managed worker",
+                metrics={"target_count": len(run.targets)},
+            )
+            return self.execute_run(run, now)
+        except Exception as exc:
+            self._mark_degraded("claimed run processing failed", exc)
+            return CollectorTickResult(
+                status="degraded",
+                run_id=(
+                    run.run_id
+                    if isinstance(run, ClaimedCollectionRun)
+                    else None
+                ),
+                pipeline_type=(
+                    run.pipeline_type
+                    if isinstance(run, ClaimedCollectionRun)
+                    else None
+                ),
+                executed_target_count=0,
+            )
 
     def execute_run(
         self,
@@ -308,6 +327,10 @@ class ManagedCollectorWorker:
 
     def heartbeat(self, now: datetime) -> None:
         _require_now(now)
+        with self._heartbeat_write_lock:
+            self._heartbeat_locked(now)
+
+    def _heartbeat_locked(self, now: datetime) -> None:
         with self._state_lock:
             active_run_id = self._active_run_id
         active_lease_failed = False
@@ -388,21 +411,23 @@ class ManagedCollectorWorker:
 
     def mark_stopping(self, now: datetime) -> None:
         _require_now(now)
-        self._shutdown.set()
-        with self._state_lock:
-            self._heartbeat_status = "stopping"
-        self.heartbeat_repo.upsert_heartbeat(
-            self._heartbeat_record(now, status="stopping")
-        )
+        with self._heartbeat_write_lock:
+            self._shutdown.set()
+            with self._state_lock:
+                self._heartbeat_status = "stopping"
+            self.heartbeat_repo.upsert_heartbeat(
+                self._heartbeat_record(now, status="stopping")
+            )
 
     def mark_stopped(self, now: datetime) -> None:
         _require_now(now)
-        self._shutdown.set()
-        with self._state_lock:
-            self._heartbeat_status = "stopped"
-        self.heartbeat_repo.upsert_heartbeat(
-            self._heartbeat_record(now, status="stopped")
-        )
+        with self._heartbeat_write_lock:
+            self._shutdown.set()
+            with self._state_lock:
+                self._heartbeat_status = "stopped"
+            self.heartbeat_repo.upsert_heartbeat(
+                self._heartbeat_record(now, status="stopped")
+            )
 
     def _execute_target(
         self,

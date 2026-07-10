@@ -10,6 +10,9 @@ from sqlalchemy.engine import Engine
 from app.core.config import Config
 from app.domain.collection_jobs import APPLICATION_TIMEZONE
 from app.pipelines.article_collect_service import ArticleCollectService
+from app.pipelines.article_core_group_due_provider import (
+    ReadOnlyCoreGroupDueProvider,
+)
 from app.pipelines.article_polling_runner import (
     ArticlePollingRunner,
     ArticlePollingTarget,
@@ -39,6 +42,7 @@ from app.storage.collection_runtime_repo import MysqlCollectionRuntimeRepo
 from app.storage.db import create_mysql_engine
 from app.storage.group_repo import (
     MysqlGroupCollectLogRepo,
+    MysqlGroupConfigRepo,
     MysqlGroupMessageRepo,
 )
 from app.storage.lock_repo import MysqlUiLockRepo
@@ -78,10 +82,16 @@ def build_managed_collector_worker(
     health_repo = MysqlWechatHealthRepo(shared_engine)
     ui_lock_repo = MysqlUiLockRepo(shared_engine)
     group_message_repo = MysqlGroupMessageRepo(shared_engine)
+    group_config_repo = MysqlGroupConfigRepo(shared_engine)
     group_log_repo = MysqlGroupCollectLogRepo(shared_engine)
     article_raw_repo = MysqlArticleRawRepo(shared_engine)
     article_log_repo = MysqlArticleCollectLogRepo(shared_engine)
     article_progress_repo = MysqlArticleProgressRepo(shared_engine)
+    next_core_group_due_provider = ReadOnlyCoreGroupDueProvider(
+        group_config_repo=group_config_repo,
+        poll_interval_seconds=config.pipelines.group.poll_interval_seconds,
+        now_provider=clock,
+    )
 
     if mode == "fake":
         group_rpa: Any = FakeGroupRpaClient([])
@@ -153,11 +163,12 @@ def build_managed_collector_worker(
             max_accounts_per_ui_slice=1,
             batch_id_factory=lambda account_name: batch_id,
             progress_repo=article_progress_repo,
-            next_core_group_due_provider=None,
+            next_core_group_due_provider=next_core_group_due_provider,
             max_core_group_block_seconds=(
                 config.pipelines.ui_resource.max_core_group_block_seconds
             ),
             stop_requested_provider=stop_provider,
+            checkpoint_now_provider=clock,
         )
 
     health_monitor = WechatHealthMonitor(

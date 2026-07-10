@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import pytest
 
 from app.pipelines.article_collect_service import ArticleCollectService
 from app.pipelines.article_interrupt_resume import (
@@ -88,6 +91,7 @@ def _runner(
     log_repo: FakeArticleLogRepo,
     next_core_group_due_provider,
     max_core_group_block_seconds: int = 10,
+    checkpoint_now_provider=None,
 ) -> ArticlePollingRunner:
     return ArticlePollingRunner(
         collect_service=service,
@@ -105,6 +109,7 @@ def _runner(
         progress_repo=progress_repo,
         next_core_group_due_provider=next_core_group_due_provider,
         max_core_group_block_seconds=max_core_group_block_seconds,
+        checkpoint_now_provider=checkpoint_now_provider,
     )
 
 
@@ -156,6 +161,72 @@ def test_article_runner_interrupts_at_safe_checkpoint_and_releases_ui_lock() -> 
     assert progress_repo.upserts[0].last_article_url == "https://mp.weixin.qq.com/s/2"
     assert log_repo.records[0]["status"] == "interrupted"
     assert log_repo.records[0]["error_code"] == "ARTICLE_INTERRUPTED_FOR_CORE_GROUP"
+
+
+@pytest.mark.parametrize(
+    ("checkpoint_times", "expected_stage"),
+    [
+        ([0], ArticleStage.OPEN_ACCOUNT),
+        ([-1, 0], ArticleStage.COPY_LINKS),
+        ([-2, -1, 0], ArticleStage.SAVE_LINKS),
+    ],
+)
+def test_article_runner_uses_live_time_at_every_core_group_checkpoint(
+    checkpoint_times, expected_stage
+) -> None:
+    zone = ZoneInfo("Asia/Shanghai")
+    due_at = datetime(2026, 7, 10, 9, 0, 5, tzinfo=zone)
+    times = iter(
+        due_at + timedelta(seconds=offset)
+        for offset in checkpoint_times
+    )
+    raw_repo = FakeArticleRawRepo()
+    service = ArticleCollectService(
+        rpa=FakeArticleRpaClient(
+            {"行业观察": ["https://mp.weixin.qq.com/s/1"]}
+        ),
+        raw_repo=raw_repo,
+    )
+    progress_repo = FakeArticleProgressRepo()
+
+    result = _runner(
+        service=service,
+        lock_repo=InMemoryUiLockRepo(),
+        progress_repo=progress_repo,
+        log_repo=FakeArticleLogRepo(),
+        next_core_group_due_provider=lambda: due_at,
+        checkpoint_now_provider=lambda: next(times),
+    ).run_once(due_at - timedelta(minutes=1))
+
+    assert result.core_group_interrupted_count == 1
+    assert progress_repo.upserts[-1].stage == expected_stage.value
+
+
+def test_article_long_run_can_be_preempted_after_checkpoint_time_advances() -> None:
+    zone = ZoneInfo("Asia/Shanghai")
+    started_at = datetime(2026, 7, 10, 9, 0, tzinfo=zone)
+    due_at = started_at + timedelta(seconds=5)
+    checkpoint_times = iter(
+        [started_at + timedelta(seconds=1), started_at + timedelta(seconds=6)]
+    )
+    progress_repo = FakeArticleProgressRepo()
+
+    result = _runner(
+        service=ArticleCollectService(
+            rpa=FakeArticleRpaClient(
+                {"行业观察": ["https://mp.weixin.qq.com/s/1"]}
+            ),
+            raw_repo=FakeArticleRawRepo(),
+        ),
+        lock_repo=InMemoryUiLockRepo(),
+        progress_repo=progress_repo,
+        log_repo=FakeArticleLogRepo(),
+        next_core_group_due_provider=lambda: due_at,
+        checkpoint_now_provider=lambda: next(checkpoint_times),
+    ).run_once(started_at)
+
+    assert result.core_group_interrupted_count == 1
+    assert progress_repo.upserts[-1].stage == ArticleStage.COPY_LINKS.value
 
 
 def test_article_runner_resumes_after_last_saved_article_url() -> None:
