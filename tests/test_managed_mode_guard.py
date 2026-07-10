@@ -45,7 +45,7 @@ class UiLockRepo:
         acquire_result: bool = True,
         heartbeat_results=None,
         release_result: bool = True,
-        release_error: Exception | None = None,
+        release_error: BaseException | None = None,
     ) -> None:
         self.acquire_result = acquire_result
         self.heartbeat_results = list(heartbeat_results or [True])
@@ -517,6 +517,107 @@ def test_still_live_renewer_marks_lease_lost_and_releases_without_success(
     assert elapsed < timedelta(seconds=0.5)
     assert len(thread.join_timeouts) == 3
     assert lock_repo.release_calls == [("wechat_ui", "group", "manual-1")]
+
+
+@pytest.mark.parametrize(
+    "cleanup_error_type",
+    [RuntimeError, KeyboardInterrupt],
+    ids=["runtime-error", "keyboard-interrupt"],
+)
+@pytest.mark.parametrize(
+    "action_fails",
+    [False, True],
+    ids=["action-success", "action-failure"],
+)
+def test_poll_sleep_failure_never_skips_release_or_overrides_action_error(
+    monkeypatch,
+    cleanup_error_type,
+    action_fails: bool,
+) -> None:
+    lock_repo = UiLockRepo()
+    cleanup_error = cleanup_error_type("poll sleep failed")
+    action_error = RuntimeError("action failed")
+
+    class PollingThread:
+        def __init__(self, **kwargs) -> None:
+            self.join_calls = 0
+
+        def start(self) -> None:
+            return None
+
+        def join(self, timeout=None) -> None:
+            self.join_calls += 1
+
+        def is_alive(self) -> bool:
+            return True
+
+    thread = PollingThread()
+
+    def fail_sleep(_seconds: float) -> None:
+        raise cleanup_error
+
+    def action() -> str:
+        if action_fails:
+            raise action_error
+        return "must-not-return"
+
+    monkeypatch.setattr(
+        guard_module,
+        "threading",
+        SimpleNamespace(
+            Event=threading.Event,
+            Lock=threading.Lock,
+            Thread=lambda **kwargs: thread,
+        ),
+    )
+    monkeypatch.setattr(guard_module.time, "sleep", fail_sleep)
+
+    with pytest.raises(BaseException) as raised:
+        build_guard(ui_lock_repo=lock_repo).run_manual(
+            "group", "manual-1", NOW, action
+        )
+
+    expected = action_error if action_fails else cleanup_error
+    assert raised.value is expected
+    assert lock_repo.release_calls == [("wechat_ui", "group", "manual-1")]
+    assert thread.join_calls == 3
+    if action_fails:
+        traceback_names = []
+        traceback = raised.value.__traceback__
+        while traceback is not None:
+            traceback_names.append(traceback.tb_frame.f_code.co_name)
+            traceback = traceback.tb_next
+        assert "action" in traceback_names
+
+
+@pytest.mark.parametrize(
+    "action_fails",
+    [False, True],
+    ids=["action-success", "action-failure"],
+)
+def test_release_base_exception_stays_inside_exception_priority_boundary(
+    action_fails: bool,
+) -> None:
+    release_error = SystemExit("release interrupted")
+    lock_repo = UiLockRepo(release_error=release_error)
+    action_error = RuntimeError("action failed")
+
+    def action() -> str:
+        if action_fails:
+            raise action_error
+        return "must-not-return"
+
+    expected_type = RuntimeError if action_fails else WechatUiReleaseError
+    with pytest.raises(expected_type) as raised:
+        build_guard(ui_lock_repo=lock_repo).run_manual(
+            "article", "manual-1", NOW, action
+        )
+
+    if action_fails:
+        assert raised.value is action_error
+    assert lock_repo.release_calls == [
+        ("wechat_ui", "article", "manual-1")
+    ]
 
 
 def test_inflight_heartbeat_finishes_then_thread_exits_before_release() -> None:

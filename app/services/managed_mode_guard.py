@@ -5,6 +5,7 @@ import threading
 import time
 from collections.abc import Callable
 from datetime import datetime
+from types import TracebackType
 from typing import Protocol, TypeVar
 from zoneinfo import ZoneInfo
 
@@ -147,8 +148,37 @@ class ManagedModeGuard:
         stop_requested = False
         lease_was_lost = False
         operation_error: BaseException | None = None
+        operation_traceback: TracebackType | None = None
         cleanup_error: BaseException | None = None
         released = False
+
+        def record_cleanup_error(exc: BaseException) -> None:
+            nonlocal cleanup_error
+            if cleanup_error is None:
+                cleanup_error = exc
+
+        def read_monotonic() -> float | None:
+            try:
+                return time.monotonic()
+            except BaseException as exc:
+                record_cleanup_error(exc)
+                return None
+
+        def poll_sleep(seconds: float) -> bool:
+            try:
+                time.sleep(seconds)
+            except BaseException as exc:
+                record_cleanup_error(exc)
+                return False
+            return True
+
+        def thread_is_alive(default: bool) -> bool:
+            try:
+                return renewer.is_alive()
+            except BaseException as exc:
+                record_cleanup_error(exc)
+                return default
+
         try:
             state_lock = threading.Lock()
             wakeup = threading.Event()
@@ -201,76 +231,78 @@ class ManagedModeGuard:
             result = action()
         except BaseException as exc:
             operation_error = exc
+            operation_traceback = exc.__traceback__
         finally:
-            if state_lock is not None:
-                try:
-                    with state_lock:
-                        stop_requested = True
-                except BaseException as exc:
-                    cleanup_error = exc
-            if wakeup is not None:
-                try:
-                    wakeup.set()
-                except BaseException as exc:
-                    if cleanup_error is None:
-                        cleanup_error = exc
-            should_join = renewer_started
-            if renewer is not None and not should_join:
-                try:
-                    should_join = renewer.is_alive()
-                except BaseException as exc:
-                    if cleanup_error is None:
-                        cleanup_error = exc
-                    should_join = False
-            if renewer is not None and should_join:
-                deadline = time.monotonic() + float(
-                    self.ui_heartbeat_interval_seconds
-                ) + 0.05
-                alive = True
-                for _ in range(3):
-                    remaining = max(0.0, deadline - time.monotonic())
-                    timeout = min(
-                        float(self.ui_heartbeat_interval_seconds),
-                        remaining,
+            try:
+                if state_lock is not None:
+                    try:
+                        with state_lock:
+                            stop_requested = True
+                    except BaseException as exc:
+                        record_cleanup_error(exc)
+                if wakeup is not None:
+                    try:
+                        wakeup.set()
+                    except BaseException as exc:
+                        record_cleanup_error(exc)
+                should_join = renewer_started
+                if renewer is not None and not should_join:
+                    should_join = thread_is_alive(False)
+                if renewer is not None and should_join:
+                    interval = float(self.ui_heartbeat_interval_seconds)
+                    started_at = read_monotonic()
+                    deadline = (
+                        started_at + interval + 0.05
+                        if started_at is not None
+                        else None
                     )
-                    try:
-                        renewer.join(timeout=timeout)
-                    except BaseException as exc:
-                        if cleanup_error is None:
-                            cleanup_error = exc
-                    try:
-                        alive = renewer.is_alive()
-                    except BaseException as exc:
-                        if cleanup_error is None:
-                            cleanup_error = exc
-                        alive = True
-                    if not alive:
-                        break
-                while alive and time.monotonic() < deadline:
-                    remaining = deadline - time.monotonic()
-                    time.sleep(min(0.005, max(0.0, remaining)))
-                    try:
-                        alive = renewer.is_alive()
-                    except BaseException as exc:
-                        if cleanup_error is None:
-                            cleanup_error = exc
-                        alive = True
-                if alive:
-                    if state_lock is not None:
+                    alive = True
+                    for _ in range(3):
+                        timeout = interval
+                        if deadline is not None:
+                            polled_at = read_monotonic()
+                            if polled_at is None:
+                                deadline = None
+                            else:
+                                timeout = min(
+                                    interval,
+                                    max(0.0, deadline - polled_at),
+                                )
                         try:
-                            with state_lock:
-                                lease_was_lost = True
+                            renewer.join(timeout=timeout)
                         except BaseException as exc:
-                            if cleanup_error is None:
-                                cleanup_error = exc
-                    if cleanup_error is None:
-                        cleanup_error = WechatUiLeaseLostError(
-                            "WeChat UI lease thread did not stop"
-                        )
-            released = self._release(pipeline, owner_task_id)
+                            record_cleanup_error(exc)
+                        alive = thread_is_alive(True)
+                        if not alive:
+                            break
+                    while alive and deadline is not None:
+                        polled_at = read_monotonic()
+                        if polled_at is None or polled_at >= deadline:
+                            break
+                        remaining = deadline - polled_at
+                        if not poll_sleep(
+                            min(0.005, max(0.0, remaining))
+                        ):
+                            break
+                        alive = thread_is_alive(True)
+                    if alive:
+                        if state_lock is not None:
+                            try:
+                                with state_lock:
+                                    lease_was_lost = True
+                            except BaseException as exc:
+                                record_cleanup_error(exc)
+                        if cleanup_error is None:
+                            cleanup_error = WechatUiLeaseLostError(
+                                "WeChat UI lease thread did not stop"
+                            )
+            except BaseException as exc:
+                record_cleanup_error(exc)
+            finally:
+                released = self._release(pipeline, owner_task_id)
 
         if operation_error is not None:
-            raise operation_error
+            raise operation_error.with_traceback(operation_traceback)
         if cleanup_error is not None:
             raise cleanup_error
         if lease_was_lost:
@@ -287,7 +319,7 @@ class ManagedModeGuard:
                 )
                 is True
             )
-        except Exception:
+        except BaseException:
             return False
 
 
