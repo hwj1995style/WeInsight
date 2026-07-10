@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}运行实例 · WeInsight{% endblock %}
+{% block content %}
+  <div class="page-heading"><div><h1>运行实例</h1><p>查看采集任务每次运行及目标完成情况。</p></div></div>
+  {% if error %}<p class="notice error" role="alert">{{ error }}</p>{% endif %}
+  <form class="filter-panel runtime-filters" method="get" action="/runs">
+    <div><label for="pipeline">链路</label><select id="pipeline" name="pipeline"><option value="">全部</option><option value="group" {% if values.pipeline == "group" %}selected{% endif %}>微信群</option><option value="article" {% if values.pipeline == "article" %}selected{% endif %}>公众号</option></select></div>
+    <div><label for="run-status">状态</label><select id="run-status" name="status"><option value="">全部</option>{% for status, label in run_status_labels.items() %}<option value="{{ status.value }}" {% if values.status == status.value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div><label for="run-date">上海日期</label><input id="run-date" type="date" name="date" value="{{ values.date }}"></div>
+    <div><label for="run-job-id">任务 ID</label><input id="run-job-id" inputmode="numeric" name="job_id" value="{{ values.job_id }}"></div>
+    <div><label for="run-name">任务名称</label><input id="run-name" name="name" value="{{ values.name }}" maxlength="200"></div>
+    <input type="hidden" name="page_size" value="{{ values.page_size }}">
+    <button type="submit">筛选</button>
+  </form>
+  <section class="content-panel source-panel">
+    {% if runs %}
+      <div class="table-scroll" tabindex="0" aria-label="运行实例列表"><table class="data-table runtime-table"><thead><tr><th scope="col">运行</th><th scope="col">任务</th><th scope="col">链路</th><th scope="col">状态</th><th scope="col">计划时间</th><th scope="col">目标</th><th scope="col">Worker</th><th scope="col">操作</th></tr></thead><tbody>
+      {% for item in runs %}<tr><th scope="row">#{{ item.id }}</th><td><a href="/jobs/{{ item.job_id }}">{{ item.job_name }}</a></td><td>{{ pipeline_labels[item.pipeline_type] }}</td><td><span class="job-status status-{{ item.status.value }}">{{ run_status_labels[item.status] }}</span></td><td>{{ item.scheduled_at.strftime("%Y-%m-%d %H:%M:%S") }}</td><td>{{ item.target_success_count }} 成功 / {{ item.target_failed_count }} 失败 / {{ item.target_total_count }} 总计</td><td>{{ item.worker_id or "—" }}</td><td><a class="button compact secondary" href="/runs/{{ item.id }}">查看运行</a></td></tr>{% endfor %}
+      </tbody></table></div>
+    {% else %}<div class="empty-state"><h2>没有匹配的运行实例</h2><p>调整筛选条件后重试。</p></div>{% endif %}
+  </section>
+  {% if previous_url or next_url %}<nav class="pagination" aria-label="运行分页">{% if previous_url %}<a class="button secondary" href="{{ previous_url }}">上一页</a>{% else %}<span></span>{% endif %}<span>第 {{ page.page }} 页 · 共 {{ page.total_count }} 条</span>{% if next_url %}<a class="button secondary" href="{{ next_url }}">下一页</a>{% endif %}</nav>{% endif %}
+{% endblock %}

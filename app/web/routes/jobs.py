@@ -27,6 +27,7 @@ from app.services.collection_job_service import (
     JobValidationError,
     JobVersionConflictError,
 )
+from app.services.runtime_monitor_service import JobRuntimeHistory
 
 
 TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "templates"
@@ -239,7 +240,8 @@ async def job_detail(request: Request, job_id: int) -> Response:
             "采集任务不存在或已被删除。",
             status_code=404,
         )
-    return _job_detail_response(request, job)
+    history = await _load_job_history(request, job_id)
+    return _job_detail_response(request, job, history=history)
 
 
 @router.post("/{job_id}/stop", response_class=HTMLResponse)
@@ -333,7 +335,19 @@ async def _job_action(request: Request, job_id: int, action: str) -> Response:
             "采集任务不存在或已被删除。",
             status_code=404,
         )
-    return _job_detail_response(request, current)
+    history = await _load_job_history(request, job_id)
+    return _job_detail_response(request, current, history=history)
+
+
+async def _load_job_history(request: Request, job_id: int) -> JobRuntimeHistory:
+    try:
+        return await run_in_threadpool(
+            request.app.state.runtime_monitor_service.get_job_history,
+            job_id,
+            10,
+        )
+    except Exception:
+        return JobRuntimeHistory((), ())
 
 
 def _job_list_response(
@@ -399,6 +413,7 @@ def _job_detail_response(
     error: str | None = None,
     *,
     status_code: int = 200,
+    history: JobRuntimeHistory | None = None,
 ) -> Response:
     return templates.TemplateResponse(
         request=request,
@@ -409,6 +424,7 @@ def _job_detail_response(
             "error": error,
             "pipeline_labels": PIPELINE_LABELS,
             "status_labels": STATUS_LABELS,
+            "history": history or JobRuntimeHistory((), ()),
         },
         status_code=status_code,
     )

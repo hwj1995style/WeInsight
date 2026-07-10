@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterator
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi import FastAPI
@@ -14,6 +16,12 @@ from app.services.dashboard_service import (
     BacklogCount,
     CollectionOutcomeCounts,
     DashboardSnapshot,
+)
+from app.rpa.desktop_probe import WechatHealthStatus
+from app.services.runtime_monitor_service import (
+    RunTrendBucket,
+    RuntimeDashboardSnapshot,
+    TodayRunCounts,
 )
 from app.storage import dashboard_repo
 from app.storage.dashboard_repo import MysqlDashboardRepo
@@ -35,6 +43,46 @@ class FakeDashboardService:
 
     def get_snapshot(self, hours: int = 24) -> DashboardSnapshot:
         self.calls.append(hours)
+        return self.snapshot
+
+
+class FakeRuntimeDashboardService:
+    def __init__(self) -> None:
+        self.calls = []
+        current = datetime(2026, 7, 10, 12, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+        self.snapshot = RuntimeDashboardSnapshot(
+            live_collector_count=1,
+            total_worker_count=2,
+            latest_wechat_status=WechatHealthStatus.OK,
+            latest_wechat_checked_at=current,
+            ui_lock_state="live",
+            active_job_count=3,
+            stop_requested_job_count=1,
+            today_runs=TodayRunCounts(
+                queued=1,
+                running=2,
+                success=5,
+                partial_success=1,
+                failed=2,
+                cancelled=1,
+                aborted=1,
+            ),
+            trend=tuple(
+                RunTrendBucket(
+                    current - timedelta(hours=23 - index),
+                    success_count=(2 if index == 23 else 0),
+                    partial_success_count=(1 if index == 23 else 0),
+                    failed_count=(1 if index == 23 else 0),
+                    cancelled_count=(1 if index == 23 else 0),
+                    aborted_count=(1 if index == 23 else 0),
+                )
+                for index in range(24)
+            ),
+            generated_at=current,
+        )
+
+    def get_dashboard(self, now):
+        self.calls.append(now)
         return self.snapshot
 
 
@@ -73,11 +121,21 @@ def dashboard_service() -> FakeDashboardService:
 
 
 @pytest.fixture
-def app(config: Config, dashboard_service: FakeDashboardService) -> FastAPI:
+def runtime_service() -> FakeRuntimeDashboardService:
+    return FakeRuntimeDashboardService()
+
+
+@pytest.fixture
+def app(
+    config: Config,
+    dashboard_service: FakeDashboardService,
+    runtime_service: FakeRuntimeDashboardService,
+) -> FastAPI:
     return create_app(
         config,
         auth_service=FakeAuthService(),
         dashboard_service=dashboard_service,
+        runtime_monitor_service=runtime_service,
     )
 
 
@@ -135,6 +193,28 @@ def test_dashboard_has_one_accessible_horizontal_chart_and_text_fallback(
     assert "采集结果文本明细" in response.text
 
 
+def test_dashboard_renders_live_runtime_kpis_and_24_hour_terminal_conservation(
+    authenticated_client: TestClient,
+    runtime_service: FakeRuntimeDashboardService,
+) -> None:
+    response = authenticated_client.get("/dashboard")
+
+    assert response.status_code == 200
+    assert len(runtime_service.calls) == 1
+    for text in ("1 / 2", "微信状态", "UI 锁", "运行中 2", "停止中 1"):
+        assert text in response.text
+    assert response.text.count('data-trend-total="') == 24
+    assert 'data-trend-success="3"' in response.text
+    assert 'data-trend-failed="2"' in response.text
+    assert 'data-trend-cancelled="1"' in response.text
+    assert 'data-trend-total="6"' in response.text
+    assert response.text.count('id="run-trend-chart"') == 1
+    assert "24 小时运行终态趋势" in response.text
+    assert "运行中" not in response.text.split(
+        'id="run-trend-chart-data"', 1
+    )[-1].split("</script>", 1)[0]
+
+
 def test_dashboard_loads_only_local_echarts_and_other_pages_do_not(
     authenticated_client: TestClient,
 ) -> None:
@@ -185,7 +265,7 @@ def test_dashboard_service_call_runs_in_threadpool(
     )
 
     assert authenticated_client.get("/dashboard").status_code == 200
-    assert calls == ["get_snapshot"]
+    assert calls == ["get_snapshot", "get_dashboard"]
 
 
 def test_dashboard_sql_uses_only_aggregates_and_safe_control_tables() -> None:
@@ -317,6 +397,8 @@ def test_create_app_default_data_services_share_one_engine(
     assert app.state.article_report_service.repo.engine is engine
     assert app.state.summary_report_service.repo.engine is engine
     assert app.state.dashboard_service.repo.engine is engine
+    assert app.state.runtime_monitor_service.repo.engine is engine
+    assert app.state.event_repo.engine is engine
 
 
 class DashboardResult:

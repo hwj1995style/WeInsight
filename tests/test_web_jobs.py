@@ -840,6 +840,10 @@ def test_detail_explains_cross_midnight_and_history_retention(
     assert "开始时间等于结束时间表示全天" in response.text
     assert "开始时间晚于结束时间表示跨午夜" in response.text
     assert "删除仅隐藏任务，运行历史和采集结果会保留" in response.text
+    assert "最近运行历史" in response.text
+    assert 'href="/runs?job_id=11"' in response.text
+    assert "最近操作事件" in response.text
+    assert 'href="/events?job_id=11"' in response.text
     assert "当前仍使用默认密码 admin123456" in response.text
 
 
@@ -911,9 +915,12 @@ def test_all_job_and_source_calls_run_in_threadpool(
         "list_jobs",
         "list_enabled_groups_for_job",
         "get_job",
+        "get_job_history",
         "create_job",
         "get_job",
+        "get_job_history",
         "request_stop",
         "get_job",
+        "get_job_history",
         "delete_job",
     ]

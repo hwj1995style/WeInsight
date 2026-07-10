@@ -1,7 +1,15 @@
 {% extends "base.html" %}
 {% block title %}基础总览 · WeInsight{% endblock %}
 {% block content %}
-  <div class="page-heading"><div><h1>基础总览</h1><p>最近 {{ snapshot.window_hours }} 小时的安全聚合指标。Worker 与微信实时状态将在后续阶段接入。</p></div></div>
+  <div class="page-heading"><div><h1>实时总览</h1><p>安全聚合结果与运行控制面快照。最近更新时间 {{ runtime.generated_at.strftime("%Y-%m-%d %H:%M:%S") }}。</p></div></div>
+  {% if not runtime_available %}<p class="notice error" role="status">运行控制面暂时不可用；采集结果和最后可渲染的零值结构仍可查看。</p>{% endif %}
+  <section class="kpi-grid runtime-kpi-grid" aria-label="实时运行指标">
+    <article class="kpi-card"><span>Collector / 全部 Worker</span><strong>{{ runtime.live_collector_count }} / {{ runtime.total_worker_count }}</strong><small>在线 Collector / 心跳记录</small></article>
+    <article class="kpi-card"><span>微信状态</span><strong>{{ runtime.latest_wechat_status.value if runtime.latest_wechat_status else "暂无" }}</strong><small>{{ runtime.latest_wechat_checked_at.strftime("%m-%d %H:%M:%S") if runtime.latest_wechat_checked_at else "暂无完整检查" }}</small></article>
+    <article class="kpi-card"><span>UI 锁</span><strong>{% if runtime.ui_lock_state == "live" %}占用中{% elif runtime.ui_lock_state == "expired" %}已过期{% else %}空闲{% endif %}</strong><small><a href="/workers">查看 Worker 与锁详情</a></small></article>
+    <article class="kpi-card"><span>采集任务</span><strong>{{ runtime.active_job_count }} / {{ runtime.stop_requested_job_count }}</strong><small>运行中 {{ runtime.active_job_count }} · 停止中 {{ runtime.stop_requested_job_count }}</small></article>
+    <article class="kpi-card"><span>今日运行</span><strong>{{ runtime.today_runs.total }}</strong><small>运行中 {{ runtime.today_runs.running }} · 成功 {{ runtime.today_runs.success }} · 部分成功 {{ runtime.today_runs.partial_success }} · 失败 {{ runtime.today_runs.failed }} · 取消 {{ runtime.today_runs.cancelled }} · 异常 {{ runtime.today_runs.aborted }}</small></article>
+  </section>
   <section class="kpi-grid" aria-label="关键指标">
     <article class="kpi-card"><span>微信群采集</span><strong>{{ snapshot.group_collection.total }}</strong><small>成功 {{ snapshot.group_collection.success }} · 失败 {{ snapshot.group_collection.failed }} · 跳过 {{ snapshot.group_collection.skipped }}</small></article>
     <article class="kpi-card"><span>公众号采集</span><strong>{{ snapshot.article_collection.total }}</strong><small>成功 {{ snapshot.article_collection.success }} · 失败 {{ snapshot.article_collection.failed }} · 跳过 {{ snapshot.article_collection.skipped }}</small></article>
@@ -11,6 +19,13 @@
     <article class="kpi-card"><span>任务积压</span><strong>{{ snapshot.backlog_count }}</strong><small>待处理、运行中与失败</small></article>
   </section>
   <div class="dashboard-grid">
+    <section class="content-panel chart-panel trend-panel">
+      <div class="panel-heading"><div><h2>24 小时运行终态趋势</h2><p id="run-trend-summary" class="muted">{{ trend_summary }}</p></div><a href="/runs">查看运行</a></div>
+      <div id="run-trend-chart" class="run-trend-chart" role="img" aria-label="{{ trend_summary }}"></div>
+      <p id="run-trend-fallback" class="notice chart-fallback" hidden>运行趋势图表未加载；上方指标和下方逐小时文本表仍可使用。</p>
+      <noscript><p class="notice">浏览器未启用脚本；请使用下方逐小时运行终态表。</p></noscript>
+      <div class="table-scroll" tabindex="0" aria-label="24 小时运行终态文本表"><table class="data-table compact-table trend-table"><caption>逐小时运行终态守恒表</caption><thead><tr><th scope="col">上海整点</th><th scope="col">成功（含部分成功）</th><th scope="col">失败（含异常终止）</th><th scope="col">取消</th><th scope="col">终态合计</th></tr></thead><tbody>{% for bucket in runtime.trend %}<tr data-trend-success="{{ bucket.successful_count }}" data-trend-failed="{{ bucket.unsuccessful_count }}" data-trend-cancelled="{{ bucket.cancelled_count }}" data-trend-total="{{ bucket.terminal_total }}"><th scope="row">{{ bucket.bucket_start.strftime("%m-%d %H:00") }}</th><td>{{ bucket.successful_count }}</td><td>{{ bucket.unsuccessful_count }}</td><td>{{ bucket.cancelled_count }}</td><td>{{ bucket.successful_count }} + {{ bucket.unsuccessful_count }} + {{ bucket.cancelled_count }} = {{ bucket.terminal_total }}</td></tr>{% endfor %}</tbody></table></div>
+    </section>
     <section class="content-panel chart-panel">
       <div class="panel-heading"><div><h2>24 小时采集结果构成（明确终态）</h2><p id="chart-summary" class="muted">{{ chart_summary }}</p></div></div>
       <div id="collection-chart" class="collection-chart" role="img" aria-label="{{ chart_summary }}"></div>
@@ -29,6 +44,7 @@
 {% block scripts %}
   <script src="/static/vendor/echarts.min.js"></script>
   <script type="application/json" id="collection-chart-data">{{ chart_data | tojson }}</script>
+  <script type="application/json" id="run-trend-chart-data">{{ trend_data | tojson }}</script>
   <script>
     (() => {
       const chartElement = document.getElementById('collection-chart');
@@ -52,6 +68,34 @@
           { name: '成功', type: 'bar', data: data.success, label: { show: true, position: 'right' } },
           { name: '失败', type: 'bar', data: data.failed, label: { show: true, position: 'right' } },
           { name: '跳过', type: 'bar', data: data.skipped, label: { show: true, position: 'right' } }
+        ]
+      });
+      window.addEventListener('resize', () => chart.resize());
+    })();
+  </script>
+  <script>
+    (() => {
+      const chartElement = document.getElementById('run-trend-chart');
+      const fallback = document.getElementById('run-trend-fallback');
+      if (!window.echarts || !chartElement) {
+        if (fallback) fallback.hidden = false;
+        return;
+      }
+      const data = JSON.parse(document.getElementById('run-trend-chart-data').textContent);
+      const chart = window.echarts.init(chartElement, null, { renderer: 'canvas' });
+      chart.setOption({
+        animation: false,
+        aria: { enabled: true, description: document.getElementById('run-trend-summary').textContent },
+        color: ['#225fd1', '#a61b1b', '#b25e09'],
+        grid: { left: 48, right: 20, top: 38, bottom: 72, containLabel: true },
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+        legend: { top: 0, data: ['成功（含部分成功）', '失败（含异常终止）', '取消'] },
+        xAxis: { type: 'category', data: data.categories, axisLabel: { rotate: 45, interval: 3 } },
+        yAxis: { type: 'value', min: 0, minInterval: 1 },
+        series: [
+          { name: '成功（含部分成功）', type: 'bar', stack: 'terminal', data: data.successful },
+          { name: '失败（含异常终止）', type: 'bar', stack: 'terminal', data: data.failed },
+          { name: '取消', type: 'bar', stack: 'terminal', data: data.cancelled }
         ]
       });
       window.addEventListener('resize', () => chart.resize());

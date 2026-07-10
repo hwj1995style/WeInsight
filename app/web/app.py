@@ -14,6 +14,7 @@ from app.services.auth_service import AuthService
 from app.services.dashboard_service import DashboardService
 from app.services.collection_job_service import CollectionJobService
 from app.services.result_query_service import ResultQueryService
+from app.services.runtime_monitor_service import RuntimeMonitorService
 from app.services.source_management_service import SourceManagementService
 from app.storage.admin_auth_repo import MysqlAdminAuthRepo
 from app.storage.article_config_repo import MysqlArticleAccountConfigRepo
@@ -21,16 +22,28 @@ from app.storage.article_daily_report_query_repo import MysqlArticleDailyReportQ
 from app.storage.db import create_mysql_engine
 from app.storage.dashboard_repo import MysqlDashboardRepo
 from app.storage.collection_job_repo import MysqlCollectionJobRepo
+from app.storage.collection_event_repo import MysqlCollectionEventRepo
 from app.storage.group_repo import MysqlGroupConfigRepo
 from app.storage.group_daily_report_query_repo import MysqlGroupDailyReportQueryRepo
 from app.storage.safe_result_query_repo import MysqlSafeResultQueryRepo
+from app.storage.runtime_monitor_repo import MysqlRuntimeMonitorRepo
 from app.storage.source_reference_repo import MysqlSourceReferenceRepo
 from app.storage.summary_daily_report_query_repo import MysqlSummaryDailyReportQueryRepo
 from app.pipelines.article_daily_report_query_service import ArticleDailyReportQueryService
 from app.pipelines.group_daily_report_query_service import GroupDailyReportQueryService
 from app.pipelines.summary_daily_report_query_service import SummaryDailyReportQueryService
 from app.web.middleware import AdminSessionMiddleware
-from app.web.routes import auth, dashboard, jobs, reports, results, sources
+from app.web.routes import (
+    auth,
+    dashboard,
+    events,
+    jobs,
+    reports,
+    results,
+    runs,
+    sources,
+    workers,
+)
 from app.web.routes.auth import LoginAttemptLimiter, MAX_CONCURRENT_LOGIN_HASHES
 
 
@@ -56,6 +69,8 @@ def create_app(
     summary_report_service: SummaryDailyReportQueryService | None = None,
     dashboard_service: DashboardService | None = None,
     job_service: CollectionJobService | None = None,
+    runtime_monitor_service: RuntimeMonitorService | None = None,
+    event_repo: MysqlCollectionEventRepo | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="WeInsight Admin",
@@ -76,6 +91,8 @@ def create_app(
             summary_report_service,
             dashboard_service,
             job_service,
+            runtime_monitor_service,
+            event_repo,
         )
     ):
         engine = create_mysql_engine(config.mysql)
@@ -101,6 +118,15 @@ def create_app(
     app.state.job_service = job_service or CollectionJobService(
         MysqlCollectionJobRepo(engine)
     )
+    app.state.runtime_monitor_service = (
+        runtime_monitor_service
+        or RuntimeMonitorService(
+            MysqlRuntimeMonitorRepo(engine),
+            Path(config.runtime.screenshot_dir),
+            heartbeat_ttl_seconds=config.workers.heartbeat_seconds * 3,
+        )
+    )
+    app.state.event_repo = event_repo or MysqlCollectionEventRepo(engine)
     app.state.login_attempt_limiter = LoginAttemptLimiter(
         config.auth.login_failure_limit,
         config.auth.login_lock_minutes,
@@ -114,6 +140,9 @@ def create_app(
     app.include_router(auth.router)
     app.include_router(sources.router)
     app.include_router(jobs.router)
+    app.include_router(runs.router)
+    app.include_router(events.router)
+    app.include_router(workers.router)
     app.include_router(results.router)
     app.include_router(reports.router)
     app.include_router(dashboard.router)

@@ -1,0 +1,160 @@
+from __future__ import annotations
+
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
+from app.domain.collection_jobs import PipelineType, RunStatus
+from app.services.runtime_monitor_service import EventListFilter, RunListFilter
+from app.storage import runtime_monitor_repo
+
+
+ZONE = ZoneInfo("Asia/Shanghai")
+NOW = datetime(2026, 7, 10, 12, 30, tzinfo=ZONE)
+
+
+def test_run_filter_sql_uses_fixed_conditions_and_bound_values() -> None:
+    where, params = runtime_monitor_repo._run_filter_clause(
+        RunListFilter(
+            pipeline_type=PipelineType.ARTICLE,
+            status=RunStatus.FAILED,
+            run_date=date(2026, 7, 10),
+            job_id=7,
+            job_name="50%_蛋",
+        )
+    )
+
+    assert "job.pipeline_type = :pipeline_type" in where
+    assert "run.status = :status" in where
+    assert "run.scheduled_at >= :date_start" in where
+    assert "run.job_id = :job_id" in where
+    assert "job.job_name LIKE :job_name ESCAPE" in where
+    assert "50%_蛋" not in where
+    assert params["pipeline_type"] == "article"
+    assert params["status"] == "failed"
+    assert params["job_name"] == "%50\\%\\_蛋%"
+    assert params["date_start"] == datetime(2026, 7, 10)
+    assert params["date_end"] == datetime(2026, 7, 11)
+
+
+def test_event_filter_sql_uses_only_allowlisted_bound_conditions() -> None:
+    where, params = runtime_monitor_repo._event_filter_clause(
+        EventListFilter(
+            job_id=7,
+            run_id=11,
+            target_run_id=13,
+            pipeline_type=PipelineType.GROUP,
+            level="error",
+            start_at=NOW - timedelta(hours=1),
+            end_at=NOW,
+        )
+    )
+
+    for condition in (
+        "event.job_id = :job_id",
+        "event.run_id = :run_id",
+        "event.target_run_id = :target_run_id",
+        "job.pipeline_type = :pipeline_type",
+        "event.level = :level",
+        "event.create_time >= :start_at",
+        "event.create_time <= :end_at",
+    ):
+        assert condition in where
+    assert params["pipeline_type"] == "group"
+    assert params["level"] == "error"
+    assert params["start_at"] == datetime(2026, 7, 10, 11, 30)
+
+
+def test_fill_trend_produces_24_shanghai_buckets_and_terminal_conservation() -> None:
+    rows = [
+        {"bucket_start": datetime(2026, 7, 10, 11), "status": "success", "count": 2},
+        {
+            "bucket_start": datetime(2026, 7, 10, 11),
+            "status": "partial_success",
+            "count": 1,
+        },
+        {"bucket_start": datetime(2026, 7, 10, 12), "status": "failed", "count": 3},
+        {"bucket_start": datetime(2026, 7, 10, 12), "status": "aborted", "count": 1},
+        {"bucket_start": datetime(2026, 7, 10, 12), "status": "cancelled", "count": 2},
+        {"bucket_start": datetime(2026, 7, 10, 12), "status": "running", "count": 99},
+        {"bucket_start": datetime(2026, 7, 10, 12), "status": "unknown", "count": 99},
+    ]
+
+    buckets = runtime_monitor_repo._fill_trend(rows, NOW)
+
+    assert len(buckets) == 24
+    assert buckets[0].bucket_start == datetime(
+        2026, 7, 9, 13, tzinfo=ZONE
+    )
+    assert buckets[-1].bucket_start == datetime(
+        2026, 7, 10, 12, tzinfo=ZONE
+    )
+    assert buckets[-2].successful_count == 3
+    assert buckets[-1].unsuccessful_count == 4
+    assert buckets[-1].cancelled_count == 2
+    assert buckets[-1].terminal_total == 6
+
+
+def test_dashboard_trend_sql_excludes_nonterminal_statuses() -> None:
+    sql = str(runtime_monitor_repo._TREND_RUNS).lower()
+    normalized = " ".join(sql.split())
+
+    assert "status in (" in normalized
+    for status in (
+        "'success'",
+        "'partial_success'",
+        "'failed'",
+        "'cancelled'",
+        "'aborted'",
+    ):
+        assert status in normalized
+    assert "running" not in sql
+    assert "queued" not in sql
+    assert "end_time >= :trend_start" in sql
+
+
+def test_worker_and_ui_lock_expiry_boundary_is_fail_closed() -> None:
+    worker = runtime_monitor_repo._worker_view(
+        {
+            "worker_id": "collector-1",
+            "worker_type": "collector",
+            "hostname": "HOST-A",
+            "process_id": 123,
+            "version": "v1",
+            "status": "running",
+            "last_heartbeat_at": datetime(2026, 7, 10, 12, 0),
+            "start_time": datetime(2026, 7, 10, 11, 0),
+            "last_error_summary": None,
+            "within_ttl": 0,
+        }
+    )
+    lock = runtime_monitor_repo._ui_lock_view(
+        {
+            "owner_pipeline": "group",
+            "owner_task_id": "batch-1",
+            "acquire_time": datetime(2026, 7, 10, 11, 59),
+            "heartbeat_time": datetime(2026, 7, 10, 12, 0),
+            "expire_time": datetime(2026, 7, 10, 12, 30),
+        },
+        NOW,
+    )
+
+    assert worker.is_live is False
+    assert lock.state == "expired"
+
+
+def test_latest_health_window_alias_avoids_mysql_reserved_function_name() -> None:
+    sql = " ".join(str(runtime_monitor_repo._LATEST_HEALTH).lower().split())
+
+    assert "as row_rank" in sql
+    assert "ranked.row_rank = 1" in sql
+    assert "as row_number" not in sql
+
+
+def test_event_metrics_summary_preserves_keys_and_sanitizes_string_values() -> None:
+    summary = runtime_monitor_repo._safe_metrics(
+        '{"failed":1,"detail":"<b>secret</b> https://example.com/raw"}'
+    )
+
+    assert '"failed":1' in summary
+    assert "<b>" not in summary
+    assert "https://" not in summary
