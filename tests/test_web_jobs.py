@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, time
+from datetime import date, datetime, time
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Iterator
@@ -169,13 +169,29 @@ class FakeJobService:
         )
         if self.delete_error is not None:
             raise self.delete_error
+        self.detail = replace(
+            self.detail,
+            status=JobStatus.DELETED,
+            version=self.detail.version + 1,
+        )
+        self.summaries = [
+            replace(item, status=JobStatus.DELETED)
+            if item.id == job_id
+            else item
+            for item in self.summaries
+        ]
         return True
 
     def list_jobs(self, filters, page, page_size):
         self.calls.append(("list_jobs", filters, page, page_size))
         if self.list_error is not None:
             raise self.list_error
-        return PagedResult(self.summaries, page, page_size, self.total_count)
+        items = self.summaries
+        if filters.status is None:
+            items = [item for item in items if item.status is not JobStatus.DELETED]
+        else:
+            items = [item for item in items if item.status is filters.status]
+        return PagedResult(items, page, page_size, len(items))
 
 
 @pytest.fixture
@@ -288,7 +304,8 @@ def test_job_list_parses_filters_paginates_and_escapes_names(
     job_service.total_count = 3
 
     response = authenticated_client.get(
-        "/jobs?pipeline=group&status=active&name=%E6%99%A8%E9%97%B4&page=2&page_size=1"
+        "/jobs?pipeline=group&status=active&date=2026-07-10&"
+        "name=%E6%99%A8%E9%97%B4&page=2&page_size=1"
     )
 
     assert response.status_code == 200
@@ -297,13 +314,20 @@ def test_job_list_parses_filters_paginates_and_escapes_names(
     assert filters.pipeline_type is PipelineType.GROUP
     assert filters.status is JobStatus.ACTIVE
     assert filters.name_contains == "晨间"
+    assert filters.date == date(2026, 7, 10)
     assert (page, page_size) == (2, 1)
     assert "<script>" not in response.text
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in response.text
     assert "pipeline=group" in response.text
     assert "status=active" in response.text
     assert "name=%E6%99%A8%E9%97%B4" in response.text
+    assert "date=2026-07-10" in response.text
     assert "page_size=1" in response.text
+    assert (
+        'href="/jobs?pipeline=group&amp;status=active&amp;date=2026-07-10&amp;'
+        'name=%E6%99%A8%E9%97%B4&amp;page=1&amp;page_size=1"'
+        in response.text
+    )
 
 
 @pytest.mark.parametrize(
@@ -319,6 +343,9 @@ def test_job_list_parses_filters_paginates_and_escapes_names(
         "page=0",
         "page_size=101",
         "name=" + "x" * 201,
+        "date=2026-07-10&date=2026-07-11",
+        "date=2026-7-10",
+        "date=2026-02-30",
     ],
 )
 def test_job_list_rejects_ambiguous_or_invalid_query_without_service_call(
@@ -331,6 +358,17 @@ def test_job_list_rejects_ambiguous_or_invalid_query_without_service_call(
     assert response.status_code == 422
     assert "请检查筛选条件" in response.text
     assert job_service.calls == []
+
+
+def test_job_list_renders_date_filter_and_preserves_value(
+    authenticated_client: TestClient,
+) -> None:
+    response = authenticated_client.get("/jobs?date=2026-07-10")
+
+    assert response.status_code == 200
+    assert 'name="date"' in response.text
+    assert 'type="date"' in response.text
+    assert 'value="2026-07-10"' in response.text
 
 
 def test_new_job_loads_only_selected_pipeline_sources(
@@ -643,6 +681,28 @@ def test_delete_stopped_job_redirects_to_list(
 
     assert response.status_code == 303
     assert response.headers["location"] == "/jobs"
+
+
+def test_soft_deleted_job_is_hidden_by_default_and_available_for_audit(
+    authenticated_client: TestClient,
+    job_service: FakeJobService,
+) -> None:
+    job_service.detail = replace(job_service.detail, status=JobStatus.STOPPED)
+
+    deleted = authenticated_client.post(
+        "/jobs/11/delete",
+        data={"csrf_token": "csrf-token", "version": "3"},
+        follow_redirects=False,
+    )
+    default_list = authenticated_client.get("/jobs")
+    audit_list = authenticated_client.get("/jobs?status=deleted")
+
+    assert deleted.status_code == 303
+    assert "晨间群采集" not in default_list.text
+    assert "晨间群采集" in audit_list.text
+    list_filters = [call[1] for call in job_service.calls if call[0] == "list_jobs"]
+    assert list_filters[0].status is None
+    assert list_filters[1].status is JobStatus.DELETED
 
 
 @pytest.mark.parametrize("action", ["stop", "delete"])

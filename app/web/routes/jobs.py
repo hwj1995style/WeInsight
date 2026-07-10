@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date as Date
 from datetime import datetime, time
 from pathlib import Path
 from urllib.parse import urlencode
@@ -32,7 +33,9 @@ TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 router = APIRouter(prefix="/jobs")
 
-_LIST_QUERY_FIELDS = frozenset({"pipeline", "status", "name", "page", "page_size"})
+_LIST_QUERY_FIELDS = frozenset(
+    {"pipeline", "status", "date", "name", "page", "page_size"}
+)
 _NEW_QUERY_FIELDS = frozenset({"pipeline"})
 _CREATE_COMMON_FIELDS = frozenset(
     {
@@ -49,6 +52,7 @@ _CREATE_COMMON_FIELDS = frozenset(
 _ACTION_FIELDS = frozenset({"csrf_token", "version"})
 _DATETIME_LOCAL_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}")
 _TIME_PATTERN = re.compile(r"[0-9]{2}:[0-9]{2}")
+_DATE_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _POSITIVE_INTEGER_PATTERN = re.compile(r"[1-9][0-9]*")
 
 PIPELINE_LABELS = {
@@ -73,6 +77,7 @@ async def job_list(request: Request) -> Response:
             pipeline_type=_optional_pipeline(values.get("pipeline")),
             status=_optional_status(values.get("status")),
             name_contains=_optional_name(values.get("name")),
+            date=_optional_date(values.get("date")),
         )
         page = _positive_integer(values.get("page", "1"), "page")
         page_size = _positive_integer(values.get("page_size", "20"), "page_size")
@@ -88,13 +93,20 @@ async def job_list(request: Request) -> Response:
         return _job_list_response(
             request,
             PagedResult([], 1, 20, 0),
-            values={"pipeline": "", "status": "", "name": "", "page_size": "20"},
+            values={
+                "pipeline": "",
+                "status": "",
+                "date": "",
+                "name": "",
+                "page_size": "20",
+            },
             error="请检查筛选条件后重试。",
             status_code=422,
         )
     normalized_values = {
         "pipeline": values.get("pipeline", ""),
         "status": values.get("status", ""),
+        "date": values.get("date", ""),
         "name": values.get("name", ""),
         "page_size": str(page_size),
     }
@@ -627,6 +639,17 @@ def _optional_name(value: str | None) -> str | None:
     return value
 
 
+def _optional_date(value: str | None) -> Date | None:
+    if value in {None, ""}:
+        return None
+    if not isinstance(value, str) or _DATE_PATTERN.fullmatch(value) is None:
+        raise ValueError("invalid date")
+    try:
+        return Date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError("invalid date") from exc
+
+
 def _positive_integer(value: str, field: str) -> int:
     if not isinstance(value, str) or _POSITIVE_INTEGER_PATTERN.fullmatch(value) is None:
         raise ValueError(f"invalid positive integer: {field}")
@@ -658,6 +681,7 @@ def _job_list_url(values: dict[str, str], page: int) -> str:
         for key, value in (
             ("pipeline", values.get("pipeline", "")),
             ("status", values.get("status", "")),
+            ("date", values.get("date", "")),
             ("name", values.get("name", "")),
             ("page", str(page)),
             ("page_size", values.get("page_size", "20")),

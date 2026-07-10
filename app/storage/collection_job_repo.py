@@ -557,6 +557,8 @@ def _list_filter_clause(filters: JobListFilter) -> tuple[str, dict[str, Any]]:
     if filters.status is not None:
         conditions.append("status = :status")
         params["status"] = filters.status.value
+    else:
+        conditions.append("status <> 'deleted'")
     if filters.name_contains is not None:
         conditions.append("job_name LIKE :name_contains ESCAPE '\\\\'")
         escaped = (
@@ -565,6 +567,13 @@ def _list_filter_clause(filters: JobListFilter) -> tuple[str, dict[str, Any]]:
             .replace("_", "\\_")
         )
         params["name_contains"] = f"%{escaped}%"
+    if filters.date is not None:
+        date_start = datetime.combine(filters.date, time.min, tzinfo=_ZONE)
+        date_end = date_start + timedelta(days=1)
+        conditions.append("effective_start_at < :date_end_exclusive")
+        conditions.append("effective_end_at > :date_start_inclusive")
+        params["date_start_inclusive"] = _to_db_datetime(date_start)
+        params["date_end_exclusive"] = _to_db_datetime(date_end)
     where_sql = "" if not conditions else "WHERE " + " AND ".join(conditions)
     return where_sql, params
 

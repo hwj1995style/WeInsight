@@ -132,7 +132,7 @@ form button { margin-top: 1.25rem; }
 .chart-fallback { margin: .75rem 0; background: #f2f4f7; color: var(--color-muted); }
 .compact-table { min-width: 620px; }
 .compact-table caption { padding: .75rem; text-align: left; font-weight: 680; }
-.job-filters { grid-template-columns: minmax(9rem, .8fr) minmax(9rem, .8fr) minmax(14rem, 1.5fr) auto; }
+.job-filters { grid-template-columns: repeat(3, minmax(9rem, .8fr)) minmax(14rem, 1.5fr) auto; }
 .job-table { min-width: 780px; }
 .job-status { display: inline-flex; align-items: center; min-height: 28px; padding: .24rem .58rem; border-radius: 999px; font-size: .78rem; font-weight: 720; white-space: nowrap; }
 .status-scheduled { color: #855b00; background: #fff5cf; }

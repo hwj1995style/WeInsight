@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -446,6 +446,7 @@ def test_list_jobs_reuses_filter_params_escapes_like_and_has_stable_order() -> N
         pipeline_type=PipelineType.GROUP,
         status=JobStatus.ACTIVE,
         name_contains="100%_群\\",
+        date=date(2026, 7, 10),
     )
 
     page = MysqlCollectionJobRepo(engine).list_jobs(filters, 2, 20)
@@ -454,12 +455,16 @@ def test_list_jobs_reuses_filter_params_escapes_like_and_has_stable_order() -> N
     count_sql, count_params = engine.connection.executions[0]
     data_sql, data_params = engine.connection.executions[1]
     assert "job_name LIKE :name_contains ESCAPE" in count_sql
+    assert "effective_start_at < :date_end_exclusive" in count_sql
+    assert "effective_end_at > :date_start_inclusive" in count_sql
     assert "ORDER BY update_time DESC, id DESC" in data_sql
     assert "raw" not in data_sql.lower()
     assert count_params == {
         "pipeline_type": "group",
         "status": "active",
         "name_contains": "%100\\%\\_群\\\\%",
+        "date_start_inclusive": datetime(2026, 7, 10, 0, 0),
+        "date_end_exclusive": datetime(2026, 7, 11, 0, 0),
     }
     assert data_params == {
         **count_params,
@@ -467,3 +472,45 @@ def test_list_jobs_reuses_filter_params_escapes_like_and_has_stable_order() -> N
         "offset": 20,
     }
     assert page.items[0].next_run_at.tzinfo == ZONE
+
+
+def test_list_jobs_default_excludes_deleted_but_explicit_deleted_is_queryable() -> None:
+    default_engine = Engine([Result(scalar=0), Result(rows=[])])
+
+    MysqlCollectionJobRepo(default_engine).list_jobs(JobListFilter(), 1, 20)
+
+    default_count_sql, default_count_params = default_engine.connection.executions[0]
+    default_data_sql, default_data_params = default_engine.connection.executions[1]
+    assert "status <> 'deleted'" in default_count_sql
+    assert "status <> 'deleted'" in default_data_sql
+    assert "status" not in default_count_params
+    assert default_data_params == {"limit": 20, "offset": 0}
+
+    deleted_engine = Engine([Result(scalar=0), Result(rows=[])])
+    MysqlCollectionJobRepo(deleted_engine).list_jobs(
+        JobListFilter(status=JobStatus.DELETED), 1, 20
+    )
+
+    deleted_count_sql, deleted_count_params = deleted_engine.connection.executions[0]
+    deleted_data_sql, deleted_data_params = deleted_engine.connection.executions[1]
+    assert "status = :status" in deleted_count_sql
+    assert "status <> 'deleted'" not in deleted_count_sql
+    assert "status <> 'deleted'" not in deleted_data_sql
+    assert deleted_count_params == {"status": "deleted"}
+    assert deleted_data_params == {"status": "deleted", "limit": 20, "offset": 0}
+
+
+def test_date_filter_uses_half_open_effective_interval_boundaries() -> None:
+    engine = Engine([Result(scalar=0), Result(rows=[])])
+
+    MysqlCollectionJobRepo(engine).list_jobs(
+        JobListFilter(date=date(2026, 7, 10)), 1, 20
+    )
+
+    sql, params = engine.connection.executions[0]
+    assert "effective_start_at < :date_end_exclusive" in sql
+    assert "effective_end_at > :date_start_inclusive" in sql
+    assert params == {
+        "date_start_inclusive": datetime(2026, 7, 10, 0, 0),
+        "date_end_exclusive": datetime(2026, 7, 11, 0, 0),
+    }

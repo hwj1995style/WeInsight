@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, time
+from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -205,6 +205,7 @@ def test_list_validates_page_and_page_size_and_passes_same_filter(service, repo)
         pipeline_type=PipelineType.GROUP,
         status=JobStatus.ACTIVE,
         name_contains="晨间",
+        date=date(2026, 7, 10),
     )
     result = service.list_jobs(filters, page=2, page_size=100)
 
@@ -212,6 +213,19 @@ def test_list_validates_page_and_page_size_and_passes_same_filter(service, repo)
     assert repo.list_calls == [(filters, 2, 100)]
     with pytest.raises(JobValidationError, match="page_size"):
         service.list_jobs(filters, page=1, page_size=101)
+
+
+@pytest.mark.parametrize(
+    "invalid_date",
+    [datetime(2026, 7, 10, 0, 0), "2026-07-10", 20260710, True],
+)
+def test_list_rejects_non_date_filter_values(service, repo, invalid_date) -> None:
+    filters = JobListFilter(date=invalid_date)
+
+    with pytest.raises(JobValidationError, match="date"):
+        service.list_jobs(filters, page=1, page_size=20)
+
+    assert repo.list_calls == []
 
 
 def test_get_job_maps_missing_to_domain_error(service) -> None:

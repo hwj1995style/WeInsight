@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from datetime import date as Date
 from datetime import datetime, time, timedelta
 from typing import Protocol
 
@@ -40,6 +41,7 @@ class JobListFilter:
     pipeline_type: PipelineType | None = None
     status: JobStatus | None = None
     name_contains: str | None = None
+    date: Date | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,6 +274,8 @@ class CollectionJobService:
                 raise JobValidationError(
                     "name_contains must be at most 200 characters"
                 )
+        if filters.date is not None and type(filters.date) is not Date:
+            raise JobValidationError("date must be a calendar date")
 
     @staticmethod
     def _validate_identity(value: object, field: str) -> None:
