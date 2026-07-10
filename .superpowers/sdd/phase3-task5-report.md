@@ -19,7 +19,7 @@
 
 ### UI busy 与 deferred
 
-浅检查通过后才读取 `wechat_ui` owner。锁繁忙时：
+浅检查通过后才使用本次严格上海时间读取 `wechat_ui` owner。MySQL 只将 `expire_time > now` 的租约视为活动锁，等于当前时间即过期；内存实现只读返回 `None`，不在 owner 查询中删除过期记录。锁繁忙时：
 
 - 窗口、登录和 RPA 探针调用次数均为 0；
 - 不写 `wechat_client_health_check`，不改变连续失败次数；
@@ -37,6 +37,8 @@
 
 完整 OK 将连续失败次数重置为 0，完整非 OK 在上一条同主机完整记录基础上加 1。计数读取和写入位于同一事务，已有历史记录使用 `SELECT ... FOR UPDATE` 串行化重叠写入。
 
+锁定并解析最新记录后，若待写记录的 `checked_at` 早于最新记录则在 INSERT 前拒绝，避免迟到探测回写后错误占据连续失败链。相同 `checked_at` 允许写入，并继续依靠 `id DESC` 确定稳定新旧顺序。
+
 现有表没有每主机唯一锁行或 hostname 唯一键，本任务又明确禁止修改表结构，因此正式运行必须遵守“同一 hostname 只有一个健康监控写者”的约束，由 Task 6 的 collector heartbeat/重复实例门禁负责建立该所有权边界。Repo 不应被用于绕过该单写者约束。
 
 ## TDD 证据
@@ -47,6 +49,7 @@
 - 桌面状态和真实 MySQL 锁只读能力分别因缺少 `NOT_RUNNING` 和 `current_owner` 产生 3 个失败；
 - 数据库超长 message 严格校验测试先因未抛错失败；
 - `detected_version` 输出清洗测试先因原始 HTML/控制字符被直接写入失败。
+- 审查修复测试先观察到迟到健康记录仍尝试 INSERT、Monitor 未传递 `now`、等号到期锁仍导致 deferred，以及两种锁 Repo 不接受时间参数。
 
 实现后覆盖六状态、固定顺序/短路、busy 零深调用、deferred 只写事件、旧 OK 不续期、无历史 fail closed、恢复重置、异常脱敏、2 倍间隔边界、时区、Repo SQL 参数绑定/稳定排序/严格校验和真实锁 owner 查询。
 
@@ -60,12 +63,13 @@
 - `MysqlUiLockRepo.current_owner("wechat_ui")` 在锁存在/删除后分别返回 `group`/`None`；
 - 同 hostname 首次并发两次写入均成功，持久化计数为 `[1, 2]`；
 - 同 hostname 已有历史时并发观察到一次成功和一次 MySQL deadlock `1213`，持久化计数为 `[1, 2]`，没有静默写入重复计数。这进一步证明正式运行必须维持同主机单写者约束。
+- 审查修复后再次使用 MySQL 8.4 验证：旧时间记录在 INSERT 前被拒绝且表内仍为 1 行；相同时间允许写入并得到 2 行；活动锁在到期前返回 owner、等号到期返回 `None`，省略 `now` 的兼容调用仍返回原记录。
 
 验证结束后已删除临时数据库，并通过 `INFORMATION_SCHEMA.SCHEMATA` 确认不存在（`temporary_database_removed=True`）。
 
 ## 最终验证
 
-- Task 5 + desktop/main + Task 4 event/lock/runtime 定向回归：`148 passed`。
-- 全量测试：`1179 passed`。
+- Task 5 + desktop/main + lock/pipeline/event/runtime 定向回归：`167 passed`。
+- 全量测试：`1185 passed`。
 - `python -m compileall -q app tests`：通过。
 - `git diff --check`：通过（仅 Git 提示现有 Windows CRLF 转换策略，无空白错误）。

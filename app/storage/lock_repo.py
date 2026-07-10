@@ -88,9 +88,15 @@ class InMemoryUiLockRepo:
         self.stale_lock_recovered_count += 1
         return True
 
-    def current_owner(self, lock_name: str) -> str | None:
+    def current_owner(
+        self, lock_name: str, now: datetime | None = None
+    ) -> str | None:
         lock = self._locks.get(lock_name)
-        return None if lock is None else lock.owner_pipeline
+        if lock is None:
+            return None
+        if now is not None and lock.expire_time <= now:
+            return None
+        return lock.owner_pipeline
 
 
 class MysqlUiLockRepo:
@@ -200,18 +206,30 @@ class MysqlUiLockRepo:
             )
             return int(result.rowcount or 0) == 1
 
-    def current_owner(self, lock_name: str) -> str | None:
+    def current_owner(
+        self, lock_name: str, now: datetime | None = None
+    ) -> str | None:
+        params: dict[str, object] = {"lock_name": lock_name}
+        expiration_filter = ""
+        if now is not None:
+            if not isinstance(now, datetime):
+                raise TypeError("now must be a datetime or None")
+            expiration_filter = "AND expire_time > :now"
+            params["now"] = (
+                now.replace(tzinfo=None)
+                if now.tzinfo is not None and now.utcoffset() is not None
+                else now
+            )
         statement = text(
-            """
+            f"""
             SELECT owner_pipeline
             FROM wechat_ui_lock
             WHERE lock_name = :lock_name
+              {expiration_filter}
             """
         )
         with self.engine.begin() as connection:
-            owner = connection.execute(
-                statement, {"lock_name": lock_name}
-            ).scalar_one_or_none()
+            owner = connection.execute(statement, params).scalar_one_or_none()
         if owner is None:
             return None
         if not isinstance(owner, str) or not owner:

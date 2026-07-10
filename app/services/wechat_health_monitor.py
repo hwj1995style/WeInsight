@@ -34,7 +34,9 @@ class BooleanHealthProbe(Protocol):
 
 
 class UiLockOwnerReader(Protocol):
-    def current_owner(self, lock_name: str) -> str | None: ...
+    def current_owner(
+        self, lock_name: str, now: datetime | None = None
+    ) -> str | None: ...
 
 
 class WechatHealthRepo(Protocol):
@@ -113,7 +115,7 @@ class WechatHealthMonitor:
             )
 
         try:
-            ui_owner = self.ui_lock_repo.current_owner("wechat_ui")
+            ui_owner = self.ui_lock_repo.current_owner("wechat_ui", now)
         except Exception:
             return self._persist(
                 WechatHealthStatus.RPA_UNAVAILABLE,

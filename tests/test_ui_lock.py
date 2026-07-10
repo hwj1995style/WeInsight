@@ -39,3 +39,17 @@ def test_stale_lock_can_be_recovered() -> None:
     assert recovered is True
     assert repo.current_owner("wechat_ui") is None
     assert repo.stale_lock_recovered_count == 1
+
+
+def test_current_owner_treats_equal_expiry_as_expired_without_deleting() -> None:
+    repo = InMemoryUiLockRepo()
+    acquired_at = datetime(2026, 7, 10, 9, 0, 0)
+    assert repo.acquire("wechat_ui", "group", "task-1", acquired_at, 120)
+    expires_at = acquired_at + timedelta(seconds=120)
+
+    assert (
+        repo.current_owner("wechat_ui", expires_at - timedelta(microseconds=1))
+        == "group"
+    )
+    assert repo.current_owner("wechat_ui", expires_at) is None
+    assert repo.current_owner("wechat_ui") == "group"

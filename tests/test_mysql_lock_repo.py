@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from app.storage.lock_repo import MysqlUiLockRepo
 
@@ -86,3 +87,18 @@ def test_mysql_ui_lock_current_owner_is_read_only_and_bound() -> None:
     assert "SELECT owner_pipeline" in sql
     assert "WHERE lock_name = :lock_name" in sql
     assert params == {"lock_name": "wechat_ui"}
+
+
+def test_mysql_ui_lock_current_owner_filters_expired_lease_by_now() -> None:
+    engine = FakeEngine(scalar="group")
+    now = datetime(2026, 7, 10, 9, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    owner = MysqlUiLockRepo(engine).current_owner("wechat_ui", now)
+
+    assert owner == "group"
+    sql, params = engine.connection.executions[0]
+    assert "expire_time > :now" in sql
+    assert params == {
+        "lock_name": "wechat_ui",
+        "now": datetime(2026, 7, 10, 9, 30),
+    }

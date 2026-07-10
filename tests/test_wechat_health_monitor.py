@@ -126,12 +126,19 @@ class BooleanProbe:
 
 
 class UiLockRepo:
-    def __init__(self, owner=None) -> None:
+    def __init__(self, owner=None, expire_time=None) -> None:
         self.owner = owner
+        self.expire_time = expire_time
         self.calls = []
 
-    def current_owner(self, lock_name: str) -> str | None:
-        self.calls.append(lock_name)
+    def current_owner(self, lock_name: str, now=None) -> str | None:
+        self.calls.append((lock_name, now))
+        if (
+            self.expire_time is not None
+            and now is not None
+            and self.expire_time <= now
+        ):
+            return None
         return self.owner
 
 
@@ -159,7 +166,9 @@ def health_record(**changes) -> WechatHealthRecord:
     return WechatHealthRecord(**values)
 
 
-def build_monitor(*, desktop_result=None, owner=None, records=None):
+def build_monitor(
+    *, desktop_result=None, owner=None, lock_expire_time=None, records=None
+):
     order = []
     repo = FakeHealthRepo(records)
     event_repo = EventRepo()
@@ -171,7 +180,7 @@ def build_monitor(*, desktop_result=None, owner=None, records=None):
         window_probe=window_probe,
         login_probe=login_probe,
         rpa_probe=rpa_probe,
-        ui_lock_repo=UiLockRepo(owner),
+        ui_lock_repo=UiLockRepo(owner, lock_expire_time),
         health_repo=repo,
         event_repo=event_repo,
         hostname="wechat-host",
@@ -246,6 +255,7 @@ def test_ui_busy_defers_all_deep_checks_without_refreshing_full_health() -> None
     assert window.calls == login.calls == rpa.calls == 0
     assert repo.inserted == []
     assert len(repo.records) == 1
+    assert monitor.ui_lock_repo.calls == [("wechat_ui", NOW)]
     assert len(event_repo.events) == 1
     event = event_repo.events[0]
     assert event.event_type == "wechat_health_deep_check_deferred"
@@ -275,6 +285,24 @@ def test_deferred_check_does_not_extend_stale_ok_freshness() -> None:
     assert deferred.checked_at == stale.checked_at
     assert repo.records == [stale]
     assert monitor.can_collect(NOW) is False
+
+
+def test_expired_ui_lock_runs_full_check_and_refreshes_stale_ok() -> None:
+    stale = health_record(checked_at=NOW - timedelta(seconds=601))
+    monitor, repo, _, order, _, _, _ = build_monitor(
+        owner="group",
+        lock_expire_time=NOW,
+        records=[stale],
+    )
+
+    refreshed = monitor.run_check(NOW)
+
+    assert refreshed.status is WechatHealthStatus.OK
+    assert refreshed.checked_at == NOW
+    assert refreshed.deep_check_deferred is False
+    assert order == ["desktop", "window", "login", "rpa"]
+    assert len(repo.inserted) == 1
+    assert monitor.can_collect(NOW) is True
 
 
 @pytest.mark.parametrize(
@@ -379,6 +407,53 @@ def test_repo_insert_locks_latest_host_row_and_increments_failure_count() -> Non
     assert "13812345678" not in insert_params["message"]
     assert "wxid_secret123" not in insert_params["message"]
     assert "https://" not in insert_params["message"]
+
+
+def test_repo_rejects_older_check_than_latest_without_insert() -> None:
+    engine = Engine([Result(rows=[db_row(checked_at=NOW.replace(tzinfo=None))])])
+
+    with pytest.raises(ValueError, match="checked_at"):
+        MysqlWechatHealthRepo(engine).insert_check(
+            new_check(checked_at=NOW - timedelta(seconds=1))
+        )
+
+    assert len(engine.connection.executions) == 1
+
+
+def test_repo_allows_equal_checked_at_and_uses_next_id() -> None:
+    engine = Engine(
+        [
+            Result(rows=[db_row(checked_at=NOW.replace(tzinfo=None))]),
+            Result(lastrowid=8),
+        ]
+    )
+
+    saved = MysqlWechatHealthRepo(engine).insert_check(new_check(checked_at=NOW))
+
+    assert saved.id == 8
+    assert saved.checked_at == NOW
+    assert saved.consecutive_failure_count == 3
+
+
+def test_repo_allows_newer_checked_at() -> None:
+    engine = Engine(
+        [
+            Result(
+                rows=[
+                    db_row(
+                        checked_at=(NOW - timedelta(seconds=1)).replace(
+                            tzinfo=None
+                        )
+                    )
+                ]
+            ),
+            Result(lastrowid=8),
+        ]
+    )
+
+    saved = MysqlWechatHealthRepo(engine).insert_check(new_check(checked_at=NOW))
+
+    assert saved.checked_at == NOW
 
 
 def test_repo_ok_resets_failure_count() -> None:

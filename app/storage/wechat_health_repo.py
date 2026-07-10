@@ -61,10 +61,15 @@ class MysqlWechatHealthRepo:
             previous_row = connection.execute(
                 _SELECT_LATEST_FOR_UPDATE, {"hostname": check.hostname}
             ).mappings().first()
+            previous = (
+                None if previous_row is None else _record_from_row(previous_row)
+            )
+            if previous is not None and check.checked_at < previous.checked_at:
+                raise ValueError(
+                    "checked_at must not be earlier than the latest check"
+                )
             previous_count = (
-                0
-                if previous_row is None
-                else _record_from_row(previous_row).consecutive_failure_count
+                0 if previous is None else previous.consecutive_failure_count
             )
             failure_count = (
                 0 if status is WechatHealthStatus.OK else previous_count + 1
