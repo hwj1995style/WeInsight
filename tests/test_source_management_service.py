@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from app.services.source_management_service import (
     ArticleSourceCommand,
     GroupSourceCommand,
+    SourceAlreadyExistsError,
     SourceInUseError,
     SourceManagementService,
     SourceMustBeDisabledError,
@@ -59,6 +60,7 @@ class FakeGroupRepo:
         self.deleted_ids: list[int] = []
         self.delete_rowcount = 1
         self.delete_error: Exception | None = None
+        self.create_error: Exception | None = None
 
     def list_groups(self):
         return [self.record]
@@ -67,6 +69,8 @@ class FakeGroupRepo:
         return self.record if source_id == 7 else None
 
     def create_group_config(self, **values):
+        if self.create_error is not None:
+            raise self.create_error
         self.created.append(values)
         return 7
 
@@ -178,6 +182,28 @@ def test_list_and_create_sources_are_symmetric(service, group_repo, article_repo
     assert group_repo.created[0]["enabled"] is True
     assert article_repo.created[0]["enabled"] is True
     assert article_repo.created[0]["dedup_key"] == "article_hash"
+
+
+def test_mysql_duplicate_name_is_mapped_to_safe_source_conflict(
+    service, group_repo
+) -> None:
+    group_repo.create_error = IntegrityError(
+        "INSERT", {}, Exception(1062, "Duplicate entry 'secret' for key")
+    )
+
+    with pytest.raises(SourceAlreadyExistsError):
+        service.create_group(GROUP_COMMAND)
+
+
+def test_non_duplicate_integrity_error_from_create_is_not_mapped(
+    service, group_repo
+) -> None:
+    error = IntegrityError("INSERT", {}, Exception(1048, "Column cannot be null"))
+    group_repo.create_error = error
+
+    with pytest.raises(IntegrityError) as exc:
+        service.create_group(GROUP_COMMAND)
+    assert exc.value is error
 
 
 def test_active_reference_blocks_disable(service, refs) -> None:

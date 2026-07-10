@@ -50,6 +50,10 @@ class SourceNotFoundError(LookupError):
     pass
 
 
+class SourceAlreadyExistsError(RuntimeError):
+    pass
+
+
 class SourceMustBeDisabledError(RuntimeError):
     pass
 
@@ -146,18 +150,26 @@ class SourceManagementService:
 
     def create_group(self, command: GroupSourceCommand) -> int:
         self._validate_group_command(command)
-        return self.group_repo.create_group_config(
-            enabled=True,
-            **self._group_values(command),
-        )
+        try:
+            return self.group_repo.create_group_config(
+                enabled=True,
+                **self._group_values(command),
+            )
+        except IntegrityError as exc:
+            self._raise_if_duplicate(exc)
+            raise
 
     def create_article(self, command: ArticleSourceCommand) -> int:
         self._validate_article_command(command)
-        return self.article_repo.create_account_config(
-            enabled=True,
-            dedup_key="article_hash",
-            **self._article_values(command),
-        )
+        try:
+            return self.article_repo.create_account_config(
+                enabled=True,
+                dedup_key="article_hash",
+                **self._article_values(command),
+            )
+        except IntegrityError as exc:
+            self._raise_if_duplicate(exc)
+            raise
 
     def update_group(self, source_id: int, command: GroupSourceCommand) -> None:
         self._validate_source_id(source_id)
@@ -166,7 +178,8 @@ class SourceManagementService:
             self._run_mutation(
                 lambda: self.mutation_repo.update_group(
                     source_id, **self._group_values(command)
-                )
+                ),
+                map_duplicate=True,
             )
             return
         # Non-MySQL adapters and test doubles use the protocol path below. Concrete
@@ -178,9 +191,14 @@ class SourceManagementService:
             )
             if jobs or self.reference_repo.has_group_history(current.group_name):
                 raise SourceRenameBlockedError(jobs)
-        if self.group_repo.update_group_config(
-            source_id, **self._group_values(command)
-        ) == 0:
+        try:
+            affected = self.group_repo.update_group_config(
+                source_id, **self._group_values(command)
+            )
+        except IntegrityError as exc:
+            self._raise_if_duplicate(exc)
+            raise
+        if affected == 0:
             raise SourceNotFoundError(f"group source not found: {source_id}")
 
     def update_article(self, source_id: int, command: ArticleSourceCommand) -> None:
@@ -190,7 +208,8 @@ class SourceManagementService:
             self._run_mutation(
                 lambda: self.mutation_repo.update_article(
                     source_id, **self._article_values(command)
-                )
+                ),
+                map_duplicate=True,
             )
             return
         current = self._get_article(source_id)
@@ -200,9 +219,14 @@ class SourceManagementService:
             )
             if jobs or self.reference_repo.has_article_history(current.account_name):
                 raise SourceRenameBlockedError(jobs)
-        if self.article_repo.update_account_config(
-            source_id, **self._article_values(command)
-        ) == 0:
+        try:
+            affected = self.article_repo.update_account_config(
+                source_id, **self._article_values(command)
+            )
+        except IntegrityError as exc:
+            self._raise_if_duplicate(exc)
+            raise
+        if affected == 0:
             raise SourceNotFoundError(f"article source not found: {source_id}")
 
     def set_group_enabled(self, source_id: int, enabled: bool) -> None:
@@ -437,6 +461,13 @@ class SourceManagementService:
             raise SourceInUseError() from exc
 
     @staticmethod
+    def _raise_if_duplicate(exc: IntegrityError) -> None:
+        args = getattr(exc.orig, "args", ())
+        code = args[0] if args else None
+        if code == 1062:
+            raise SourceAlreadyExistsError() from exc
+
+    @staticmethod
     def _mysql_mutation_repo(
         group_repo: GroupConfigRepo,
         article_repo: ArticleConfigRepo,
@@ -461,7 +492,7 @@ class SourceManagementService:
         return MysqlSourceMutationRepo(engines[0])
 
     @classmethod
-    def _run_mutation(cls, action) -> None:
+    def _run_mutation(cls, action, *, map_duplicate: bool = False) -> None:
         try:
             action()
         except SourceMutationNotFoundError as exc:
@@ -474,4 +505,6 @@ class SourceManagementService:
             raise SourceRenameBlockedError(exc.job_names) from exc
         except IntegrityError as exc:
             cls._raise_if_foreign_key_conflict(exc)
+            if map_duplicate:
+                cls._raise_if_duplicate(exc)
             raise

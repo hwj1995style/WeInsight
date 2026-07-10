@@ -9,6 +9,11 @@
   <body>
     <header class="topbar">
       <a class="brand" href="/">WeInsight</a>
+      <nav class="primary-nav" aria-label="主要导航">
+        <a href="/" {% if section == "home" %}aria-current="page"{% endif %}>控制台</a>
+        <a href="/sources/groups" {% if section == "groups" %}aria-current="page"{% endif %}>微信群</a>
+        <a href="/sources/articles" {% if section == "articles" %}aria-current="page"{% endif %}>公众号</a>
+      </nav>
       <div class="account-actions">
         <span>{{ request.state.admin.username }}</span>
         <a href="/account/password">账户设置</a>

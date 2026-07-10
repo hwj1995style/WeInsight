@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}微信群名单 · WeInsight{% endblock %}
+{% block content %}
+  <section class="page-heading">
+    <div>
+      <h1>微信群名单</h1>
+      <p>配置需要采集的微信群。任务引用和历史数据会保护名单标识。</p>
+    </div>
+    <a class="button" href="/sources/groups/new">新增微信群</a>
+  </section>
+  <section class="content-panel source-panel" aria-label="微信群配置">
+    {% if groups %}
+      <div class="table-scroll" tabindex="0" aria-label="微信群配置表，可横向滚动">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th scope="col">群名称</th>
+              <th scope="col">状态</th>
+              <th scope="col">优先级</th>
+              <th scope="col">采集间隔</th>
+              <th scope="col">类型</th>
+              <th scope="col">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for group in groups %}
+              <tr>
+                <th scope="row">{{ group.group_name }}</th>
+                <td><span class="status-text {{ 'enabled' if group.enabled else 'disabled' }}">{{ "已启用" if group.enabled else "已停用" }}</span></td>
+                <td>{{ group.priority }}</td>
+                <td>{{ group.poll_interval_seconds }} 秒</td>
+                <td>{{ "核心群" if group.is_core_group else "普通群" }}</td>
+                <td>
+                  <div class="row-actions">
+                    <a class="button compact secondary" href="/sources/groups/{{ group.id }}/edit">编辑</a>
+                    {% if group.enabled %}
+                      <form method="post" action="/sources/groups/{{ group.id }}/disable">
+                        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                        <button class="compact secondary-action" type="submit">停用</button>
+                      </form>
+                    {% else %}
+                      <form method="post" action="/sources/groups/{{ group.id }}/enable">
+                        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                        <button class="compact secondary-action" type="submit">启用</button>
+                      </form>
+                      <form method="post" action="/sources/groups/{{ group.id }}/delete" onsubmit="return confirm('只删除配置，不删除历史采集结果。确定删除吗？')">
+                        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                        <button class="compact danger-action" type="submit">删除</button>
+                      </form>
+                      <span class="delete-note">只删除配置，不删除历史采集结果</span>
+                    {% endif %}
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty-state">
+        <h2>还没有微信群配置</h2>
+        <p>新增名单后，可在采集任务中按稳定 ID 引用。</p>
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}
