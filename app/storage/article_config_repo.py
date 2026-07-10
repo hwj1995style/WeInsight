@@ -186,6 +186,37 @@ class MysqlArticleAccountConfigRepo:
             rows = connection.execute(statement).mappings().all()
         return [self._record_from_row(row) for row in rows]
 
+    def list_accounts_page(
+        self, *, limit: int, offset: int
+    ) -> list[ArticleAccountConfigRecord]:
+        statement = text(
+            """
+            SELECT
+                id,
+                account_name,
+                account_type,
+                enabled,
+                priority,
+                poll_interval_minutes,
+                daily_window_start,
+                daily_window_end,
+                max_articles_per_round,
+                collect_today_only,
+                dedup_key,
+                last_success_collect_time,
+                remark
+            FROM wechat_public_account_config
+            ORDER BY priority ASC, account_name ASC
+            LIMIT :limit
+            OFFSET :offset
+            """
+        )
+        with self.engine.begin() as connection:
+            rows = connection.execute(
+                statement, {"limit": limit, "offset": offset}
+            ).mappings().all()
+        return [self._record_from_row(row) for row in rows]
+
     def get_account(self, source_id: int) -> ArticleAccountConfigRecord | None:
         statement = text(
             """

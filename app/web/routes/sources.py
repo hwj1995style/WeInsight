@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
@@ -23,13 +24,24 @@ router = APIRouter(prefix="/sources")
 
 
 @router.get("/groups", response_class=HTMLResponse)
-async def group_list(request: Request) -> Response:
+async def group_list(
+    request: Request, page: int = 1, page_size: int = 20
+) -> Response:
+    try:
+        result = await run_in_threadpool(
+            request.app.state.source_service.list_groups_page,
+            page,
+            page_size,
+        )
+    except ValueError as exc:
+        return _source_error_response(request, exc, "/sources/groups")
     return templates.TemplateResponse(
         request=request,
         name="sources/groups.html",
         context={
             "section": "groups",
-            "groups": request.app.state.source_service.list_groups(),
+            "groups": result.items,
+            "page": result,
         },
     )
 
@@ -41,9 +53,20 @@ async def group_new(request: Request) -> Response:
 
 @router.post("/groups", response_class=HTMLResponse)
 async def group_create(request: Request) -> Response:
-    values = await _form_values(request)
     try:
-        request.app.state.source_service.create_group(_group_command(values))
+        values = await _form_values(request)
+    except ValueError as exc:
+        return _group_form_response(
+            request,
+            _group_defaults(),
+            _form_error_message(exc),
+            status_code=422,
+        )
+    try:
+        await run_in_threadpool(
+            request.app.state.source_service.create_group,
+            _group_command(values),
+        )
     except SourceAlreadyExistsError:
         return _group_form_response(
             request,
@@ -65,24 +88,32 @@ async def group_create(request: Request) -> Response:
 
 @router.get("/groups/{source_id}/edit", response_class=HTMLResponse)
 async def group_edit(request: Request, source_id: int) -> Response:
-    source = _find_source(
-        request.app.state.source_service.list_groups(), source_id
-    )
-    if source is None:
-        return _source_error_response(
-            request,
-            SourceNotFoundError(),
-            "/sources/groups",
+    try:
+        source = await run_in_threadpool(
+            request.app.state.source_service.get_group, source_id
         )
+    except _SOURCE_ERRORS as exc:
+        return _source_error_response(request, exc, "/sources/groups")
     return _group_form_response(request, _group_values(source), None, source_id)
 
 
 @router.post("/groups/{source_id}", response_class=HTMLResponse)
 async def group_update(request: Request, source_id: int) -> Response:
-    values = await _form_values(request)
     try:
-        request.app.state.source_service.update_group(
-            source_id, _group_command(values)
+        values = await _form_values(request)
+    except ValueError as exc:
+        return _group_form_response(
+            request,
+            _group_defaults(),
+            _form_error_message(exc),
+            source_id,
+            status_code=422,
+        )
+    try:
+        await run_in_threadpool(
+            request.app.state.source_service.update_group,
+            source_id,
+            _group_command(values),
         )
     except SourceAlreadyExistsError:
         return _group_form_response(
@@ -107,27 +138,38 @@ async def group_update(request: Request, source_id: int) -> Response:
 
 @router.post("/groups/{source_id}/enable", response_class=HTMLResponse)
 async def group_enable(request: Request, source_id: int) -> Response:
-    return _set_enabled(request, "group", source_id, True)
+    return await _set_enabled(request, "group", source_id, True)
 
 
 @router.post("/groups/{source_id}/disable", response_class=HTMLResponse)
 async def group_disable(request: Request, source_id: int) -> Response:
-    return _set_enabled(request, "group", source_id, False)
+    return await _set_enabled(request, "group", source_id, False)
 
 
 @router.post("/groups/{source_id}/delete", response_class=HTMLResponse)
 async def group_delete(request: Request, source_id: int) -> Response:
-    return _delete(request, "group", source_id)
+    return await _delete(request, "group", source_id)
 
 
 @router.get("/articles", response_class=HTMLResponse)
-async def article_list(request: Request) -> Response:
+async def article_list(
+    request: Request, page: int = 1, page_size: int = 20
+) -> Response:
+    try:
+        result = await run_in_threadpool(
+            request.app.state.source_service.list_articles_page,
+            page,
+            page_size,
+        )
+    except ValueError as exc:
+        return _source_error_response(request, exc, "/sources/articles")
     return templates.TemplateResponse(
         request=request,
         name="sources/articles.html",
         context={
             "section": "articles",
-            "articles": request.app.state.source_service.list_articles(),
+            "articles": result.items,
+            "page": result,
         },
     )
 
@@ -139,10 +181,20 @@ async def article_new(request: Request) -> Response:
 
 @router.post("/articles", response_class=HTMLResponse)
 async def article_create(request: Request) -> Response:
-    values = await _form_values(request)
+    try:
+        values = await _form_values(request)
+    except ValueError as exc:
+        return _article_form_response(
+            request,
+            _article_defaults(),
+            _form_error_message(exc),
+            status_code=422,
+        )
     try:
         command = _article_command(values)
-        request.app.state.source_service.create_article(command)
+        await run_in_threadpool(
+            request.app.state.source_service.create_article, command
+        )
     except SourceAlreadyExistsError:
         return _article_form_response(
             request,
@@ -164,15 +216,12 @@ async def article_create(request: Request) -> Response:
 
 @router.get("/articles/{source_id}/edit", response_class=HTMLResponse)
 async def article_edit(request: Request, source_id: int) -> Response:
-    source = _find_source(
-        request.app.state.source_service.list_articles(), source_id
-    )
-    if source is None:
-        return _source_error_response(
-            request,
-            SourceNotFoundError(),
-            "/sources/articles",
+    try:
+        source = await run_in_threadpool(
+            request.app.state.source_service.get_article, source_id
         )
+    except _SOURCE_ERRORS as exc:
+        return _source_error_response(request, exc, "/sources/articles")
     return _article_form_response(
         request,
         _article_values(source),
@@ -183,10 +232,21 @@ async def article_edit(request: Request, source_id: int) -> Response:
 
 @router.post("/articles/{source_id}", response_class=HTMLResponse)
 async def article_update(request: Request, source_id: int) -> Response:
-    values = await _form_values(request)
     try:
-        request.app.state.source_service.update_article(
-            source_id, _article_command(values)
+        values = await _form_values(request)
+    except ValueError as exc:
+        return _article_form_response(
+            request,
+            _article_defaults(),
+            _form_error_message(exc),
+            source_id,
+            status_code=422,
+        )
+    try:
+        await run_in_threadpool(
+            request.app.state.source_service.update_article,
+            source_id,
+            _article_command(values),
         )
     except SourceAlreadyExistsError:
         return _article_form_response(
@@ -211,20 +271,20 @@ async def article_update(request: Request, source_id: int) -> Response:
 
 @router.post("/articles/{source_id}/enable", response_class=HTMLResponse)
 async def article_enable(request: Request, source_id: int) -> Response:
-    return _set_enabled(request, "article", source_id, True)
+    return await _set_enabled(request, "article", source_id, True)
 
 
 @router.post("/articles/{source_id}/disable", response_class=HTMLResponse)
 async def article_disable(request: Request, source_id: int) -> Response:
-    return _set_enabled(request, "article", source_id, False)
+    return await _set_enabled(request, "article", source_id, False)
 
 
 @router.post("/articles/{source_id}/delete", response_class=HTMLResponse)
 async def article_delete(request: Request, source_id: int) -> Response:
-    return _delete(request, "article", source_id)
+    return await _delete(request, "article", source_id)
 
 
-def _set_enabled(
+async def _set_enabled(
     request: Request,
     source_type: str,
     source_id: int,
@@ -234,22 +294,28 @@ def _set_enabled(
     return_url = _return_url(source_type)
     try:
         if source_type == "group":
-            service.set_group_enabled(source_id, enabled)
+            await run_in_threadpool(
+                service.set_group_enabled, source_id, enabled
+            )
         else:
-            service.set_article_enabled(source_id, enabled)
+            await run_in_threadpool(
+                service.set_article_enabled, source_id, enabled
+            )
     except _SOURCE_ERRORS as exc:
         return _source_error_response(request, exc, return_url)
     return RedirectResponse(return_url, status_code=303)
 
 
-def _delete(request: Request, source_type: str, source_id: int) -> Response:
+async def _delete(
+    request: Request, source_type: str, source_id: int
+) -> Response:
     service = request.app.state.source_service
     return_url = _return_url(source_type)
     try:
         if source_type == "group":
-            service.delete_group(source_id)
+            await run_in_threadpool(service.delete_group, source_id)
         else:
-            service.delete_article(source_id)
+            await run_in_threadpool(service.delete_article, source_id)
     except _SOURCE_ERRORS as exc:
         return _source_error_response(request, exc, return_url)
     return RedirectResponse(return_url, status_code=303)
@@ -293,11 +359,16 @@ def _source_error_response(
 
 async def _form_values(request: Request) -> dict[str, str]:
     form = await request.form()
-    return {
-        key: value
-        for key, value in form.multi_items()
-        if key != "csrf_token" and isinstance(value, str)
-    }
+    values: dict[str, str] = {}
+    for key, value in form.multi_items():
+        if key == "csrf_token":
+            continue
+        if key in values:
+            raise ValueError("duplicate form field")
+        if not isinstance(value, str):
+            raise ValueError("invalid form field")
+        values[key] = value
+    return values
 
 
 def _group_command(values: dict[str, str]) -> GroupSourceCommand:
@@ -334,16 +405,17 @@ def _integer(values: dict[str, str], field: str) -> int:
 
 
 def _checked(values: dict[str, str], field: str) -> bool:
-    return values.get(field) in {"on", "1", "true"}
+    if field not in values:
+        return False
+    value = values[field]
+    if value not in {"on", "1", "true"}:
+        raise ValueError("invalid checkbox field")
+    return True
 
 
 def _optional(values: dict[str, str], field: str) -> str | None:
     value = values.get(field, "")
     return value if value else None
-
-
-def _find_source(sources, source_id: int):
-    return next((source for source in sources if source.id == source_id), None)
 
 
 def _group_defaults() -> dict[str, object]:
@@ -447,6 +519,12 @@ def _article_validation_message(values: dict[str, str]) -> str:
     except ValueError:
         pass
     return "请检查表单字段，公众号间隔至少 10 分钟。"
+
+
+def _form_error_message(exc: ValueError) -> str:
+    if str(exc) == "duplicate form field":
+        return "表单包含重复字段，请刷新页面后重试。"
+    return "请检查表单字段后重试。"
 
 
 def _return_url(source_type: str) -> str:

@@ -128,6 +128,32 @@ def test_mysql_group_config_repo_lists_group_configs() -> None:
     assert re.search(r"SELECT\s+id\s*,", sql)
 
 
+def test_mysql_group_config_repo_pages_with_limit_and_offset() -> None:
+    engine = FakeEngine(
+        rows=[
+            {
+                "id": 7,
+                "group_name": "核心群A",
+                "enabled": 1,
+                "priority": 1,
+                "poll_interval_seconds": 30,
+                "backtrack_pages": 1,
+                "extra_backtrack_pages": 3,
+                "is_core_group": 1,
+                "remark": None,
+            }
+        ]
+    )
+
+    groups = MysqlGroupConfigRepo(engine).list_groups_page(limit=21, offset=40)
+
+    assert groups[0].id == 7
+    sql, params = engine.connection.executions[0]
+    assert "LIMIT :limit" in sql
+    assert "OFFSET :offset" in sql
+    assert params == {"limit": 21, "offset": 40}
+
+
 def test_mysql_group_config_repo_disables_group_config() -> None:
     engine = FakeEngine()
     repo = MysqlGroupConfigRepo(engine)

@@ -61,9 +61,15 @@ class FakeGroupRepo:
         self.delete_rowcount = 1
         self.delete_error: Exception | None = None
         self.create_error: Exception | None = None
+        self.page_records = [self.record]
+        self.page_calls: list[tuple[int, int]] = []
 
     def list_groups(self):
         return [self.record]
+
+    def list_groups_page(self, *, limit: int, offset: int):
+        self.page_calls.append((limit, offset))
+        return self.page_records
 
     def get_group(self, source_id: int):
         return self.record if source_id == 7 else None
@@ -109,9 +115,15 @@ class FakeArticleRepo:
         self.enabled_calls: list[tuple[int, bool]] = []
         self.deleted_ids: list[int] = []
         self.delete_rowcount = 1
+        self.page_records = [self.record]
+        self.page_calls: list[tuple[int, int]] = []
 
     def list_accounts(self):
         return [self.record]
+
+    def list_accounts_page(self, *, limit: int, offset: int):
+        self.page_calls.append((limit, offset))
+        return self.page_records
 
     def get_account(self, source_id: int):
         return self.record if source_id == 9 else None
@@ -182,6 +194,56 @@ def test_list_and_create_sources_are_symmetric(service, group_repo, article_repo
     assert group_repo.created[0]["enabled"] is True
     assert article_repo.created[0]["enabled"] is True
     assert article_repo.created[0]["dedup_key"] == "article_hash"
+
+
+def test_group_page_uses_page_size_plus_one_and_reports_navigation(
+    service, group_repo
+) -> None:
+    group_repo.page_records = [
+        replace(group_repo.record, id=7),
+        replace(group_repo.record, id=8),
+        replace(group_repo.record, id=9),
+    ]
+
+    page = service.list_groups_page(page=2, page_size=2)
+
+    assert [item.id for item in page.items] == [7, 8]
+    assert page.page == 2
+    assert page.page_size == 2
+    assert page.has_previous is True
+    assert page.has_next is True
+    assert group_repo.page_calls == [(3, 2)]
+
+
+def test_article_page_and_public_get_by_id_are_symmetric(
+    service, article_repo
+) -> None:
+    article_repo.page_records = [article_repo.record]
+
+    page = service.list_articles_page(page=1, page_size=20)
+
+    assert page.items == (article_repo.record,)
+    assert page.has_previous is False
+    assert page.has_next is False
+    assert article_repo.page_calls == [(21, 0)]
+    assert service.get_group(7).id == 7
+    assert service.get_article(9).id == 9
+    with pytest.raises(SourceNotFoundError):
+        service.get_group(999)
+    with pytest.raises(SourceNotFoundError):
+        service.get_article(999)
+
+
+@pytest.mark.parametrize(
+    ("page", "page_size"),
+    [(0, 20), (1, 0), (1, 101), (True, 20), (1, True)],
+)
+def test_source_page_rejects_invalid_boundaries_without_querying(
+    service, group_repo, page, page_size
+) -> None:
+    with pytest.raises(ValueError):
+        service.list_groups_page(page=page, page_size=page_size)
+    assert group_repo.page_calls == []
 
 
 def test_mysql_duplicate_name_is_mapped_to_safe_source_conflict(

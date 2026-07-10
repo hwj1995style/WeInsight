@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime
+from html.parser import HTMLParser
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Iterator
 
 import pytest
@@ -23,6 +25,7 @@ from app.services.source_management_service import (
 from app.storage.article_config_repo import ArticleAccountConfigRecord
 from app.storage.group_repo import GroupConfigRecord
 from app.web.app import create_app
+from app.web.routes import sources as source_routes
 
 
 class FakeAuthService:
@@ -117,6 +120,48 @@ class FakeSourceService:
 
     def list_articles(self):
         return self.articles
+
+    def list_groups_page(self, page: int, page_size: int):
+        self._raise_error()
+        self.calls.append(("list_groups_page", page, page_size))
+        offset = (page - 1) * page_size
+        items = self.groups[offset : offset + page_size]
+        return SimpleNamespace(
+            items=tuple(items),
+            page=page,
+            page_size=page_size,
+            has_previous=page > 1,
+            has_next=offset + page_size < len(self.groups),
+        )
+
+    def list_articles_page(self, page: int, page_size: int):
+        self._raise_error()
+        self.calls.append(("list_articles_page", page, page_size))
+        offset = (page - 1) * page_size
+        items = self.articles[offset : offset + page_size]
+        return SimpleNamespace(
+            items=tuple(items),
+            page=page,
+            page_size=page_size,
+            has_previous=page > 1,
+            has_next=offset + page_size < len(self.articles),
+        )
+
+    def get_group(self, source_id: int):
+        self._raise_error()
+        self.calls.append(("get_group", source_id))
+        for source in self.groups:
+            if source.id == source_id:
+                return source
+        raise SourceNotFoundError()
+
+    def get_article(self, source_id: int):
+        self._raise_error()
+        self.calls.append(("get_article", source_id))
+        for source in self.articles:
+            if source.id == source_id:
+                return source
+        raise SourceNotFoundError()
 
     def create_group(self, command: GroupSourceCommand) -> int:
         self._raise_error()
@@ -553,3 +598,244 @@ def test_create_app_default_source_repositories_share_one_engine(
     assert service.article_repo.engine is engine
     assert service.reference_repo.engine is engine
     assert service.mutation_repo.engine is engine
+
+
+class SourceFormParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.forms: list[dict[str, object]] = []
+        self.current: dict[str, object] | None = None
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        values = dict(attrs)
+        if tag == "form":
+            self.current = {
+                "method": values.get("method"),
+                "action": values.get("action"),
+                "inputs": [],
+            }
+        elif tag == "input" and self.current is not None:
+            self.current["inputs"].append(values)  # type: ignore[union-attr]
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "form" and self.current is not None:
+            self.forms.append(self.current)
+            self.current = None
+
+
+@pytest.mark.parametrize(
+    ("path", "expected_actions"),
+    [
+        (
+            "/sources/groups",
+            {
+                "/sources/groups/7/disable",
+                "/sources/groups/8/enable",
+                "/sources/groups/8/delete",
+            },
+        ),
+        (
+            "/sources/articles",
+            {
+                "/sources/articles/9/disable",
+                "/sources/articles/10/enable",
+                "/sources/articles/10/delete",
+            },
+        ),
+        ("/sources/groups/new", {"/sources/groups"}),
+        ("/sources/groups/7/edit", {"/sources/groups/7"}),
+        ("/sources/articles/new", {"/sources/articles"}),
+        ("/sources/articles/9/edit", {"/sources/articles/9"}),
+    ],
+)
+def test_each_source_write_form_is_post_with_exactly_one_csrf(
+    authenticated_client: TestClient,
+    path: str,
+    expected_actions: set[str],
+) -> None:
+    response = authenticated_client.get(path)
+    parser = SourceFormParser()
+    parser.feed(response.text)
+    source_forms = [
+        form
+        for form in parser.forms
+        if str(form["action"]).startswith("/sources/")
+    ]
+
+    assert response.status_code == 200
+    assert {str(form["action"]) for form in source_forms} == expected_actions
+    for form in source_forms:
+        assert str(form["method"]).lower() == "post"
+        csrf_inputs = [
+            field
+            for field in form["inputs"]
+            if field.get("name") == "csrf_token"
+        ]
+        assert csrf_inputs == [
+            {
+                "type": "hidden",
+                "name": "csrf_token",
+                "value": "csrf-token",
+            }
+        ]
+
+
+def test_group_list_paginates_and_preserves_page_size(
+    authenticated_client: TestClient,
+) -> None:
+    response = authenticated_client.get("/sources/groups?page=2&page_size=1")
+
+    assert response.status_code == 200
+    assert "停用群" in response.text
+    assert "核心群A" not in response.text
+    assert 'href="/sources/groups?page=1&amp;page_size=1"' in response.text
+
+
+def test_invalid_page_boundaries_return_safe_422(
+    authenticated_client: TestClient,
+    source_service: FakeSourceService,
+) -> None:
+    source_service.error = ValueError("page_size must be between 1 and 100")
+    response = authenticated_client.get("/sources/articles?page=1&page_size=101")
+
+    assert response.status_code == 422
+    assert "请检查表单字段" in response.text
+
+
+def test_all_source_service_calls_run_in_threadpool(
+    authenticated_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    async def recording_threadpool(function, *args, **kwargs):
+        calls.append(function.__name__)
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(source_routes, "run_in_threadpool", recording_threadpool)
+    group_values = _csrf_data(
+        group_name="线程群",
+        priority="1",
+        poll_interval_seconds="30",
+        backtrack_pages="1",
+        extra_backtrack_pages="3",
+        remark="",
+    )
+    article_values = _csrf_data(
+        account_name="线程公众号",
+        account_type="subscription",
+        priority="1",
+        poll_interval_minutes="10",
+        daily_window_start="07:00",
+        daily_window_end="19:00",
+        max_articles_per_round="5",
+        remark="",
+    )
+
+    requests = (
+        ("get", "/sources/groups", None),
+        ("get", "/sources/articles", None),
+        ("get", "/sources/groups/7/edit", None),
+        ("get", "/sources/articles/9/edit", None),
+        ("post", "/sources/groups", group_values),
+        ("post", "/sources/articles", article_values),
+        ("post", "/sources/groups/7", group_values),
+        ("post", "/sources/articles/9", article_values),
+        ("post", "/sources/groups/7/enable", _csrf_data()),
+        ("post", "/sources/groups/7/disable", _csrf_data()),
+        ("post", "/sources/groups/8/delete", _csrf_data()),
+        ("post", "/sources/articles/9/enable", _csrf_data()),
+        ("post", "/sources/articles/9/disable", _csrf_data()),
+        ("post", "/sources/articles/10/delete", _csrf_data()),
+    )
+    for method, path, data in requests:
+        if method == "get":
+            response = authenticated_client.get(path, follow_redirects=False)
+        else:
+            response = authenticated_client.post(
+                path, data=data, follow_redirects=False
+            )
+        assert response.status_code in {200, 303}
+
+    assert calls == [
+        "list_groups_page",
+        "list_articles_page",
+        "get_group",
+        "get_article",
+        "create_group",
+        "create_article",
+        "update_group",
+        "update_article",
+        "set_group_enabled",
+        "set_group_enabled",
+        "delete_group",
+        "set_article_enabled",
+        "set_article_enabled",
+        "delete_article",
+    ]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/sources/groups/7/enable",
+        "/sources/groups/7/disable",
+        "/sources/groups/7/delete",
+        "/sources/articles/9/enable",
+        "/sources/articles/9/disable",
+        "/sources/articles/9/delete",
+    ],
+)
+def test_all_mutation_paths_reject_get_without_calling_service(
+    authenticated_client: TestClient,
+    source_service: FakeSourceService,
+    path: str,
+) -> None:
+    response = authenticated_client.get(path)
+
+    assert response.status_code in {404, 405}
+    assert source_service.calls == []
+
+
+def test_duplicate_business_field_is_rejected_without_service_call(
+    authenticated_client: TestClient,
+    source_service: FakeSourceService,
+) -> None:
+    response = authenticated_client.post(
+        "/sources/groups",
+        content=(
+            "group_name=A&group_name=B&priority=1&poll_interval_seconds=30&"
+            "backtrack_pages=1&extra_backtrack_pages=3"
+        ),
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "X-CSRF-Token": "csrf-token",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "重复字段" in response.text
+    assert source_service.calls == []
+
+
+@pytest.mark.parametrize("checkbox_value", ["yes", "off", "TRUE", "2"])
+def test_illegal_checkbox_value_is_rejected_without_service_call(
+    authenticated_client: TestClient,
+    source_service: FakeSourceService,
+    checkbox_value: str,
+) -> None:
+    response = authenticated_client.post(
+        "/sources/groups",
+        data=_csrf_data(
+            group_name="非法复选框群",
+            is_core_group=checkbox_value,
+            priority="1",
+            poll_interval_seconds="30",
+            backtrack_pages="1",
+            extra_backtrack_pages="3",
+            remark="",
+        ),
+    )
+
+    assert response.status_code == 422
+    assert source_service.calls == []

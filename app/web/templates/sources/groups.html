@@ -63,4 +63,15 @@
       </div>
     {% endif %}
   </section>
+  {% if page.has_previous or page.has_next %}
+    <nav class="pagination" aria-label="微信群名单分页">
+      {% if page.has_previous %}
+        <a class="button secondary" href="/sources/groups?page={{ page.page - 1 }}&amp;page_size={{ page.page_size }}">上一页</a>
+      {% endif %}
+      <span>第 {{ page.page }} 页</span>
+      {% if page.has_next %}
+        <a class="button secondary" href="/sources/groups?page={{ page.page + 1 }}&amp;page_size={{ page.page_size }}">下一页</a>
+      {% endif %}
+    </nav>
+  {% endif %}
 {% endblock %}

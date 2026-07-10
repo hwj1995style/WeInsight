@@ -148,6 +148,38 @@ def test_mysql_article_account_config_repo_lists_accounts() -> None:
     assert re.search(r"SELECT\s+id\s*,", sql)
 
 
+def test_mysql_article_account_config_repo_pages_with_limit_and_offset() -> None:
+    engine = FakeEngine(
+        rows=[
+            {
+                "id": 9,
+                "account_name": "行业观察",
+                "account_type": "subscription",
+                "enabled": 1,
+                "priority": 2,
+                "poll_interval_minutes": 10,
+                "daily_window_start": "07:30:00",
+                "daily_window_end": "19:30:00",
+                "max_articles_per_round": 5,
+                "collect_today_only": 1,
+                "dedup_key": "article_hash",
+                "last_success_collect_time": None,
+                "remark": None,
+            }
+        ]
+    )
+
+    accounts = MysqlArticleAccountConfigRepo(engine).list_accounts_page(
+        limit=11, offset=20
+    )
+
+    assert accounts[0].id == 9
+    sql, params = engine.connection.executions[0]
+    assert "LIMIT :limit" in sql
+    assert "OFFSET :offset" in sql
+    assert params == {"limit": 11, "offset": 20}
+
+
 def test_mysql_article_account_config_repo_lists_due_accounts_from_article_config_only() -> None:
     engine = FakeEngine(
         rows=[

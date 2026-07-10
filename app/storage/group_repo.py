@@ -357,6 +357,33 @@ class MysqlGroupConfigRepo:
             rows = connection.execute(statement).mappings().all()
         return [self._record_from_row(row) for row in rows]
 
+    def list_groups_page(
+        self, *, limit: int, offset: int
+    ) -> list[GroupConfigRecord]:
+        statement = text(
+            """
+            SELECT
+                id,
+                group_name,
+                enabled,
+                priority,
+                poll_interval_seconds,
+                backtrack_pages,
+                extra_backtrack_pages,
+                is_core_group,
+                remark
+            FROM wechat_group_config
+            ORDER BY priority ASC, group_name ASC
+            LIMIT :limit
+            OFFSET :offset
+            """
+        )
+        with self.engine.begin() as connection:
+            rows = connection.execute(
+                statement, {"limit": limit, "offset": offset}
+            ).mappings().all()
+        return [self._record_from_row(row) for row in rows]
+
     def get_group(self, source_id: int) -> GroupConfigRecord | None:
         statement = text(
             """

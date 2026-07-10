@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import time
-from typing import Protocol
+from typing import Generic, Protocol, TypeVar
 
 from sqlalchemy.exc import IntegrityError
 
@@ -20,6 +20,18 @@ from app.storage.source_mutation_repo import (
     SourceMutationRenameBlockedError,
 )
 from app.storage.source_reference_repo import MysqlSourceReferenceRepo
+
+
+SourceRecord = TypeVar("SourceRecord")
+
+
+@dataclass(frozen=True)
+class SourcePage(Generic[SourceRecord]):
+    items: tuple[SourceRecord, ...]
+    page: int
+    page_size: int
+    has_previous: bool
+    has_next: bool
 
 
 @dataclass(frozen=True)
@@ -76,6 +88,10 @@ class SourceRenameBlockedError(RuntimeError):
 class GroupConfigRepo(Protocol):
     def list_groups(self) -> list[GroupConfigRecord]: ...
 
+    def list_groups_page(
+        self, *, limit: int, offset: int
+    ) -> list[GroupConfigRecord]: ...
+
     def get_group(self, source_id: int) -> GroupConfigRecord | None: ...
 
     def create_group_config(self, **values) -> int: ...
@@ -89,6 +105,10 @@ class GroupConfigRepo(Protocol):
 
 class ArticleConfigRepo(Protocol):
     def list_accounts(self) -> list[ArticleAccountConfigRecord]: ...
+
+    def list_accounts_page(
+        self, *, limit: int, offset: int
+    ) -> list[ArticleAccountConfigRecord]: ...
 
     def get_account(self, source_id: int) -> ArticleAccountConfigRecord | None: ...
 
@@ -147,6 +167,46 @@ class SourceManagementService:
 
     def list_articles(self) -> list[ArticleAccountConfigRecord]:
         return self.article_repo.list_accounts()
+
+    def list_groups_page(
+        self, page: int, page_size: int
+    ) -> SourcePage[GroupConfigRecord]:
+        self._validate_page(page, page_size)
+        rows = self.group_repo.list_groups_page(
+            limit=page_size + 1,
+            offset=(page - 1) * page_size,
+        )
+        return SourcePage(
+            items=tuple(rows[:page_size]),
+            page=page,
+            page_size=page_size,
+            has_previous=page > 1,
+            has_next=len(rows) > page_size,
+        )
+
+    def list_articles_page(
+        self, page: int, page_size: int
+    ) -> SourcePage[ArticleAccountConfigRecord]:
+        self._validate_page(page, page_size)
+        rows = self.article_repo.list_accounts_page(
+            limit=page_size + 1,
+            offset=(page - 1) * page_size,
+        )
+        return SourcePage(
+            items=tuple(rows[:page_size]),
+            page=page,
+            page_size=page_size,
+            has_previous=page > 1,
+            has_next=len(rows) > page_size,
+        )
+
+    def get_group(self, source_id: int) -> GroupConfigRecord:
+        self._validate_source_id(source_id)
+        return self._get_group(source_id)
+
+    def get_article(self, source_id: int) -> ArticleAccountConfigRecord:
+        self._validate_source_id(source_id)
+        return self._get_article(source_id)
 
     def create_group(self, command: GroupSourceCommand) -> int:
         self._validate_group_command(command)
@@ -451,6 +511,11 @@ class SourceManagementService:
     def _validate_enabled(enabled: bool) -> None:
         if type(enabled) is not bool:
             raise ValueError("enabled must be a boolean")
+
+    @classmethod
+    def _validate_page(cls, page: int, page_size: int) -> None:
+        cls._validate_integer(page, "page", minimum=1)
+        cls._validate_integer(page_size, "page_size", minimum=1, maximum=100)
 
     @staticmethod
     def _raise_if_foreign_key_conflict(exc: IntegrityError) -> None:

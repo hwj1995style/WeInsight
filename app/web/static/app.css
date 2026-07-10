@@ -96,6 +96,8 @@ form button { margin-top: 1.25rem; }
 .form-actions button { margin: 0; }
 .section-title { margin: 1.5rem 0 .6rem; font-size: 1rem; }
 .reference-list { margin: 0 0 1.5rem; padding-left: 1.25rem; line-height: 1.7; overflow-wrap: anywhere; }
+.pagination { display: flex; align-items: center; justify-content: flex-end; gap: .85rem; margin-top: 1rem; color: var(--color-muted); font-size: .86rem; }
+.pagination .button { padding: .55rem .8rem; }
 
 @media (max-width: 720px) {
   .login-page { padding: 0; align-items: stretch; }
@@ -115,4 +117,5 @@ form button { margin-top: 1.25rem; }
   .form-grid { grid-template-columns: 1fr; }
   .form-actions { align-items: stretch; flex-direction: column; }
   .form-actions .button, .form-actions button { width: 100%; text-align: center; }
+  .pagination { justify-content: space-between; }
 }
