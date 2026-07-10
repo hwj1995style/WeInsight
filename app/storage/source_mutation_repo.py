@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
@@ -43,6 +44,15 @@ class SourceGuardRecord:
     enabled: bool
 
 
+@dataclass(frozen=True)
+class SourceCreationRecord:
+    id: int
+    source_name: str
+    enabled: bool
+    priority: int
+    config: dict[str, Any]
+
+
 class MysqlSourceWriteGuard:
     """Locks source identity inside the caller's existing write transaction."""
 
@@ -59,6 +69,30 @@ class MysqlSourceWriteGuard:
                 f"{source_type} source is disabled: {source_id}"
             )
         return record
+
+    def lock_for_job_creation(
+        self, connection: Connection, source_type: str, source_id: int
+    ) -> SourceCreationRecord:
+        """Exclusively lock and return the canonical job-safe source config."""
+        row = connection.execute(
+            _source_creation_lock_statement(source_type),
+            {"source_id": source_id},
+        ).mappings().first()
+        if row is None:
+            raise SourceGuardNotFoundError(
+                f"{source_type} source not found: {source_id}"
+            )
+        if not bool(row["enabled"]):
+            raise SourceGuardDisabledError(
+                f"{source_type} source is disabled: {source_id}"
+            )
+        return SourceCreationRecord(
+            id=int(row["id"]),
+            source_name=str(row["source_name"]),
+            enabled=True,
+            priority=int(row["priority"]),
+            config=_source_creation_config(source_type, row),
+        )
 
     def lock_for_history_write(
         self, connection: Connection, source_type: str, source_name: str
@@ -265,6 +299,69 @@ def _source_table(source_type: str) -> str:
     if source_type == "article":
         return "wechat_public_account_config"
     raise ValueError("source_type must be group or article")
+
+
+def _source_creation_lock_statement(source_type: str):
+    if source_type == "group":
+        columns = """
+            id,
+            group_name AS source_name,
+            enabled,
+            priority,
+            poll_interval_seconds,
+            backtrack_pages,
+            extra_backtrack_pages,
+            is_core_group,
+            remark
+        """
+        table = "wechat_group_config"
+    elif source_type == "article":
+        columns = """
+            id,
+            account_name AS source_name,
+            enabled,
+            priority,
+            account_type,
+            poll_interval_minutes,
+            daily_window_start,
+            daily_window_end,
+            max_articles_per_round,
+            collect_today_only,
+            dedup_key,
+            remark
+        """
+        table = "wechat_public_account_config"
+    else:
+        raise ValueError("source_type must be group or article")
+    return text(
+        f"""
+        SELECT {columns}
+        FROM {table}
+        WHERE id = :source_id
+        FOR UPDATE
+        """
+    )
+
+
+def _source_creation_config(source_type: str, row) -> dict[str, Any]:
+    if source_type == "group":
+        return {
+            "backtrack_pages": int(row["backtrack_pages"]),
+            "extra_backtrack_pages": int(row["extra_backtrack_pages"]),
+            "is_core_group": bool(row["is_core_group"]),
+            "poll_interval_seconds": int(row["poll_interval_seconds"]),
+            "remark": row["remark"],
+        }
+    return {
+        "account_type": str(row["account_type"]),
+        "collect_today_only": bool(row["collect_today_only"]),
+        "daily_window_end": row["daily_window_end"],
+        "daily_window_start": row["daily_window_start"],
+        "dedup_key": str(row["dedup_key"]),
+        "max_articles_per_round": int(row["max_articles_per_round"]),
+        "poll_interval_minutes": int(row["poll_interval_minutes"]),
+        "remark": row["remark"],
+    }
 
 
 def _has_current_history(

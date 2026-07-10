@@ -220,6 +220,80 @@ def test_job_target_guard_rejects_disabled_source() -> None:
         MysqlSourceWriteGuard().lock_for_job_target(connection, "article", 9)
 
 
+def test_job_creation_guard_exclusively_locks_complete_group_config() -> None:
+    connection = Connection(
+        [
+            Result(
+                rows=[
+                    {
+                        "id": 7,
+                        "source_name": "核心群A",
+                        "enabled": 1,
+                        "priority": 2,
+                        "poll_interval_seconds": 45,
+                        "backtrack_pages": 4,
+                        "extra_backtrack_pages": 8,
+                        "is_core_group": 1,
+                        "remark": "重点",
+                    }
+                ]
+            )
+        ]
+    )
+
+    record = MysqlSourceWriteGuard().lock_for_job_creation(
+        connection, "group", 7
+    )
+
+    assert record.id == 7
+    assert record.source_name == "核心群A"
+    assert record.priority == 2
+    assert record.config == {
+        "backtrack_pages": 4,
+        "extra_backtrack_pages": 8,
+        "is_core_group": True,
+        "poll_interval_seconds": 45,
+        "remark": "重点",
+    }
+    sql, params = connection.executions[0]
+    assert "FROM wechat_group_config" in sql
+    assert "FOR UPDATE" in sql
+    assert "backtrack_pages" in sql
+    assert params == {"source_id": 7}
+
+
+def test_job_creation_guard_rejects_disabled_complete_article_config() -> None:
+    connection = Connection(
+        [
+            Result(
+                rows=[
+                    {
+                        "id": 9,
+                        "source_name": "行业观察",
+                        "enabled": 0,
+                        "priority": 3,
+                        "account_type": "subscription",
+                        "poll_interval_minutes": 10,
+                        "daily_window_start": "07:30:00",
+                        "daily_window_end": "19:30:00",
+                        "max_articles_per_round": 5,
+                        "collect_today_only": 1,
+                        "dedup_key": "article_hash",
+                        "remark": None,
+                    }
+                ]
+            )
+        ]
+    )
+
+    with pytest.raises(SourceGuardDisabledError):
+        MysqlSourceWriteGuard().lock_for_job_creation(
+            connection, "article", 9
+        )
+
+    assert "FOR UPDATE" in connection.executions[0][0]
+
+
 @pytest.mark.parametrize(
     ("source_type", "source_name", "table", "column"),
     [
