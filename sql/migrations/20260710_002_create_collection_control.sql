@@ -24,7 +24,6 @@ CREATE TABLE IF NOT EXISTS wechat_collection_job (
     KEY idx_collection_job_due (status, next_run_at),
     KEY idx_collection_job_window (effective_start_at, effective_end_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
 CREATE TABLE IF NOT EXISTS wechat_collection_job_target (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '任务目标主键',
     job_id BIGINT NOT NULL COMMENT '采集任务主键',
@@ -151,4 +150,3 @@ CREATE TABLE IF NOT EXISTS wechat_client_health_check (
     KEY idx_client_health_status (status, checked_at),
     KEY idx_client_health_worker (worker_id, checked_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
