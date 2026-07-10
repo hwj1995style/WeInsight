@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import threading
+import time
 from collections.abc import Callable
 from datetime import datetime
 from typing import Protocol, TypeVar
@@ -139,19 +140,39 @@ class ManagedModeGuard:
         if acquired is not True:
             raise WechatUiBusyError("WeChat UI is busy")
 
-        stop = None
-        lease_lost = None
+        state_lock = None
+        wakeup = None
         renewer = None
         renewer_started = False
+        stop_requested = False
+        lease_was_lost = False
         operation_error: BaseException | None = None
         cleanup_error: BaseException | None = None
         released = False
         try:
-            stop = threading.Event()
-            lease_lost = threading.Event()
+            state_lock = threading.Lock()
+            wakeup = threading.Event()
+
+            def should_stop() -> bool:
+                with state_lock:
+                    return stop_requested
+
+            def mark_lease_lost() -> None:
+                nonlocal lease_was_lost
+                with state_lock:
+                    lease_was_lost = True
 
             def renew_lease() -> None:
-                while not stop.wait(self.ui_heartbeat_interval_seconds):
+                while True:
+                    if should_stop():
+                        return
+                    try:
+                        wakeup.wait(self.ui_heartbeat_interval_seconds)
+                    except Exception:
+                        mark_lease_lost()
+                        return
+                    if should_stop():
+                        return
                     try:
                         heartbeat_now = self.now_provider()
                         _require_now(heartbeat_now)
@@ -162,10 +183,12 @@ class ManagedModeGuard:
                             heartbeat_now,
                         )
                     except Exception:
-                        lease_lost.set()
+                        mark_lease_lost()
                         return
                     if renewed is not True:
-                        lease_lost.set()
+                        mark_lease_lost()
+                        return
+                    if should_stop():
                         return
 
             renewer = threading.Thread(
@@ -179,11 +202,18 @@ class ManagedModeGuard:
         except BaseException as exc:
             operation_error = exc
         finally:
-            if stop is not None:
+            if state_lock is not None:
                 try:
-                    stop.set()
+                    with state_lock:
+                        stop_requested = True
                 except BaseException as exc:
                     cleanup_error = exc
+            if wakeup is not None:
+                try:
+                    wakeup.set()
+                except BaseException as exc:
+                    if cleanup_error is None:
+                        cleanup_error = exc
             should_join = renewer_started
             if renewer is not None and not should_join:
                 try:
@@ -193,22 +223,57 @@ class ManagedModeGuard:
                         cleanup_error = exc
                     should_join = False
             if renewer is not None and should_join:
-                try:
-                    renewer.join()
-                except BaseException as exc:
-                    if cleanup_error is None:
-                        cleanup_error = exc
+                deadline = time.monotonic() + float(
+                    self.ui_heartbeat_interval_seconds
+                ) + 0.05
+                alive = True
+                for _ in range(3):
+                    remaining = max(0.0, deadline - time.monotonic())
+                    timeout = min(
+                        float(self.ui_heartbeat_interval_seconds),
+                        remaining,
+                    )
                     try:
-                        renewer.join()
-                    except BaseException:
-                        pass
+                        renewer.join(timeout=timeout)
+                    except BaseException as exc:
+                        if cleanup_error is None:
+                            cleanup_error = exc
+                    try:
+                        alive = renewer.is_alive()
+                    except BaseException as exc:
+                        if cleanup_error is None:
+                            cleanup_error = exc
+                        alive = True
+                    if not alive:
+                        break
+                while alive and time.monotonic() < deadline:
+                    remaining = deadline - time.monotonic()
+                    time.sleep(min(0.005, max(0.0, remaining)))
+                    try:
+                        alive = renewer.is_alive()
+                    except BaseException as exc:
+                        if cleanup_error is None:
+                            cleanup_error = exc
+                        alive = True
+                if alive:
+                    if state_lock is not None:
+                        try:
+                            with state_lock:
+                                lease_was_lost = True
+                        except BaseException as exc:
+                            if cleanup_error is None:
+                                cleanup_error = exc
+                    if cleanup_error is None:
+                        cleanup_error = WechatUiLeaseLostError(
+                            "WeChat UI lease thread did not stop"
+                        )
             released = self._release(pipeline, owner_task_id)
 
         if operation_error is not None:
             raise operation_error
         if cleanup_error is not None:
             raise cleanup_error
-        if lease_lost is not None and lease_lost.is_set():
+        if lease_was_lost:
             raise WechatUiLeaseLostError("WeChat UI lease was lost")
         if not released:
             raise WechatUiReleaseError("failed to release WeChat UI lock")

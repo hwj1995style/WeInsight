@@ -255,7 +255,11 @@ def test_thread_constructor_failure_still_releases_lock(monkeypatch) -> None:
     monkeypatch.setattr(
         guard_module,
         "threading",
-        SimpleNamespace(Event=threading.Event, Thread=fail_thread),
+        SimpleNamespace(
+            Event=threading.Event,
+            Lock=threading.Lock,
+            Thread=fail_thread,
+        ),
     )
 
     with pytest.raises(RuntimeError) as raised:
@@ -278,7 +282,11 @@ def test_event_constructor_failure_still_releases_lock(monkeypatch) -> None:
     monkeypatch.setattr(
         guard_module,
         "threading",
-        SimpleNamespace(Event=fail_event, Thread=threading.Thread),
+        SimpleNamespace(
+            Event=fail_event,
+            Lock=threading.Lock,
+            Thread=threading.Thread,
+        ),
     )
 
     with pytest.raises(RuntimeError) as raised:
@@ -318,6 +326,7 @@ def test_thread_start_failure_still_releases_without_join(monkeypatch) -> None:
         "threading",
         SimpleNamespace(
             Event=threading.Event,
+            Lock=threading.Lock,
             Thread=lambda **kwargs: thread,
         ),
     )
@@ -332,20 +341,22 @@ def test_thread_start_failure_still_releases_without_join(monkeypatch) -> None:
     assert lock_repo.release_calls == [("wechat_ui", "group", "manual-1")]
 
 
-def test_thread_join_failure_retries_join_and_still_releases(monkeypatch) -> None:
+def test_thread_join_failure_rechecks_liveness_and_still_releases(monkeypatch) -> None:
     lock_repo = UiLockRepo()
     expected = RuntimeError("thread join failed")
 
     class JoinFailureThread:
         def __init__(self, **kwargs) -> None:
             self.join_calls = 0
+            self.join_timeouts = []
             self.active = False
 
         def start(self) -> None:
             self.active = True
 
-        def join(self) -> None:
+        def join(self, timeout=None) -> None:
             self.join_calls += 1
+            self.join_timeouts.append(timeout)
             self.active = False
             if self.join_calls == 1:
                 raise expected
@@ -359,6 +370,7 @@ def test_thread_join_failure_retries_join_and_still_releases(monkeypatch) -> Non
         "threading",
         SimpleNamespace(
             Event=threading.Event,
+            Lock=threading.Lock,
             Thread=lambda **kwargs: thread,
         ),
     )
@@ -369,8 +381,167 @@ def test_thread_join_failure_retries_join_and_still_releases(monkeypatch) -> Non
         )
 
     assert raised.value is expected
-    assert thread.join_calls == 2
+    assert thread.join_calls == 1
+    assert thread.join_timeouts[0] is not None
     assert thread.is_alive() is False
+    assert lock_repo.release_calls == [("wechat_ui", "group", "manual-1")]
+
+
+def test_stop_wakeup_failure_exits_within_interval_without_extra_heartbeat(
+    monkeypatch,
+) -> None:
+    lock_repo = UiLockRepo(heartbeat_results=[False])
+    expected = RuntimeError("wake event set failed")
+
+    class FailingWakeEvent:
+        def __init__(self) -> None:
+            self.inner = threading.Event()
+
+        def wait(self, timeout=None):
+            return self.inner.wait(timeout)
+
+        def set(self) -> None:
+            raise expected
+
+    events = iter([FailingWakeEvent(), threading.Event()])
+    monkeypatch.setattr(
+        guard_module,
+        "threading",
+        SimpleNamespace(
+            Event=lambda: next(events),
+            Lock=threading.Lock,
+            Thread=threading.Thread,
+        ),
+    )
+
+    started = datetime.now()
+    with pytest.raises(RuntimeError) as raised:
+        build_guard(ui_lock_repo=lock_repo).run_manual(
+            "group", "manual-1", NOW, lambda: "done"
+        )
+    elapsed = datetime.now() - started
+
+    assert raised.value is expected
+    assert elapsed < timedelta(seconds=0.5)
+    assert lock_repo.heartbeat_calls == []
+    assert lock_repo.release_calls == [("wechat_ui", "group", "manual-1")]
+    assert _active_lease_threads() == []
+
+
+def test_continuous_join_errors_are_bounded_and_never_skip_release(
+    monkeypatch,
+) -> None:
+    lock_repo = UiLockRepo()
+    expected = RuntimeError("join failed continuously")
+
+    class BoundedFailureThread:
+        def __init__(self, **kwargs) -> None:
+            self.join_timeouts = []
+            self.alive_checks = 0
+            self.active = False
+
+        def start(self) -> None:
+            self.active = True
+
+        def join(self, timeout=None) -> None:
+            self.join_timeouts.append(timeout)
+            raise expected
+
+        def is_alive(self) -> bool:
+            self.alive_checks += 1
+            if self.alive_checks >= 3:
+                self.active = False
+            return self.active
+
+    thread = BoundedFailureThread()
+    monkeypatch.setattr(
+        guard_module,
+        "threading",
+        SimpleNamespace(
+            Event=threading.Event,
+            Lock=threading.Lock,
+            Thread=lambda **kwargs: thread,
+        ),
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        build_guard(ui_lock_repo=lock_repo).run_manual(
+            "article", "manual-1", NOW, lambda: "done"
+        )
+
+    assert raised.value is expected
+    assert len(thread.join_timeouts) == 3
+    assert all(timeout is not None for timeout in thread.join_timeouts)
+    assert thread.is_alive() is False
+    assert lock_repo.release_calls == [
+        ("wechat_ui", "article", "manual-1")
+    ]
+
+
+def test_still_live_renewer_marks_lease_lost_and_releases_without_success(
+    monkeypatch,
+) -> None:
+    lock_repo = UiLockRepo()
+
+    class NeverStopsThread:
+        def __init__(self, **kwargs) -> None:
+            self.join_timeouts = []
+
+        def start(self) -> None:
+            return None
+
+        def join(self, timeout=None) -> None:
+            self.join_timeouts.append(timeout)
+
+        def is_alive(self) -> bool:
+            return True
+
+    thread = NeverStopsThread()
+    monkeypatch.setattr(
+        guard_module,
+        "threading",
+        SimpleNamespace(
+            Event=threading.Event,
+            Lock=threading.Lock,
+            Thread=lambda **kwargs: thread,
+        ),
+    )
+
+    started = datetime.now()
+    with pytest.raises(WechatUiLeaseLostError, match="thread did not stop"):
+        build_guard(ui_lock_repo=lock_repo).run_manual(
+            "group", "manual-1", NOW, lambda: "must-not-return"
+        )
+    elapsed = datetime.now() - started
+
+    assert elapsed < timedelta(seconds=0.5)
+    assert len(thread.join_timeouts) == 3
+    assert lock_repo.release_calls == [("wechat_ui", "group", "manual-1")]
+
+
+def test_inflight_heartbeat_finishes_then_thread_exits_before_release() -> None:
+    heartbeat_started = threading.Event()
+    allow_heartbeat_to_finish = threading.Event()
+
+    class InflightHeartbeatRepo(UiLockRepo):
+        def heartbeat(self, *args, **kwargs) -> bool:
+            heartbeat_started.set()
+            assert allow_heartbeat_to_finish.wait(timeout=1)
+            return super().heartbeat(*args, **kwargs)
+
+    lock_repo = InflightHeartbeatRepo()
+
+    def action() -> str:
+        assert heartbeat_started.wait(timeout=1)
+        threading.Timer(0.02, allow_heartbeat_to_finish.set).start()
+        return "done"
+
+    result = build_guard(ui_lock_repo=lock_repo).run_manual(
+        "group", "manual-1", NOW, action
+    )
+
+    assert result == "done"
+    assert _active_lease_threads() == []
     assert lock_repo.release_calls == [("wechat_ui", "group", "manual-1")]
 
 
