@@ -162,7 +162,38 @@ TABLE_RULES = {
 
 
 def _without_sql_comments(sql: str) -> str:
-    return re.sub(r"(?m)^\s*--.*$", "", sql)
+    result: list[str] = []
+    index = 0
+    in_string = False
+    while index < len(sql):
+        char = sql[index]
+        if char == "'":
+            result.append(char)
+            if in_string and index + 1 < len(sql) and sql[index + 1] == "'":
+                result.append("'")
+                index += 2
+                continue
+            in_string = not in_string
+            index += 1
+            continue
+        if not in_string and sql.startswith("/*", index):
+            end = sql.find("*/", index + 2)
+            index = len(sql) if end < 0 else end + 2
+            result.append(" ")
+            continue
+        if not in_string and sql.startswith("--", index) and (
+            index + 2 == len(sql) or sql[index + 2].isspace()
+        ):
+            end = sql.find("\n", index + 2)
+            index = len(sql) if end < 0 else end
+            continue
+        if not in_string and char == "#":
+            end = sql.find("\n", index + 1)
+            index = len(sql) if end < 0 else end
+            continue
+        result.append(char)
+        index += 1
+    return "".join(result)
 
 
 def _table_block(sql: str, table: str) -> str:
@@ -179,8 +210,38 @@ def _normalized(sql: str) -> str:
     return re.sub(r"\s+", "", sql).lower()
 
 
-def _assert_table_fragment(block: str, fragment: str, table: str) -> None:
-    assert _normalized(fragment) in _normalized(block), (table, fragment)
+def _table_items(block: str) -> set[str]:
+    start = block.find("(")
+    end = block.upper().rfind(") ENGINE=INNODB")
+    assert start >= 0 and end > start
+    body = block[start + 1 : end]
+    items: list[str] = []
+    item_start = 0
+    depth = 0
+    in_string = False
+    index = 0
+    while index < len(body):
+        char = body[index]
+        if char == "'":
+            if in_string and index + 1 < len(body) and body[index + 1] == "'":
+                index += 2
+                continue
+            in_string = not in_string
+        elif not in_string:
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            elif char == "," and depth == 0:
+                items.append(body[item_start:index])
+                item_start = index + 1
+        index += 1
+    items.append(body[item_start:])
+    return {_normalized(item) for item in items if item.strip()}
+
+
+def _assert_table_item(items: set[str], expected: str, table: str) -> None:
+    assert _normalized(expected) in items, (table, expected)
 
 
 def _assert_schema(sql: str) -> None:
@@ -190,10 +251,11 @@ def _assert_schema(sql: str) -> None:
         assert forbidden not in upper
     for table, fields in TABLE_FIELDS.items():
         block = _table_block(uncommented, table)
+        items = _table_items(block)
         for field in fields:
-            _assert_table_fragment(block, field, table)
+            _assert_table_item(items, field, table)
         for rule in TABLE_RULES[table]:
-            _assert_table_fragment(block, rule, table)
+            _assert_table_item(items, rule, table)
 
 
 def _remove_from_table(sql: str, table: str, fragment: str) -> str:
@@ -277,3 +339,37 @@ def test_schema_validation_ignores_commented_out_contract_lines() -> None:
 
     with pytest.raises(AssertionError):
         _assert_schema(migration.replace(fragment, f"-- {fragment}", 1))
+
+
+@pytest.mark.parametrize(
+    "commented_fragment",
+    [
+        "-- KEY idx_collection_event_run (run_id, id)",
+        "# KEY idx_collection_event_run (run_id, id)",
+        "/* KEY idx_collection_event_run (run_id, id) */",
+    ],
+)
+def test_schema_validation_ignores_all_mysql_comment_forms(
+    commented_fragment: str,
+) -> None:
+    migration = MIGRATION.read_text(encoding="utf-8")
+    mutated = _remove_from_table(
+        migration,
+        "wechat_collection_job_event",
+        "KEY idx_collection_event_run (run_id, id)",
+    )
+    marker = ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+    target_block = _table_block(mutated, "wechat_collection_job_event")
+    mutated_block = target_block.replace(marker, f"{commented_fragment}\n{marker}")
+
+    with pytest.raises(AssertionError):
+        _assert_schema(mutated.replace(target_block, mutated_block, 1))
+
+
+def test_schema_validation_rejects_extra_column_semantics() -> None:
+    migration = MIGRATION.read_text(encoding="utf-8")
+    original = "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"
+    altered = f"{original} ON UPDATE CURRENT_TIMESTAMP"
+
+    with pytest.raises(AssertionError):
+        _assert_schema(migration.replace(original, altered, 1))
