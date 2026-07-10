@@ -17,7 +17,7 @@
     const status = document.getElementById('event-connection');
     const list = document.getElementById('event-list');
     if (!window.EventSource || !status || !list) { if (status) status.textContent = '实时连接不可用，显示页面加载时事件。'; return; }
-    const source = new EventSource('/events/stream?run_id={{ detail.run.id }}');
+    const source = new EventSource('/events/stream?run_id={{ detail.run.id }}{% if initial_event_id is not none %}&after_id={{ initial_event_id }}{% endif %}');
     source.onopen = () => { status.textContent = '实时事件已连接'; };
     source.onerror = () => { status.textContent = '连接中断，正在自动重连；现有事件仍可查看。'; };
     source.addEventListener('collection', (message) => {

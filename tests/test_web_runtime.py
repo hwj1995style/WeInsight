@@ -298,6 +298,39 @@ def test_run_detail_shows_local_path_as_text_only(
     assert "最近事件" in response.text
 
 
+def test_run_detail_orders_latest_history_ascending_and_seeds_sse_cursor(
+    authenticated_client: TestClient,
+    runtime_service: FakeRuntimeMonitorService,
+) -> None:
+    runtime_service.event_page = PagedResult(
+        [_event(103), _event(102), _event(101)],
+        1,
+        50,
+        103,
+    )
+
+    response = authenticated_client.get("/runs/31")
+
+    positions = [
+        response.text.index(f'data-event-id="{event_id}"')
+        for event_id in (101, 102, 103)
+    ]
+    assert positions == sorted(positions)
+    assert "new EventSource('/events/stream?run_id=31&after_id=103')" in response.text
+
+
+def test_run_detail_without_initial_events_omits_sse_cursor(
+    authenticated_client: TestClient,
+    runtime_service: FakeRuntimeMonitorService,
+) -> None:
+    runtime_service.event_page = PagedResult([], 1, 50, 0)
+
+    response = authenticated_client.get("/runs/31")
+
+    assert "new EventSource('/events/stream?run_id=31')" in response.text
+    assert "after_id=" not in response.text
+
+
 def test_run_detail_invalid_path_never_echoes_original(
     authenticated_client: TestClient,
 ) -> None:

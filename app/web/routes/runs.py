@@ -105,19 +105,26 @@ async def run_detail(request: Request, run_id: int) -> Response:
                 "section": "runs",
                 "detail": None,
                 "events": (),
+                "initial_event_id": None,
                 "error": "运行实例不存在。",
                 "pipeline_labels": PIPELINE_LABELS,
                 "run_status_labels": RUN_STATUS_LABELS,
             },
             status_code=404,
         )
+    initial_events = tuple(reversed(events.items))
+    initial_event_id = max(
+        (event.id for event in initial_events),
+        default=None,
+    )
     return templates.TemplateResponse(
         request=request,
         name="runs/detail.html",
         context={
             "section": "runs",
             "detail": detail,
-            "events": events.items,
+            "events": initial_events,
+            "initial_event_id": initial_event_id,
             "error": None,
             "pipeline_labels": PIPELINE_LABELS,
             "run_status_labels": RUN_STATUS_LABELS,

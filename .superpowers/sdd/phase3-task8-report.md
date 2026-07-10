@@ -55,10 +55,19 @@ Dashboard 的 24 小时趋势按上海整点补齐 24 个 bucket，只统计 `su
 
 因收尾协调时间窗口终止，未启动 Browser bridge 或 Playwright fallback，也未生成桌面/390px 截图与控制台证据。服务端模板、响应式 CSS、EventSource 脚本和无横向溢出的结构已由单元/Web 测试覆盖，但桌面→390px 的真实渲染、console 0 error、SSE 增量追加与自动重连仍需在后续发布前执行人工或 Playwright QA。该项未声明为已通过。
 
+## Task 8 独立审查修复
+
+独立审查发现 run detail 首屏通过倒序查询取得最新 50 条事件，但 EventSource 未携带首屏游标，会从该 run 最旧事件开始重放，造成重复并逐步淘汰首屏最新事件。先补失败测试确认首屏顺序为 103→102→101 且 URL 无 cursor，随后修复为：
+
+- Repo 仍按 ID DESC 只取最新 50 条，路由在渲染前反转为时间/ID 升序；
+- 计算首屏最大事件 ID，以规范 `after_id` 附加到 EventSource URL；
+- 无首屏事件时省略 `after_id`；
+- SSE 从 seed cursor 后只追加新事件，浏览器自动重连的标准 `Last-Event-ID` header 仍优先于 query cursor。
+
 ## 最终验证
 
-- Task 8、jobs、dashboard 合并定向回归：`133 passed, 1 skipped`；skip 原因为当前 Windows 环境无符号链接创建权限，普通路径、遍历、相邻前缀和根外路径测试均通过。
-- 全量测试：`1371 passed, 1 skipped`。
+- Task 8、jobs、dashboard 合并定向回归：`136 passed, 1 skipped`；skip 原因为当前 Windows 环境无符号链接创建权限，普通路径、遍历、相邻前缀和根外路径测试均通过。
+- 全量测试：`1374 passed, 1 skipped`。
 - 真实 MySQL 8.4 临时库验证：通过并清库。
 - `python -m compileall -q app tests`：通过。
 - `git diff --check`：通过（仅 Git 提示 Windows CRLF 转换策略）。

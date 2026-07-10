@@ -308,6 +308,30 @@ def test_sse_resumes_caps_batch_and_does_not_hold_connection_across_yield(
     assert "\n" not in data_line
 
 
+def test_sse_seeded_after_initial_history_appends_only_new_event(
+    app: FastAPI,
+) -> None:
+    repo = EventRepo([[_collection_event(104, "new event")]])
+    stream = events.CollectionEventStream(
+        request=_request(app=app),
+        event_repo=repo,
+        run_id=31,
+        after_id=103,
+        max_polls=1,
+        poll_seconds=0,
+    )
+
+    async def consume():
+        return "".join([chunk async for chunk in stream])
+
+    payload = asyncio.run(consume())
+
+    assert repo.calls == [(31, 103, 200)]
+    assert "id: 104\n" in payload
+    for initial_id in (101, 102, 103):
+        assert f"id: {initial_id}\n" not in payload
+
+
 def test_sse_keepalive_disconnect_and_cancellation(app: FastAPI) -> None:
     repo = EventRepo([[], []])
     request = _request(app=app)
