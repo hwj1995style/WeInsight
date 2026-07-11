@@ -2,6 +2,7 @@ from datetime import datetime
 from types import SimpleNamespace
 import threading
 import time
+from app.rss.feed_client import FeedFetchError
 
 from app.pipelines.rss_article_collect_service import RssArticleCollectResult
 
@@ -14,6 +15,19 @@ class Service:
 class Logs:
     def __init__(self): self.rows=[]
     def insert_collect_log(self, row): self.rows.append(row)
+
+class StateRepo:
+    def __init__(self): self.calls=[]
+    def update_feed_state(self, source_id, **kwargs): self.calls.append((source_id, kwargs))
+
+class StatefulService(Service):
+    def __init__(self, errors): self.state_repo=StateRepo(); self.errors=iter(errors)
+    def collect_once(self, target, **kwargs):
+        error = next(self.errors, None)
+        if error: raise error
+        self.state_repo.update_feed_state(target.id, etag=target.last_feed_etag,
+            modified=target.last_feed_modified, success_time=NOW, error_code=None)
+        return super().collect_once(target, **kwargs)
 
 class FailingLogs(Logs):
     def __init__(self, failures): super().__init__(); self.failures = iter(failures)
@@ -71,3 +85,22 @@ def test_multiple_feeds_run_concurrently_with_configured_cap():
     )
     assert result.success_count == 5
     assert 1 < service.peak <= 2
+
+
+def test_structured_and_generic_failures_persist_error_without_cache_or_success_fields():
+    from app.pipelines.rss_article_polling_runner import RssArticlePollingRunner
+    target = SimpleNamespace(id=7, account_name="feed", last_feed_etag="etag", last_feed_modified="mod")
+    for error, code in ((FeedFetchError("feed_timeout"), "feed_timeout"), (RuntimeError("boom"), "RSS_ARTICLE_COLLECT_ERROR")):
+        service = StatefulService([error])
+        RssArticlePollingRunner(collect_service=service, log_repo=Logs(), batch_id_factory=lambda n:n).run([target], NOW)
+        assert service.state_repo.calls == [(7, {"error_code": code})]
+
+
+def test_success_after_failure_clears_error_and_preserves_cache_values():
+    from app.pipelines.rss_article_polling_runner import RssArticlePollingRunner
+    target = SimpleNamespace(id=8, account_name="feed", last_feed_etag="etag", last_feed_modified="mod")
+    service = StatefulService([FeedFetchError("feed_timeout"), None])
+    runner = RssArticlePollingRunner(collect_service=service, log_repo=Logs(), batch_id_factory=lambda n:n)
+    runner.run([target], NOW); runner.run([target], NOW)
+    assert service.state_repo.calls[0] == (8, {"error_code": "feed_timeout"})
+    assert service.state_repo.calls[1][1] == {"etag": "etag", "modified": "mod", "success_time": NOW, "error_code": None}

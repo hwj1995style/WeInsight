@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from app.storage.article_log_repo import ArticleCollectLogRecord
+from app.rss.feed_client import FeedFetchError
 
 
 @dataclass(frozen=True)
@@ -81,7 +82,8 @@ class RssArticlePollingRunner:
                     error_code=last_code, error_msg=str(exc)))
                 break
             except Exception as exc:
-                failed += 1; last_code = "RSS_ARTICLE_COLLECT_ERROR"; last_error = str(exc)
+                failed += 1; last_code = _error_code(exc); last_error = str(exc)
+                self._record_feed_error(target, last_code)
                 self._try_log(ArticleCollectLogRecord(
                     batch_id=batch_id, account_name=target.account_name, start_time=now,
                     end_time=now, status="failed", stage="rss_collect",
@@ -131,14 +133,16 @@ class RssArticlePollingRunner:
                 error_code="RSS_ARTICLE_STOP_REQUESTED", error_summary=str(exc),
             )
         except Exception as exc:
+            error_code = _error_code(exc)
+            self._record_feed_error(target, error_code)
             self._try_log(ArticleCollectLogRecord(
                 batch_id=batch_id, account_name=target.account_name, start_time=now,
                 end_time=now, status="failed", stage="rss_collect",
-                error_code="RSS_ARTICLE_COLLECT_ERROR", error_msg=str(exc),
+                error_code=error_code, error_msg=str(exc),
             ))
             return ArticlePollingRunResult(
                 attempted_count=1, success_count=0, failed_count=1,
-                lock_timeout_count=0, error_code="RSS_ARTICLE_COLLECT_ERROR",
+                lock_timeout_count=0, error_code=error_code,
                 error_summary=str(exc),
             )
 
@@ -148,6 +152,16 @@ class RssArticlePollingRunner:
         except Exception:
             # Logging is best effort here: a broken log sink must not break feed isolation.
             pass
+
+    def _record_feed_error(self, target, error_code: str) -> None:
+        state_repo = getattr(self.collect_service, "state_repo", None)
+        source_id = getattr(target, "id", None)
+        if state_repo is not None and source_id is not None:
+            state_repo.update_feed_state(source_id, error_code=error_code)
+
+
+def _error_code(exc: Exception) -> str:
+    return exc.code if isinstance(exc, FeedFetchError) else "RSS_ARTICLE_COLLECT_ERROR"
 
 
 def _aggregate(parts) -> ArticlePollingRunResult:

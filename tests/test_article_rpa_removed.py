@@ -49,3 +49,5 @@ def test_drop_migration_aborts_on_missing_feed_url_before_not_null() -> None:
     assert "BACKFILL REAL FEED_URL" in normalized
     assert normalized.index("SIGNAL SQLSTATE") < normalized.index("MODIFY COLUMN FEED_URL")
     assert "FEED_URL VARCHAR(2048) NOT NULL" in normalized
+    assert "WECHAT_ARTICLE_ACCOUNT_CONFIG" not in normalized
+    assert normalized.count("WECHAT_PUBLIC_ACCOUNT_CONFIG") >= 2

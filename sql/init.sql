@@ -142,6 +142,7 @@ CREATE TABLE IF NOT EXISTS wechat_public_account_config (
     account_name VARCHAR(200) NOT NULL COMMENT '公众号或订阅号名称',
     account_type VARCHAR(50) NOT NULL DEFAULT 'subscription' COMMENT 'official/subscription',
     feed_url TEXT NULL COMMENT '标准 RSS 或 Atom 订阅地址',
+    feed_url_hash BINARY(32) GENERATED ALWAYS AS (UNHEX(SHA2(feed_url, 256))) STORED COMMENT 'Feed URL 完整 SHA-256',
     source_type VARCHAR(20) NOT NULL DEFAULT 'rss' COMMENT '文章来源类型，首期固定 rss',
     enabled TINYINT DEFAULT 1 COMMENT '是否启用',
     priority INT DEFAULT 5 COMMENT '优先级，数字越小优先级越高',
@@ -160,7 +161,7 @@ CREATE TABLE IF NOT EXISTS wechat_public_account_config (
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_public_account_name (account_name),
-    UNIQUE KEY uk_public_account_feed_url (feed_url(255)),
+    UNIQUE KEY uk_public_account_feed_url_hash (feed_url_hash),
     KEY idx_public_account_due (enabled, priority, last_success_collect_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

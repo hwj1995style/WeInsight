@@ -15,6 +15,19 @@ def test_article_rss_migration_adds_nullable_feed_url_and_source_fields() -> Non
         assert fragment in sql
 
 
+def test_article_rss_migration_is_retry_safe_and_uses_full_url_hash_uniqueness() -> None:
+    migration = Path("sql/migrations/20260711_001_add_article_rss_source.sql").read_text("utf-8")
+    init_sql = Path("sql/init.sql").read_text("utf-8")
+    assert "information_schema.COLUMNS" in migration
+    assert "information_schema.STATISTICS" in migration
+    assert "feed_url_hash BINARY(32)" in migration
+    assert "UNHEX(SHA2(feed_url, 256))" in migration
+    assert "feed_url(255)" not in migration
+    assert "feed_url_hash BINARY(32)" in init_sql
+    assert "UNIQUE KEY uk_public_account_feed_url_hash (feed_url_hash)" in init_sql
+    assert "feed_url(255)" not in init_sql
+
+
 def test_article_rss_init_schema_matches_migration() -> None:
     sql = Path("sql/init.sql").read_text("utf-8")
     for fragment in ("feed_url TEXT NULL", "source_type VARCHAR(20) NOT NULL DEFAULT 'rss'", "request_timeout_seconds INT NOT NULL DEFAULT 30", "UNIQUE KEY uk_public_account_feed_url"):
