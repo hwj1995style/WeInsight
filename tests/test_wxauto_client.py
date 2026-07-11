@@ -11,9 +11,7 @@ from app.rpa.wxauto_client import (
     WxautoArticleRpaClient,
     WxautoGroupRpaClient,
     WxautoNotAvailableError,
-    _find_exact_network_search_result,
     _find_main_search_result,
-    _find_network_search_entry,
     _focus_main_search_edit,
     _history_row_click_coords,
 )
@@ -252,79 +250,20 @@ def test_wxauto_article_client_waits_for_account_window_after_search_fallback(
     assert client.current_account_name == "信立鸡蛋当日价格"
 
 
-def test_wxauto_article_client_uses_network_search_after_local_search_fails(
+def test_open_public_account_does_not_use_network_search_after_direct_search_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = WxautoArticleRpaClient(
         wx=FakeArticleWx(),
         open_account_search_fallback_enabled=True,
     )
-    waits = iter([False, True])
-    network_calls: list[str] = []
-
-    monkeypatch.setattr(client, "_wait_for_public_account_window", lambda account_name: next(waits))
+    monkeypatch.setattr(client, "_wait_for_public_account_window", lambda account_name: False)
     monkeypatch.setattr(client, "_open_public_account_from_main_search", lambda account_name: False)
-    monkeypatch.setattr(
-        client,
-        "_open_public_account_from_network_search",
-        lambda account_name: network_calls.append(account_name) or True,
-        raising=False,
-    )
-
-    client.open_public_account("一箱蛋")
-
-    assert network_calls == ["一箱蛋"]
-    assert client.current_account_name == "一箱蛋"
-
-
-def test_wxauto_article_client_rejects_network_search_without_ready_target_window(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = WxautoArticleRpaClient(
-        wx=FakeArticleWx(),
-        open_account_search_fallback_enabled=True,
-    )
-    waits = iter([False, False])
-    network_calls: list[str] = []
-
-    monkeypatch.setattr(client, "_wait_for_public_account_window", lambda account_name: next(waits))
-    monkeypatch.setattr(client, "_open_public_account_from_main_search", lambda account_name: False)
-    monkeypatch.setattr(
-        client,
-        "_open_public_account_from_network_search",
-        lambda account_name: network_calls.append(account_name) or True,
-        raising=False,
-    )
 
     with pytest.raises(RuntimeError, match="public account window not found"):
         client.open_public_account("一箱蛋")
 
-    assert network_calls == ["一箱蛋"]
-
-
-class FakeNetworkSearchControl:
-    def __init__(self, *, text: str, class_name: str, control_type: str = "ListItem") -> None:
-        self._text = text
-        self._class_name = class_name
-        self._control_type = control_type
-        self.element_info = SimpleNamespace(class_name=class_name, control_type=control_type)
-
-    def window_text(self) -> str:
-        return self._text
-
-    def class_name(self) -> str:
-        return self._class_name
-
-    def friendly_class_name(self) -> str:
-        return self._control_type
-
-
-class FakeNetworkSearchContainer:
-    def __init__(self, controls: list[FakeNetworkSearchControl]) -> None:
-        self._controls = controls
-
-    def descendants(self):
-        return self._controls
+    assert not hasattr(client, "_open_public_account_from_network_search")
 
 
 class FakeDirectSearchRect:
@@ -341,16 +280,33 @@ class FakeDirectSearchRect:
         return self.bottom - self.top
 
 
-class FakeDirectSearchControl(FakeNetworkSearchControl):
+class FakeDirectSearchControl:
     def __init__(self, *, text: str, class_name: str, left: int, top: int) -> None:
-        super().__init__(text=text, class_name=class_name)
+        self._text = text
+        self._class_name = class_name
+        self.element_info = SimpleNamespace(class_name=class_name, control_type="ListItem")
         self._rect = FakeDirectSearchRect(left, top, left + 300, top + 60)
+
+    def window_text(self) -> str:
+        return self._text
+
+    def class_name(self) -> str:
+        return self._class_name
+
+    def friendly_class_name(self) -> str:
+        return "ListItem"
 
     def rectangle(self) -> FakeDirectSearchRect:
         return self._rect
 
 
-class FakeDirectSearchWindow(FakeNetworkSearchContainer):
+class FakeDirectSearchWindow:
+    def __init__(self, controls: list[FakeDirectSearchControl]) -> None:
+        self._controls = controls
+
+    def descendants(self):
+        return self._controls
+
     def rectangle(self) -> FakeDirectSearchRect:
         return FakeDirectSearchRect(0, 0, 800, 1000)
 
@@ -405,32 +361,6 @@ def test_focus_main_search_edit_returns_false_without_keyboard_focus() -> None:
 
     assert _focus_main_search_edit(FakeFocusWindow(), search_edit) is False
     assert search_edit.focus_calls == 1
-
-
-def test_find_network_search_entry_requires_exact_entry_text() -> None:
-    exact = FakeNetworkSearchControl(text="搜索网络结果", class_name="mmui::XTableCell")
-    similar = FakeNetworkSearchControl(text="搜索网络结果设置", class_name="mmui::XTableCell")
-
-    assert _find_network_search_entry(FakeNetworkSearchContainer([similar, exact])) is exact
-
-
-def test_find_exact_network_search_result_rejects_partial_name() -> None:
-    partial = FakeNetworkSearchControl(
-        text="一箱蛋每日行情",
-        class_name="mmui::SearchContentCellView",
-    )
-    exact = FakeNetworkSearchControl(text="一箱蛋", class_name="mmui::SearchContentCellView")
-
-    assert _find_exact_network_search_result(FakeNetworkSearchContainer([partial, exact]), "一箱蛋") is exact
-
-
-def test_find_exact_network_search_result_returns_none_without_exact_name() -> None:
-    partial = FakeNetworkSearchControl(
-        text="一箱蛋每日行情",
-        class_name="mmui::SearchContentCellView",
-    )
-
-    assert _find_exact_network_search_result(FakeNetworkSearchContainer([partial]), "一箱蛋") is None
 
 
 def test_copy_latest_article_links_returns_empty_for_no_same_day_article(
