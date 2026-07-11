@@ -383,6 +383,8 @@ def test_create_and_update_article_use_complete_commands(
     values = _csrf_data(
         account_name="蛋价早报",
         account_type="official",
+        feed_url="https://example.com/egg.xml",
+        request_timeout_seconds="30",
         priority="3",
         poll_interval_minutes="15",
         daily_window_start="06:00",
@@ -406,6 +408,8 @@ def test_create_and_update_article_use_complete_commands(
         ArticleSourceCommand(
             account_name="蛋价早报",
             account_type="official",
+            feed_url="https://example.com/egg.xml",
+            request_timeout_seconds=30,
             priority=3,
             poll_interval_minutes=15,
             daily_window_start="06:00",
@@ -463,6 +467,8 @@ def test_article_nine_minute_interval_is_rejected_and_echoed(
         data=_csrf_data(
             account_name="九分钟公众号",
             account_type="subscription",
+            feed_url="https://example.com/nine.xml",
+            request_timeout_seconds="30",
             priority="2",
             poll_interval_minutes="9",
             daily_window_start="07:30",
@@ -724,6 +730,8 @@ def test_all_source_service_calls_run_in_threadpool(
     article_values = _csrf_data(
         account_name="线程公众号",
         account_type="subscription",
+        feed_url="https://example.com/thread.xml",
+        request_timeout_seconds="30",
         priority="1",
         poll_interval_minutes="10",
         daily_window_start="07:00",

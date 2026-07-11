@@ -50,6 +50,13 @@ def test_article_source_command_rejects_empty_feed_url(article_repo, group_repo)
         service.create_article(replace(ARTICLE_COMMAND, feed_url=""))
 
 
+@pytest.mark.parametrize("feed_url", ["ftp://example.com/feed.xml", "https:///feed.xml", "https://user:secret@example.com/feed.xml"])
+def test_article_source_command_rejects_unsafe_feed_urls(feed_url, article_repo, group_repo) -> None:
+    service = SourceManagementService(group_repo, article_repo, FakeReferences())
+    with pytest.raises(ValueError, match="feed_url"):
+        service.create_article(replace(ARTICLE_COMMAND, feed_url=feed_url))
+
+
 class FakeGroupRepo:
     def __init__(self) -> None:
         self.record = GroupConfigRecord(

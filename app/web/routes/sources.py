@@ -387,6 +387,8 @@ def _article_command(values: dict[str, str]) -> ArticleSourceCommand:
     return ArticleSourceCommand(
         account_name=values.get("account_name", ""),
         account_type=values.get("account_type", ""),
+        feed_url=values.get("feed_url", ""),
+        request_timeout_seconds=_integer(values, "request_timeout_seconds"),
         priority=_integer(values, "priority"),
         poll_interval_minutes=_integer(values, "poll_interval_minutes"),
         daily_window_start=values.get("daily_window_start", ""),
@@ -434,6 +436,8 @@ def _article_defaults() -> dict[str, object]:
     return {
         "account_name": "",
         "account_type": "subscription",
+        "feed_url": "",
+        "request_timeout_seconds": 30,
         "priority": 10,
         "poll_interval_minutes": 10,
         "daily_window_start": "00:00",
@@ -460,6 +464,8 @@ def _article_values(source) -> dict[str, object]:
     return {
         "account_name": source.account_name,
         "account_type": source.account_type,
+        "feed_url": source.feed_url or "",
+        "request_timeout_seconds": source.request_timeout_seconds,
         "priority": source.priority,
         "poll_interval_minutes": source.poll_interval_minutes,
         "daily_window_start": source.daily_window_start,

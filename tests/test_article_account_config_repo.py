@@ -79,6 +79,11 @@ def test_mysql_article_account_config_repo_upserts_account_config() -> None:
     assert params["daily_window_start"] == "07:30"
     assert params["daily_window_end"] == "19:30"
     assert params["collect_today_only"] == 1
+    columns = re.search(r"INSERT INTO wechat_public_account_config\s*\((.*?)\)\s*VALUES", sql, re.S).group(1)
+    values = re.search(r"\)\s*VALUES\s*\((.*?)\)\s*ON DUPLICATE", sql, re.S).group(1)
+    expected = ["account_name", "account_type", "feed_url", "source_type", "enabled", "priority", "poll_interval_minutes", "request_timeout_seconds", "daily_window_start", "daily_window_end", "max_articles_per_round", "collect_today_only", "dedup_key", "remark"]
+    assert [part.strip() for part in columns.split(",")] == expected
+    assert [part.strip() for part in values.split(",")] == [f":{name}" for name in expected]
 
 
 def test_mysql_article_account_config_repo_creates_without_name_upsert() -> None:
@@ -115,6 +120,9 @@ def test_mysql_article_account_config_repo_lists_accounts() -> None:
                 "id": 9,
                 "account_name": "行业观察",
                 "account_type": "subscription",
+                "feed_url": "https://example.com/industry.xml",
+                "source_type": "rss",
+                "request_timeout_seconds": 45,
                 "enabled": 1,
                 "priority": 2,
                 "poll_interval_minutes": 60,
@@ -133,9 +141,12 @@ def test_mysql_article_account_config_repo_lists_accounts() -> None:
     accounts = repo.list_accounts()
 
     assert accounts == [
-        ArticleAccountConfigRecord(
-            account_name="行业观察",
-            account_type="subscription",
+            ArticleAccountConfigRecord(
+                account_name="行业观察",
+                account_type="subscription",
+                feed_url="https://example.com/industry.xml",
+                source_type="rss",
+                request_timeout_seconds=45,
             priority=2,
             poll_interval_minutes=60,
             daily_window_start="07:30:00",
@@ -242,6 +253,9 @@ def test_mysql_article_account_config_repo_lists_due_accounts_from_article_confi
                 "id": 9,
                 "account_name": "行业观察",
                 "account_type": "subscription",
+                "feed_url": "https://example.com/industry.xml",
+                "source_type": "rss",
+                "request_timeout_seconds": 45,
                 "enabled": 1,
                 "priority": 2,
                 "poll_interval_minutes": 60,
@@ -260,6 +274,9 @@ def test_mysql_article_account_config_repo_lists_due_accounts_from_article_confi
     accounts = repo.list_due_accounts(now=datetime(2026, 7, 6, 9, 0), limit=1)
 
     assert accounts[0].account_name == "行业观察"
+    assert accounts[0].feed_url == "https://example.com/industry.xml"
+    assert accounts[0].source_type == "rss"
+    assert accounts[0].request_timeout_seconds == 45
     sql, params = engine.connection.executions[0]
     assert "FROM wechat_public_account_config" in sql
     assert "enabled = 1" in sql

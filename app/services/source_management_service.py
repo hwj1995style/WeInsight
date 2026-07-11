@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from datetime import time
 from typing import Generic, Protocol, TypeVar
+from urllib.parse import urlsplit
 
 from sqlalchemy.exc import IntegrityError
 
@@ -332,14 +333,14 @@ class SourceManagementService:
     def set_article_enabled(self, source_id: int, enabled: bool) -> None:
         self._validate_source_id(source_id)
         self._validate_enabled(enabled)
-        if enabled:
-            current = self._get_article(source_id)
-            self._validate_name(current.feed_url, "feed_url")
         if self.mutation_repo is not None:
             self._run_mutation(
                 lambda: self.mutation_repo.set_article_enabled(source_id, enabled)
             )
             return
+        if enabled:
+            current = self._get_article(source_id)
+            self._validate_feed_url(current.feed_url)
         self._get_article(source_id)
         if not enabled:
             jobs = self.reference_repo.list_referencing_jobs(
@@ -466,7 +467,7 @@ class SourceManagementService:
     @classmethod
     def _validate_article_command(cls, command: ArticleSourceCommand) -> None:
         cls._validate_name(command.account_name, "account_name")
-        cls._validate_name(command.feed_url, "feed_url")
+        cls._validate_feed_url(command.feed_url)
         cls._validate_integer(command.request_timeout_seconds, "request_timeout_seconds", minimum=1)
         if not isinstance(command.account_type, str) or command.account_type not in {
             "official",
@@ -498,6 +499,15 @@ class SourceManagementService:
             raise ValueError(f"{field} must not have surrounding whitespace")
         if len(value) > 200:
             raise ValueError(f"{field} must be at most 200 characters")
+
+    @classmethod
+    def _validate_feed_url(cls, value: str) -> None:
+        cls._validate_name(value, "feed_url")
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("feed_url must be an absolute http or https URL")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("feed_url must not include credentials")
 
     @staticmethod
     def _validate_integer(

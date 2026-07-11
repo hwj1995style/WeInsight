@@ -10,7 +10,13 @@
       <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
       <label for="account-name">公众号名称</label>
       <input id="account-name" name="account_name" maxlength="200" value="{{ values.account_name }}" required>
+      <label for="feed-url">Feed URL</label>
+      <input id="feed-url" name="feed_url" type="url" value="{{ values.feed_url }}" required>
       <div class="form-grid">
+        <div>
+          <label for="request-timeout">请求超时（秒）</label>
+          <input id="request-timeout" name="request_timeout_seconds" type="number" min="1" value="{{ values.request_timeout_seconds }}" required>
+        </div>
         <div>
           <label for="account-type">账号类型</label>
           <select id="account-type" name="account_type" required>
