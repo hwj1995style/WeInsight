@@ -59,19 +59,26 @@
 1. 唯一键冲突后在原 INSERT 事务内继续 `SELECT ... FOR UPDATE`；修复为回滚冲突事务后在新事务读取并核对。
 2. 同一事务先全表恢复过期 running、再 SKIP LOCKED 领取；修复为独立短恢复事务加原子领取事务。
 
-复审提出的两个 Important 项均已关闭：旧 worker 租约所有权竞争，以及非法 report type 可能造成空执行成功。复审最终结论为 Ready，Critical、Important、Minor 均无。
+复审提出的两个 Important 项均已关闭：旧 worker 租约所有权竞争，以及非法 report type 可能造成空执行成功。
+
+提交后的独立审查又发现一个 P1：请求表使用 MySQL `DATETIME(0)`，如果调用时间带非零微秒，数据库会截断微秒，但原内存 payload 和 claim identity 会保留微秒，可能造成重复幂等请求误冲突以及 owned 终态 CAS 失败。修复后，仓储层所有数据库 datetime 写边界统一去除时区并归一到秒精度，读边界统一恢复为 Asia/Shanghai aware datetime 且微秒为零；cutoff 幂等比较的两侧也使用同一规范。领域模型仍严格要求 Asia/Shanghai aware datetime，不受数据库精度适配影响。
 
 ## 验证结果
 
-- Task 3 定向测试：`52 passed`
+- Task 3 定向测试：`57 passed`
 - Task 3 + Task 2 日报生命周期/查询/汇总/Web 报表/入口回归：`176 passed`
-- 全量测试：`1458 passed, 1 skipped`
+- 全量测试：`1463 passed, 1 skipped`
 - `python -m compileall -q app tests`：通过
 - MySQL 8.4.9 临时库并发验证：通过
   - 8 线程同幂等键仅返回 1 个请求 ID；
   - 4 个并发 worker 领取 4 个互不重复请求；
   - 过期恢复、重新领取、旧 owner 拒绝、新 owner 成功；
   - success、partial_success、failed 三类终态和 500 字脱敏摘要；
+  - 临时数据库在 `finally` 中清理成功。
+- MySQL 8.4.9 `DATETIME(0)` 非零微秒专项验证：通过
+  - 同一 payload 重复创建返回原请求 ID，不产生 cutoff 冲突；
+  - claim 返回秒精度 identity，owned success 成功；
+  - 过期恢复并重领后，旧 owner 仍被拒绝，新 owner 成功；
   - 临时数据库在 `finally` 中清理成功。
 
 ## 风险与后续衔接

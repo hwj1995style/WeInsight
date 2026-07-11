@@ -20,6 +20,7 @@ from app.storage.report_request_repo import (
 
 ZONE = ZoneInfo("Asia/Shanghai")
 NOW = datetime(2026, 7, 10, 15, 30, tzinfo=ZONE)
+NOW_WITH_MICROSECONDS = NOW.replace(microsecond=654321)
 
 
 class Result:
@@ -179,6 +180,17 @@ def test_create_or_get_inserts_bound_payload_and_returns_new_id() -> None:
     assert params["data_cutoff_time"].tzinfo is None
 
 
+def test_create_or_get_normalizes_data_cutoff_to_database_second_precision() -> None:
+    engine = Engine([Result(lastrowid=41)])
+
+    MysqlReportRequestRepo(engine).create_or_get(
+        new_request(data_cutoff_time=NOW_WITH_MICROSECONDS)
+    )
+
+    _, params = engine.connection.executions[0]
+    assert params["data_cutoff_time"] == datetime(2026, 7, 10, 15, 30)
+
+
 def test_create_or_get_returns_existing_id_after_matching_unique_race() -> None:
     engine = Engine(
         [
@@ -199,6 +211,24 @@ def test_create_or_get_returns_existing_id_after_matching_unique_race() -> None:
     assert "WHERE idempotency_key = :idempotency_key" in select_sql
     assert "FOR UPDATE" in select_sql
     assert select_params == {"idempotency_key": "manual-form-1"}
+
+
+def test_create_or_get_treats_database_truncated_cutoff_as_same_payload() -> None:
+    engine = Engine(
+        [
+            mysql_integrity_error(
+                1062,
+                "Duplicate entry for key 'uk_report_request_idempotency'",
+            ),
+            Result(rows=[matching_row()]),
+        ]
+    )
+
+    request_id = MysqlReportRequestRepo(engine).create_or_get(
+        new_request(data_cutoff_time=NOW_WITH_MICROSECONDS)
+    )
+
+    assert request_id == 41
 
 
 def test_create_or_get_rejects_same_key_with_different_immutable_payload() -> None:
@@ -265,6 +295,33 @@ def test_claim_next_commits_recovery_before_atomic_lock_and_claim_transaction() 
     assert update_params["lease_expires_at"] == datetime(2026, 7, 10, 15, 32)
 
 
+def test_claim_next_returns_database_precision_claim_identity() -> None:
+    engine = Engine(
+        [
+            Result(rowcount=0),
+            Result(rows=[request_row()]),
+            Result(rowcount=1),
+        ]
+    )
+
+    claimed = MysqlReportRequestRepo(engine).claim_next(
+        NOW_WITH_MICROSECONDS,
+        "pipeline-1",
+        120,
+    )
+
+    assert claimed is not None
+    assert claimed.start_time == NOW
+    assert claimed.lease_expires_at == datetime(
+        2026, 7, 10, 15, 32, tzinfo=ZONE
+    )
+    recover_params = engine.connection.executions[0][1]
+    update_params = engine.connection.executions[2][1]
+    assert recover_params["now"] == datetime(2026, 7, 10, 15, 30)
+    assert update_params["now"] == datetime(2026, 7, 10, 15, 30)
+    assert update_params["lease_expires_at"] == datetime(2026, 7, 10, 15, 32)
+
+
 def test_claim_next_returns_none_when_no_pending_request() -> None:
     engine = Engine([Result(rowcount=0), Result(rows=[])])
 
@@ -300,6 +357,21 @@ def test_recover_expired_only_resets_expired_running_requests() -> None:
     assert "lease_expires_at <= :now" in sql
     assert "success" not in sql.lower()
     assert params == {"now": datetime(2026, 7, 10, 15, 30)}
+
+
+def test_recover_and_terminal_end_time_use_database_second_precision() -> None:
+    engine = Engine([Result(rowcount=0), Result(rowcount=1)])
+    repo = MysqlReportRequestRepo(engine)
+
+    repo.recover_expired(NOW_WITH_MICROSECONDS)
+    repo.mark_success(41, NOW_WITH_MICROSECONDS)
+
+    assert engine.connection.executions[0][1]["now"] == datetime(
+        2026, 7, 10, 15, 30
+    )
+    assert engine.connection.executions[1][1]["now"] == datetime(
+        2026, 7, 10, 15, 30
+    )
 
 
 @pytest.mark.parametrize(
@@ -362,6 +434,26 @@ def test_owned_terminal_transitions_compare_and_set_claim_identity(
     assert params["worker_id"] == "pipeline-1"
     assert params["start_time"] == datetime(2026, 7, 10, 15, 30)
     assert params["expected_lease_expires_at"] == datetime(2026, 7, 10, 15, 32)
+
+
+def test_owned_terminal_normalizes_claim_identity_to_database_second_precision() -> None:
+    engine = Engine([Result(rowcount=1)])
+    request = running_request(
+        start_time=NOW_WITH_MICROSECONDS,
+        lease_expires_at=NOW_WITH_MICROSECONDS + timedelta(minutes=2),
+    )
+
+    MysqlReportRequestRepo(engine).mark_success_owned(
+        request,
+        NOW_WITH_MICROSECONDS,
+    )
+
+    _, params = engine.connection.executions[0]
+    assert params["now"] == datetime(2026, 7, 10, 15, 30)
+    assert params["start_time"] == datetime(2026, 7, 10, 15, 30)
+    assert params["expected_lease_expires_at"] == datetime(
+        2026, 7, 10, 15, 32
+    )
 
 
 def test_terminal_error_summary_is_desensitized_and_capped_at_500() -> None:

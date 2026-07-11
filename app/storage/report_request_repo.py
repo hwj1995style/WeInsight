@@ -388,15 +388,18 @@ def _shanghai_datetime(value: object, field: str) -> datetime:
 
 
 def _to_db_datetime(value: datetime) -> datetime:
-    return _shanghai_datetime(value, "datetime").replace(tzinfo=None)
+    return _shanghai_datetime(value, "datetime").replace(
+        tzinfo=None,
+        microsecond=0,
+    )
 
 
 def _db_datetime(value: object, field: str) -> datetime:
     if not isinstance(value, datetime):
         raise ValueError(f"{field} must be a database datetime")
     if value.tzinfo is None or value.utcoffset() is None:
-        return value.replace(tzinfo=_ZONE)
-    return value.astimezone(_ZONE)
+        return value.replace(tzinfo=_ZONE, microsecond=0)
+    return value.astimezone(_ZONE).replace(microsecond=0)
 
 
 def _optional_db_datetime(value: object, field: str) -> datetime | None:
@@ -442,7 +445,10 @@ def _immutable_payload_matches(row, request: NewReportRequest) -> bool:
             row["report_date"] == request.report_date,
             row["source_name"] == request.source_name,
             row["generation_trigger"] == request.generation_trigger.value,
-            row["data_cutoff_time"] == _to_db_datetime(request.data_cutoff_time),
+            _to_db_datetime(
+                _db_datetime(row["data_cutoff_time"], "data_cutoff_time")
+            )
+            == _to_db_datetime(request.data_cutoff_time),
             row["requested_by"] == request.requested_by,
         )
     )
