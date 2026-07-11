@@ -1,5 +1,7 @@
 # 单公众号订阅号真实POC运行记录
 
+> **公众号 article-RPA 历史记录（已退役）**：本文中的 `article-rpa-probe`、`collect-article-once`、`run-article-scheduler` 等命令已移除，**禁止执行**，不得作为现行操作指引。公众号现行采集路径仅为 **WeRSS + WeInsight RSS**；请使用 `docs/operations/公众号RSS采集运行手册.md`。
+
 本文档用于第八阶段 Task 58。目标是在真实账户 POC 中，只使用 1 个实际授权公众号/订阅号，手动命令触发、有人值守，验证 article 链路最小闭环。
 
 ## 1. 范围限制

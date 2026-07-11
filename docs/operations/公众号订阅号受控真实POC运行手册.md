@@ -1,5 +1,7 @@
 # 公众号订阅号受控真实 POC 运行手册
 
+> **公众号 article-RPA 历史记录（已退役）**：本文中的 `article-rpa-probe`、`collect-article-once`、`run-article-scheduler` 等命令已移除，**禁止执行**，不得作为现行操作指引。公众号现行采集路径仅为 **WeRSS + WeInsight RSS**；请使用 `docs/operations/公众号RSS采集运行手册.md`。
+
 本文档适用于第五阶段公众号/订阅号链路的人工值守真实 POC。当前阶段只验证最小真实闭环，不注册 Windows 计划任务，不默认开启后台真实采集。
 
 ## 1. POC 范围

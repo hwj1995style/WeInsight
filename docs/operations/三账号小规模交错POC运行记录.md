@@ -1,5 +1,7 @@
 # 三账号小规模交错POC运行记录
 
+> **公众号 article-RPA 历史记录（已退役）**：本文中的 `article-rpa-probe`、`collect-article-once`、`run-article-scheduler` 等命令已移除，**禁止执行**，不得作为现行操作指引。公众号现行采集路径仅为 **WeRSS + WeInsight RSS**；请使用 `docs/operations/公众号RSS采集运行手册.md`。
+
 本文档用于第九阶段 Task 69。目标是在 Task 68 完成 3 个实际授权公众号/订阅号配置后，用人工值守的小窗口方式验证 3 个账号与 1 个核心群的交错运行能力。
 
 ## 1. 执行范围

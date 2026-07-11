@@ -66,6 +66,27 @@ def test_active_operator_entrypoints_do_not_direct_article_rpa_usage():
         assert "run-article-scheduler" not in text
 
 
+def test_every_operations_doc_with_removed_article_rpa_commands_has_top_banner():
+    removed_commands = ("article-rpa-probe", "collect-article-once", "run-article-scheduler")
+    matched = []
+    for path in Path("docs/operations").glob("*.md"):
+        text = path.read_text("utf-8")
+        if not any(command in text for command in removed_commands):
+            continue
+        matched.append(path)
+        top = "\n".join(text.splitlines()[:8])
+        for phrase in ("历史", "禁止执行", "WeRSS", "docs/operations/公众号RSS采集运行手册.md"):
+            assert phrase in top, f"{path} missing top banner phrase: {phrase}"
+    assert matched
+
+
+def test_readme_marks_real_rpa_validation_as_group_only_and_article_docs_historical():
+    readme = Path("README.md").read_text("utf-8")
+    assert "真实微信/RPA 验证仅适用于微信群" in readme
+    assert "公众号 article-RPA 历史文档" in readme
+    assert "公众号现行采集路径仅为 WeRSS + WeInsight RSS" in readme
+
+
 def test_readme_links_to_werss_operations_guide():
     readme = Path("README.md").read_text("utf-8")
     assert "公众号 RSS / WeRSS 部署" in readme
