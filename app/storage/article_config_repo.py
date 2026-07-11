@@ -11,15 +11,21 @@ from sqlalchemy.engine import Engine
 class ArticleAccountConfigRecord:
     account_name: str
     account_type: str
-    priority: int
-    poll_interval_minutes: int
-    daily_window_start: str
-    daily_window_end: str
-    max_articles_per_round: int
+    feed_url: str | None = None
+    source_type: str = "rss"
+    request_timeout_seconds: int = 30
+    priority: int = 5
+    poll_interval_minutes: int = 60
+    daily_window_start: str = "07:30"
+    daily_window_end: str = "19:30"
+    max_articles_per_round: int = 5
     enabled: bool = True
     collect_today_only: bool = True
     dedup_key: str = "article_hash"
     last_success_collect_time: datetime | None = None
+    last_feed_etag: str | None = None
+    last_feed_modified: str | None = None
+    last_error_code: str | None = None
     remark: str | None = None
     id: int | None = None
 
@@ -33,9 +39,12 @@ class MysqlArticleAccountConfigRepo:
         *,
         account_name: str,
         account_type: str,
+        feed_url: str,
+        source_type: str,
         enabled: bool,
         priority: int,
         poll_interval_minutes: int,
+        request_timeout_seconds: int,
         daily_window_start: str,
         daily_window_end: str,
         max_articles_per_round: int,
@@ -48,6 +57,8 @@ class MysqlArticleAccountConfigRepo:
             INSERT INTO wechat_public_account_config (
                 account_name,
                 account_type,
+                feed_url,
+                source_type,
                 enabled,
                 priority,
                 poll_interval_minutes,
@@ -60,9 +71,12 @@ class MysqlArticleAccountConfigRepo:
             ) VALUES (
                 :account_name,
                 :account_type,
+                :feed_url,
+                :source_type,
                 :enabled,
                 :priority,
                 :poll_interval_minutes,
+                :request_timeout_seconds,
                 :daily_window_start,
                 :daily_window_end,
                 :max_articles_per_round,
@@ -72,9 +86,12 @@ class MysqlArticleAccountConfigRepo:
             )
             ON DUPLICATE KEY UPDATE
                 account_type = VALUES(account_type),
+                feed_url = VALUES(feed_url),
+                source_type = VALUES(source_type),
                 enabled = VALUES(enabled),
                 priority = VALUES(priority),
                 poll_interval_minutes = VALUES(poll_interval_minutes),
+                request_timeout_seconds = VALUES(request_timeout_seconds),
                 daily_window_start = VALUES(daily_window_start),
                 daily_window_end = VALUES(daily_window_end),
                 max_articles_per_round = VALUES(max_articles_per_round),
@@ -87,9 +104,12 @@ class MysqlArticleAccountConfigRepo:
         params = {
             "account_name": account_name,
             "account_type": account_type,
+            "feed_url": feed_url,
+            "source_type": source_type,
             "enabled": 1 if enabled else 0,
             "priority": priority,
             "poll_interval_minutes": poll_interval_minutes,
+            "request_timeout_seconds": request_timeout_seconds,
             "daily_window_start": daily_window_start,
             "daily_window_end": daily_window_end,
             "max_articles_per_round": max_articles_per_round,
@@ -105,9 +125,12 @@ class MysqlArticleAccountConfigRepo:
         *,
         account_name: str,
         account_type: str,
+        feed_url: str,
+        source_type: str,
         enabled: bool,
         priority: int,
         poll_interval_minutes: int,
+        request_timeout_seconds: int,
         daily_window_start: str,
         daily_window_end: str,
         max_articles_per_round: int,
@@ -120,9 +143,12 @@ class MysqlArticleAccountConfigRepo:
             INSERT INTO wechat_public_account_config (
                 account_name,
                 account_type,
+                feed_url,
+                source_type,
                 enabled,
                 priority,
                 poll_interval_minutes,
+                request_timeout_seconds,
                 daily_window_start,
                 daily_window_end,
                 max_articles_per_round,
@@ -132,9 +158,12 @@ class MysqlArticleAccountConfigRepo:
             ) VALUES (
                 :account_name,
                 :account_type,
+                :feed_url,
+                :source_type,
                 :enabled,
                 :priority,
                 :poll_interval_minutes,
+                :request_timeout_seconds,
                 :daily_window_start,
                 :daily_window_end,
                 :max_articles_per_round,
@@ -147,9 +176,12 @@ class MysqlArticleAccountConfigRepo:
         params = {
             "account_name": account_name,
             "account_type": account_type,
+            "feed_url": feed_url,
+            "source_type": source_type,
             "enabled": 1 if enabled else 0,
             "priority": priority,
             "poll_interval_minutes": poll_interval_minutes,
+            "request_timeout_seconds": request_timeout_seconds,
             "daily_window_start": daily_window_start,
             "daily_window_end": daily_window_end,
             "max_articles_per_round": max_articles_per_round,
@@ -168,15 +200,21 @@ class MysqlArticleAccountConfigRepo:
                 id,
                 account_name,
                 account_type,
+                feed_url,
+                source_type,
                 enabled,
                 priority,
                 poll_interval_minutes,
+                request_timeout_seconds,
                 daily_window_start,
                 daily_window_end,
                 max_articles_per_round,
                 collect_today_only,
                 dedup_key,
                 last_success_collect_time,
+                last_feed_etag,
+                last_feed_modified,
+                last_error_code,
                 remark
             FROM wechat_public_account_config
             ORDER BY priority ASC, account_name ASC
@@ -195,15 +233,21 @@ class MysqlArticleAccountConfigRepo:
                 id,
                 account_name,
                 account_type,
+                feed_url,
+                source_type,
                 enabled,
                 priority,
                 poll_interval_minutes,
+                request_timeout_seconds,
                 daily_window_start,
                 daily_window_end,
                 max_articles_per_round,
                 collect_today_only,
                 dedup_key,
                 last_success_collect_time,
+                last_feed_etag,
+                last_feed_modified,
+                last_error_code,
                 remark
             FROM wechat_public_account_config
             ORDER BY priority ASC, account_name ASC
@@ -227,15 +271,21 @@ class MysqlArticleAccountConfigRepo:
                 id,
                 account_name,
                 account_type,
+                feed_url,
+                source_type,
                 enabled,
                 priority,
                 poll_interval_minutes,
+                request_timeout_seconds,
                 daily_window_start,
                 daily_window_end,
                 max_articles_per_round,
                 collect_today_only,
                 dedup_key,
                 last_success_collect_time,
+                last_feed_etag,
+                last_feed_modified,
+                last_error_code,
                 remark
             FROM wechat_public_account_config
             WHERE enabled = 1
@@ -256,15 +306,21 @@ class MysqlArticleAccountConfigRepo:
                 id,
                 account_name,
                 account_type,
+                feed_url,
+                source_type,
                 enabled,
                 priority,
                 poll_interval_minutes,
+                request_timeout_seconds,
                 daily_window_start,
                 daily_window_end,
                 max_articles_per_round,
                 collect_today_only,
                 dedup_key,
                 last_success_collect_time,
+                last_feed_etag,
+                last_feed_modified,
+                last_error_code,
                 remark
             FROM wechat_public_account_config
             WHERE id = :source_id
@@ -280,8 +336,11 @@ class MysqlArticleAccountConfigRepo:
         *,
         account_name: str,
         account_type: str,
+        feed_url: str,
+        source_type: str,
         priority: int,
         poll_interval_minutes: int,
+        request_timeout_seconds: int,
         daily_window_start: str,
         daily_window_end: str,
         max_articles_per_round: int,
@@ -293,8 +352,11 @@ class MysqlArticleAccountConfigRepo:
             UPDATE wechat_public_account_config
             SET account_name = :account_name,
                 account_type = :account_type,
+                feed_url = :feed_url,
+                source_type = :source_type,
                 priority = :priority,
                 poll_interval_minutes = :poll_interval_minutes,
+                request_timeout_seconds = :request_timeout_seconds,
                 daily_window_start = :daily_window_start,
                 daily_window_end = :daily_window_end,
                 max_articles_per_round = :max_articles_per_round,
@@ -308,8 +370,11 @@ class MysqlArticleAccountConfigRepo:
             "source_id": source_id,
             "account_name": account_name,
             "account_type": account_type,
+            "feed_url": feed_url,
+            "source_type": source_type,
             "priority": priority,
             "poll_interval_minutes": poll_interval_minutes,
+            "request_timeout_seconds": request_timeout_seconds,
             "daily_window_start": daily_window_start,
             "daily_window_end": daily_window_end,
             "max_articles_per_round": max_articles_per_round,
@@ -362,6 +427,9 @@ class MysqlArticleAccountConfigRepo:
                 collect_today_only,
                 dedup_key,
                 last_success_collect_time,
+                last_feed_etag,
+                last_feed_modified,
+                last_error_code,
                 remark
             FROM wechat_public_account_config
             WHERE enabled = 1
@@ -390,10 +458,30 @@ class MysqlArticleAccountConfigRepo:
         with self.engine.begin() as connection:
             connection.execute(statement, {"account_name": account_name})
 
+    def update_feed_state(self, source_id: int, *, etag: str | None,
+                          modified: str | None, success_time: datetime | None,
+                          error_code: str | None) -> None:
+        statement = text("""
+            UPDATE wechat_public_account_config
+            SET last_feed_etag = :etag,
+                last_feed_modified = :modified,
+                last_success_collect_time = COALESCE(:success_time, last_success_collect_time),
+                last_error_code = :error_code,
+                update_time = CURRENT_TIMESTAMP
+            WHERE id = :source_id
+        """)
+        params = {"source_id": source_id, "etag": etag, "modified": modified,
+                  "success_time": success_time, "error_code": error_code}
+        with self.engine.begin() as connection:
+            connection.execute(statement, params)
+
     def _record_from_row(self, row) -> ArticleAccountConfigRecord:
         return ArticleAccountConfigRecord(
             account_name=str(row["account_name"]),
             account_type=str(row["account_type"]),
+            feed_url=row.get("feed_url"),
+            source_type=str(row.get("source_type", "rss")),
+            request_timeout_seconds=int(row.get("request_timeout_seconds", 30)),
             priority=int(row["priority"]),
             poll_interval_minutes=int(row["poll_interval_minutes"]),
             daily_window_start=_format_time_value(row["daily_window_start"]),
@@ -403,6 +491,9 @@ class MysqlArticleAccountConfigRepo:
             collect_today_only=bool(row["collect_today_only"]),
             dedup_key=str(row["dedup_key"]),
             last_success_collect_time=row["last_success_collect_time"],
+            last_feed_etag=row.get("last_feed_etag"),
+            last_feed_modified=row.get("last_feed_modified"),
+            last_error_code=row.get("last_error_code"),
             remark=row["remark"],
             id=None if row.get("id") is None else int(row["id"]),
         )

@@ -32,6 +32,8 @@ GROUP_COMMAND = GroupSourceCommand(
 ARTICLE_COMMAND = ArticleSourceCommand(
     account_name="行业观察",
     account_type="subscription",
+    feed_url="http://werss.local/feed/industry.xml",
+    request_timeout_seconds=30,
     priority=2,
     poll_interval_minutes=10,
     daily_window_start="07:30",
@@ -40,6 +42,12 @@ ARTICLE_COMMAND = ArticleSourceCommand(
     collect_today_only=True,
     remark=None,
 )
+
+
+def test_article_source_command_rejects_empty_feed_url(article_repo, group_repo) -> None:
+    service = SourceManagementService(group_repo, article_repo, FakeReferences())
+    with pytest.raises(ValueError, match="feed_url"):
+        service.create_article(replace(ARTICLE_COMMAND, feed_url=""))
 
 
 class FakeGroupRepo:
@@ -108,6 +116,9 @@ class FakeArticleRepo:
             id=9,
             account_name="行业观察",
             account_type="subscription",
+            feed_url="http://werss.local/feed/industry.xml",
+            source_type="rss",
+            request_timeout_seconds=30,
             priority=2,
             poll_interval_minutes=10,
             daily_window_start="07:30:00",

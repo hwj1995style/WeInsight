@@ -55,9 +55,12 @@ def test_mysql_article_account_config_repo_upserts_account_config() -> None:
     repo.upsert_account_config(
         account_name="行业观察",
         account_type="subscription",
+        feed_url="http://werss.local/feed/industry.xml",
+        source_type="rss",
         enabled=True,
         priority=2,
         poll_interval_minutes=60,
+        request_timeout_seconds=30,
         daily_window_start="07:30",
         daily_window_end="19:30",
         max_articles_per_round=5,
@@ -84,9 +87,12 @@ def test_mysql_article_account_config_repo_creates_without_name_upsert() -> None
     source_id = MysqlArticleAccountConfigRepo(engine).create_account_config(
         account_name="行业观察",
         account_type="subscription",
+        feed_url="http://werss.local/feed/industry.xml",
+        source_type="rss",
         enabled=True,
         priority=2,
         poll_interval_minutes=10,
+        request_timeout_seconds=30,
         daily_window_start="07:30",
         daily_window_end="19:30",
         max_articles_per_round=5,
@@ -346,8 +352,11 @@ def test_mysql_article_account_config_repo_updates_account_by_stable_id() -> Non
         9,
         account_name="新账号",
         account_type="official",
+        feed_url="http://werss.local/feed/new.xml",
+        source_type="rss",
         priority=3,
         poll_interval_minutes=10,
+        request_timeout_seconds=30,
         daily_window_start="08:00",
         daily_window_end="20:00",
         max_articles_per_round=10,
@@ -380,3 +389,25 @@ def test_mysql_article_account_config_repo_sets_enabled_and_deletes_disabled_by_
     assert "WHERE id = :source_id" in delete_sql
     assert "enabled = 0" in delete_sql
     assert delete_params == {"source_id": 9}
+
+
+def test_article_config_record_and_feed_state_support_rss_fields() -> None:
+    record = ArticleAccountConfigRecord(
+        account_name="示例公众号", account_type="subscription",
+        feed_url="http://werss.local/feed/abc.xml", source_type="rss",
+        priority=1, poll_interval_minutes=10, request_timeout_seconds=30,
+        daily_window_start="07:30", daily_window_end="19:30",
+        max_articles_per_round=30,
+    )
+    assert record.feed_url.endswith("abc.xml")
+    assert record.request_timeout_seconds == 30
+
+    engine = FakeEngine()
+    MysqlArticleAccountConfigRepo(engine).update_feed_state(
+        9, etag='"v1"', modified="Sat, 11 Jul 2026 01:00:00 GMT",
+        success_time=datetime(2026, 7, 11, 9), error_code=None,
+    )
+    sql, params = engine.connection.executions[0]
+    assert "last_feed_etag = :etag" in sql
+    assert "COALESCE(:success_time, last_success_collect_time)" in sql
+    assert params["source_id"] == 9

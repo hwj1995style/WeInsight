@@ -49,6 +49,8 @@ class GroupSourceCommand:
 class ArticleSourceCommand:
     account_name: str
     account_type: str
+    feed_url: str
+    request_timeout_seconds: int
     priority: int
     poll_interval_minutes: int
     daily_window_start: str
@@ -330,6 +332,9 @@ class SourceManagementService:
     def set_article_enabled(self, source_id: int, enabled: bool) -> None:
         self._validate_source_id(source_id)
         self._validate_enabled(enabled)
+        if enabled:
+            current = self._get_article(source_id)
+            self._validate_name(current.feed_url, "feed_url")
         if self.mutation_repo is not None:
             self._run_mutation(
                 lambda: self.mutation_repo.set_article_enabled(source_id, enabled)
@@ -430,8 +435,11 @@ class SourceManagementService:
         return {
             "account_name": command.account_name,
             "account_type": command.account_type,
+            "feed_url": command.feed_url,
+            "source_type": "rss",
             "priority": command.priority,
             "poll_interval_minutes": command.poll_interval_minutes,
+            "request_timeout_seconds": command.request_timeout_seconds,
             "daily_window_start": command.daily_window_start,
             "daily_window_end": command.daily_window_end,
             "max_articles_per_round": command.max_articles_per_round,
@@ -458,6 +466,8 @@ class SourceManagementService:
     @classmethod
     def _validate_article_command(cls, command: ArticleSourceCommand) -> None:
         cls._validate_name(command.account_name, "account_name")
+        cls._validate_name(command.feed_url, "feed_url")
+        cls._validate_integer(command.request_timeout_seconds, "request_timeout_seconds", minimum=1)
         if not isinstance(command.account_type, str) or command.account_type not in {
             "official",
             "subscription",
