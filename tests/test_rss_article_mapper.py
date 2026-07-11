@@ -84,3 +84,20 @@ def test_map_item_hash_is_stable_across_query_order_and_fragment():
     second = map_feed_item(item=equivalent, account_name="a", batch_id="b", collect_time=NOW)
     assert first.article_hash == second.article_hash
     assert first.article_url == second.article_url
+
+
+def test_map_item_url_and_hash_are_stable_across_unreserved_percent_encoding():
+    plain = map_feed_item(
+        item=replace(ITEM, link="https://mp.weixin.qq.com/s/a"),
+        account_name="a",
+        batch_id="b",
+        collect_time=NOW,
+    )
+    encoded = map_feed_item(
+        item=replace(ITEM, link="https://mp.weixin.qq.com/s/%61"),
+        account_name="a",
+        batch_id="b",
+        collect_time=NOW,
+    )
+    assert encoded.article_url == plain.article_url == "https://mp.weixin.qq.com/s/a"
+    assert encoded.article_hash == plain.article_hash

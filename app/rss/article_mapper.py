@@ -71,7 +71,8 @@ def _normalize_article_url(value: str) -> str:
     if not (parsed.path == "/s" or short_id_is_safe):
         raise FeedItemInvalid("URL is not a WeChat article")
     query = urlencode(sorted(parse_qsl(parsed.query, keep_blank_values=True)))
-    return urlunsplit(("https", "mp.weixin.qq.com", parsed.path, query, ""))
+    canonical_path = "/s" if parsed.path == "/s" else f"/s/{path_segments[2]}"
+    return urlunsplit(("https", "mp.weixin.qq.com", canonical_path, query, ""))
 
 
 def _parse_publish_time(value: str) -> datetime:
