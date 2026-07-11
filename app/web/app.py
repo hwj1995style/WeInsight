@@ -16,6 +16,7 @@ from app.services.collection_job_service import CollectionJobService
 from app.services.result_query_service import ResultQueryService
 from app.services.runtime_monitor_service import RuntimeMonitorService
 from app.services.source_management_service import SourceManagementService
+from app.services.report_generation_service import ReportGenerationService
 from app.storage.admin_auth_repo import MysqlAdminAuthRepo
 from app.storage.article_config_repo import MysqlArticleAccountConfigRepo
 from app.storage.article_daily_report_query_repo import MysqlArticleDailyReportQueryRepo
@@ -29,6 +30,12 @@ from app.storage.safe_result_query_repo import MysqlSafeResultQueryRepo
 from app.storage.runtime_monitor_repo import MysqlRuntimeMonitorRepo
 from app.storage.source_reference_repo import MysqlSourceReferenceRepo
 from app.storage.summary_daily_report_query_repo import MysqlSummaryDailyReportQueryRepo
+from app.storage.report_request_repo import MysqlReportRequestRepo
+from app.storage.group_analysis_repo import MysqlGroupAnalysisRepo
+from app.storage.article_daily_report_repo import MysqlArticleDailyReportRepo
+from app.pipelines.group_analysis_service import GroupDailyReportService
+from app.pipelines.article_daily_report_service import ArticleDailyReportService
+from app.pipelines.summary_daily_report_service import SummaryDailyReportService
 from app.pipelines.article_daily_report_query_service import ArticleDailyReportQueryService
 from app.pipelines.group_daily_report_query_service import GroupDailyReportQueryService
 from app.pipelines.summary_daily_report_query_service import SummaryDailyReportQueryService
@@ -71,6 +78,8 @@ def create_app(
     job_service: CollectionJobService | None = None,
     runtime_monitor_service: RuntimeMonitorService | None = None,
     event_repo: MysqlCollectionEventRepo | None = None,
+    report_request_service: ReportGenerationService | None = None,
+    report_request_repo: MysqlReportRequestRepo | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="WeInsight Admin",
@@ -93,6 +102,8 @@ def create_app(
             job_service,
             runtime_monitor_service,
             event_repo,
+            report_request_service,
+            report_request_repo,
         )
     ):
         engine = create_mysql_engine(config.mysql)
@@ -111,6 +122,24 @@ def create_app(
     app.state.summary_report_service = (
         summary_report_service
         or SummaryDailyReportQueryService(repo=MysqlSummaryDailyReportQueryRepo(engine))
+    )
+    app.state.report_request_repo = (
+        report_request_repo or MysqlReportRequestRepo(engine)
+    )
+    app.state.report_request_service = (
+        report_request_service
+        or ReportGenerationService(
+            repo=app.state.report_request_repo,
+            group_report_service=GroupDailyReportService(
+                repo=MysqlGroupAnalysisRepo(engine)
+            ),
+            article_report_service=ArticleDailyReportService(
+                repo=MysqlArticleDailyReportRepo(engine)
+            ),
+            summary_report_service=SummaryDailyReportService(
+                query_service=app.state.summary_report_service
+            ),
+        )
     )
     app.state.dashboard_service = dashboard_service or DashboardService(
         MysqlDashboardRepo(engine)

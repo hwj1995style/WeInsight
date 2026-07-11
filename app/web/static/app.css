@@ -108,6 +108,20 @@ form button { margin-top: 1.25rem; }
 .results-table { min-width: 1050px; }
 .content-cell { min-width: 16rem; max-width: 28rem; white-space: normal; overflow-wrap: anywhere; }
 .report-filters { grid-template-columns: repeat(4, minmax(0, 1fr)) auto; }
+.report-request-panel { display: grid; grid-template-columns: minmax(14rem, .75fr) minmax(0, 1.25fr); gap: 2rem; margin-bottom: 1.25rem; }
+.report-request-panel h2 { margin: 0 0 .45rem; font-size: 1.2rem; }
+.report-request-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; align-items: end; gap: .75rem; }
+.report-request-form label { margin-top: 0; }
+.report-request-form button { min-height: 44px; margin: 0; white-space: nowrap; }
+.report-download-bar { display: flex; justify-content: flex-end; margin: 0 0 1rem; }
+.report-version, .request-status { display: inline-flex; align-items: center; min-height: 28px; padding: .24rem .58rem; border-radius: 999px; font-size: .78rem; font-weight: 720; white-space: nowrap; }
+.report-version-provisional, .request-status-pending, .request-status-running { color: #855b00; background: #fff5cf; }
+.report-version-final, .request-status-success { color: #17643c; background: #eaf8f0; }
+.request-status-partial_success { color: #8a4b08; background: #fff0df; }
+.request-status-failed { color: var(--color-danger); background: #fff1f1; }
+.request-status-heading { align-items: center; margin-bottom: 1rem; }
+.request-status-heading h1 { font-size: 1.8rem; }
+.request-error, .polling-note { margin-top: 1.25rem; }
 .report-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
 .report-grid h2, .report-list h2 { margin-top: 0; font-size: 1.15rem; }
 .report-table { min-width: 620px; }
@@ -213,6 +227,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .pagination { justify-content: space-between; }
   .filter-panel { grid-template-columns: 1fr; }
   .report-filters, .report-grid, .report-metrics { grid-template-columns: 1fr; }
+  .report-request-panel, .report-request-form { grid-template-columns: 1fr; }
+  .report-request-form button { width: 100%; }
   .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .collection-chart { height: 300px; }
   .job-filters { grid-template-columns: 1fr; }
