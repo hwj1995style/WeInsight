@@ -34,12 +34,15 @@ $config = (Resolve-Path -LiteralPath $configCandidate).Path
 $rootPrefix = $root.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
 if (-not $config.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw "ConfigPath must stay under ProjectRoot." }
 $runtimeDir = Join-Path $root $runtimeDirName
+[IO.Directory]::CreateDirectory($runtimeDir) | Out-Null
 
 if ($Stop) { Stop-OwnedProcesses $runtimeDir; exit 0 }
 
 # Fail closed before the first Start-Process. The validator uses the project's
-# real config loader and emits only non-secret gate values.
-$validator = @'
+# real config loader and emits only non-secret gate values. Keeping it in a
+# local file avoids PowerShell stripping JSON quotes from a Python -c argument.
+$validatorPath = Join-Path $runtimeDir "validate_e2e_config.py"
+@'
 import json, sys
 from pathlib import Path
 from app.core.config import load_config
@@ -47,8 +50,15 @@ c = load_config(Path(sys.argv[1]))
 print(json.dumps({"env": c.app.env, "mode": c.workers.collector_mode,
  "web_host": c.web.host, "web_port": c.web.port, "secure": c.web.secure_cookie,
  "mysql_host": c.mysql.host, "mysql_db": c.mysql.database}))
-'@
-$gate = (& python -c $validator $config | ConvertFrom-Json)
+'@ | Set-Content -LiteralPath $validatorPath -Encoding UTF8
+Push-Location $root
+try {
+    $env:PYTHONPATH = $root
+    $gate = (& python $validatorPath $config | ConvertFrom-Json)
+}
+finally {
+    Pop-Location
+}
 if ($gate.env -ne "dev") { throw "Test stack requires app.env=dev." }
 if ($gate.mode -ne "fake") { throw "Test stack requires collector_mode=fake." }
 if (-not (Test-LoopbackHost $gate.web_host)) { throw "Web host must be loopback." }
@@ -57,7 +67,6 @@ if (-not (Test-LoopbackHost $gate.mysql_host)) { throw "MySQL must be loopback."
 if ($gate.mysql_db -match "(?i)prod|production") { throw "Production-like database name rejected." }
 if ($gate.mysql_db -notmatch "(?i)test|e2e") { throw "Test stack requires a disposable test/e2e database." }
 
-[IO.Directory]::CreateDirectory($runtimeDir) | Out-Null
 Stop-OwnedProcesses $runtimeDir
 $started = @()
 try {

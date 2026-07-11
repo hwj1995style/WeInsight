@@ -14,6 +14,8 @@ def test_test_stack_fails_closed_before_starting_processes() -> None:
         assert content.index(gate) < first_start
     assert "-WindowStyle Hidden" in content
     assert "[Parameter(Mandatory = $true)]" in content
+    assert "validate_e2e_config.py" in content
+    assert "python -c" not in content
     for module in ("app.web", "app.workers.collector_main", "app.workers.pipeline_main"):
         assert module in content
     assert "Stop-Process -Name" not in content
