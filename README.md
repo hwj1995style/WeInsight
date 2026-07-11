@@ -560,3 +560,10 @@ docs/operations/微信群链路运行手册与验收清单.md
 - ECharts 5.6.0，来源 `https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js`，许可证 Apache License 2.0，SHA256 `bf4a223524e40b77c304bec67e1222cf551f14880cf42c69dc046558e11c07b1`。
 
 HTMX 资产已本地保留以供后续局部交互使用；当前页面未实际使用 HTMX，因此未全局加载。ECharts 仅在基础总览页面加载。
+
+## 管理后台受控 POC
+
+真实微信验证必须依次通过 Fake RPA、单目标人工值守和次日日报门禁。未经人工批准不得执行真实微信 POC，也不得在记录中预填 Go 结论：
+
+- `docs/operations/微信采集管理后台受控POC验收清单.md`
+- `docs/operations/微信采集管理后台受控POC执行记录.md`
