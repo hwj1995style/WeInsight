@@ -27,7 +27,6 @@ from app.storage.group_runtime_summary_repo import (
 from app.storage.group_runtime_metrics_repo import GroupRuntimeMetrics
 from app.storage.group_repo import GroupConfigRecord, GroupRuntimeStatus
 from app.rpa.wxauto_client import WxautoNotAvailableError
-from app.rpa.fake_clients import FakeArticleRpaClient
 from app.storage.article_raw_repo import ArticleRawInsertResult
 from app.services.managed_mode_guard import (
     HeldUiLockAdapter,

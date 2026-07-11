@@ -28,25 +28,19 @@ from app.pipelines.trial_monitor_report_service import TrialMonitorReportService
 from app.domain.ai_analysis import AiAnalysisServiceInput
 from app.pipelines.ai_analysis_service import AiAnalysisService, load_ai_analysis_config
 from app.pipelines.group_pipeline_service import GroupPipelineService
-from app.pipelines.article_core_group_due_provider import ReadOnlyCoreGroupDueProvider
 from app.pipelines.group_polling_runner import GroupPollingRunner, GroupPollingTarget
-from app.pipelines.article_collect_service import ArticleCollectService
 from app.pipelines.article_parse_service import ArticleParseService, PlaywrightArticleParser
 from app.pipelines.article_analysis_service import ArticleAnalysisService
 from app.pipelines.article_transient_extractor import PlaywrightArticleTransientExtractor
-from app.pipelines.article_polling_runner import ArticlePollingRunner, ArticlePollingTarget
 from app.rpa.desktop_probe import WechatDesktopProbe, WechatHealthStatus
 from app.rpa.screenshots import DesktopScreenshotClient
-from app.rpa.wxauto_client import WxautoArticleRpaClient, WxautoGroupRpaClient, WxautoNotAvailableError
+from app.rpa.wxauto_client import WxautoGroupRpaClient, WxautoNotAvailableError
 from app.pipelines.group_clean_service import GroupCleanService
 from app.pipelines.group_collect_service import GroupCollectService
 from app.storage.db import create_mysql_engine
 from app.storage.article_config_repo import MysqlArticleAccountConfigRepo
-from app.storage.article_log_repo import MysqlArticleCollectLogRepo
-from app.storage.article_route_cache_repo import MysqlArticleRouteCacheRepo
 from app.storage.article_parse_repo import MysqlArticleParseRepo
 from app.storage.article_analysis_repo import MysqlArticleAnalysisRepo
-from app.storage.article_progress_repo import MysqlArticleProgressRepo
 from app.storage.article_raw_repo import MysqlArticleRawRepo
 from app.storage.article_runtime_metrics_repo import MysqlArticleRuntimeMetricsRepo
 from app.storage.article_task_admin_repo import MysqlArticleTaskAdminRepo
@@ -90,15 +84,12 @@ def main() -> int:
             "wechat-health",
             "collect-group-once",
             "run-group-scheduler",
-            "run-article-scheduler",
             "group-config-list",
             "group-config-upsert",
             "group-config-disable",
             "article-account-list",
             "article-account-upsert",
             "article-account-disable",
-            "article-rpa-probe",
-            "collect-article-once",
             "parse-article-once",
             "analyze-article-once",
             "article-runtime-metrics",
@@ -275,87 +266,6 @@ def main() -> int:
         print(f"article_account_disabled={args.account_name}")
         return 0
 
-    if args.command == "article-rpa-probe":
-        if not args.account_name:
-            parser.error("--account-name is required for article-rpa-probe")
-        config = load_config(Path(args.config))
-        ensure_wechat_health(config)
-        try:
-            probe = build_real_article_rpa_probe(config)
-            result = probe.probe_account(args.account_name)
-        except WxautoNotAvailableError as exc:
-            print(f"rpa_error={exc}", file=sys.stderr)
-            return 1
-        print(
-            " ".join(
-                [
-                    "article_rpa_probe",
-                    f"status={result['status']}",
-                    f"account_found={result['account_found']}",
-                    f"link_count={result['link_count']}",
-                    f"message={result['message']}",
-                ]
-            )
-        )
-        return 0 if result["status"] == "ok" else 1
-
-    if args.command == "collect-article-once":
-        if not args.account_name:
-            parser.error("--account-name is required for collect-article-once")
-        config = load_config(Path(args.config))
-        guard, guard_error = _build_managed_guard_for_cli(config)
-        if guard_error is not None:
-            return guard_error
-        now = _shanghai_now()
-        owner_task_id = f"manual-article-{uuid4().hex}"
-
-        def collect_article():
-            ensure_wechat_health(config)
-            runner = build_real_article_poc_runner(
-                config,
-                account_name=args.account_name,
-                max_articles_per_round=(
-                    args.max_articles_per_round
-                    or config.pipelines.article.max_articles_per_account
-                ),
-                lock_repo=HeldUiLockAdapter("article"),
-            )
-            return runner.run_once(now)
-
-        try:
-            result = guard.run_manual(
-                "article", owner_task_id, now, collect_article
-            )
-        except WxautoNotAvailableError as exc:
-            print(f"rpa_error={exc}", file=sys.stderr)
-            return 1
-        except WechatUiBusyError:
-            print("managed_mode_error=wechat_ui_busy", file=sys.stderr)
-            return 3
-        except WechatUiLeaseLostError:
-            print("managed_mode_error=wechat_ui_lease_lost", file=sys.stderr)
-            return 3
-        except WechatUiReleaseError:
-            print("managed_mode_error=wechat_ui_release_failed", file=sys.stderr)
-            return 1
-        except Exception as exc:
-            print(
-                f"managed_guard_error={type(exc).__name__}",
-                file=sys.stderr,
-            )
-            return 1
-        print(f"account_name={args.account_name}")
-        print(f"attempted_count={result.attempted_count}")
-        print(f"success_count={result.success_count}")
-        print(f"failed_count={result.failed_count}")
-        print(f"lock_timeout_count={result.lock_timeout_count}")
-        print(f"link_count={result.link_count}")
-        print(f"raw_insert_count={result.raw_insert_count}")
-        print(f"duplicate_count={result.duplicate_count}")
-        print(f"skipped_count={result.skipped_count}")
-        print(f"task_created_count={result.task_created_count}")
-        return 0 if result.failed_count == 0 and result.lock_timeout_count == 0 else 1
-
     if args.command == "parse-article-once":
         config = load_config(Path(args.config))
         service = build_real_article_parse_service(config)
@@ -410,35 +320,6 @@ def main() -> int:
                 )
             )
         return 0
-
-    if args.command == "run-article-scheduler":
-        if not args.once:
-            parser.error("--once is required for run-article-scheduler in development")
-        config = load_config(Path(args.config))
-        guard, guard_error = _build_managed_guard_for_cli(config)
-        if guard_error is not None:
-            return guard_error
-        now = _shanghai_now()
-        guard_error = _ensure_scheduler_allowed_for_cli(guard, now)
-        if guard_error is not None:
-            return guard_error
-        ensure_wechat_health(config)
-        try:
-            runner = build_real_article_scheduler_runner(config)
-        except WxautoNotAvailableError as exc:
-            print(f"rpa_error={exc}", file=sys.stderr)
-            return 1
-        now = _shanghai_now()
-        guard_error = _ensure_scheduler_allowed_for_cli(guard, now)
-        if guard_error is not None:
-            return guard_error
-        result = runner.run_once(now)
-        print(f"attempted_count={result.attempted_count}")
-        print(f"success_count={result.success_count}")
-        print(f"failed_count={result.failed_count}")
-        print(f"lock_timeout_count={result.lock_timeout_count}")
-        print(f"interrupted_count={result.interrupted_count}")
-        return 0 if result.failed_count == 0 and result.lock_timeout_count == 0 else 1
 
     if args.command == "article-task-failed-list":
         config = load_config(Path(args.config))
@@ -1204,115 +1085,6 @@ def build_real_group_config_repo(config) -> MysqlGroupConfigRepo:
 def build_real_article_account_config_repo(config) -> MysqlArticleAccountConfigRepo:
     engine = create_mysql_engine(config.mysql)
     return MysqlArticleAccountConfigRepo(engine)
-
-
-def build_real_article_rpa_client(config) -> WxautoArticleRpaClient:
-    engine = create_mysql_engine(config.mysql)
-    route_cache_repo = (
-        MysqlArticleRouteCacheRepo(engine)
-    )
-    return WxautoArticleRpaClient(
-        route_cache_repo=route_cache_repo,
-        route_cache_enabled=True,
-        route_probe_enabled=True,
-        route_probe_failure_threshold=3,
-        close_browser_after_extract=True,
-        open_account_search_fallback_enabled=True,
-    )
-
-
-def build_real_article_rpa_probe(config) -> WxautoArticleRpaClient:
-    return build_real_article_rpa_client(config)
-
-
-def build_real_article_poc_runner(
-    config,
-    *,
-    account_name: str,
-    max_articles_per_round: int,
-    lock_repo=None,
-) -> ArticlePollingRunner:
-    engine = create_mysql_engine(config.mysql)
-    group_config_repo = MysqlGroupConfigRepo(engine)
-    collect_service = ArticleCollectService(
-        rpa=build_real_article_rpa_client(config),
-        raw_repo=MysqlArticleRawRepo(engine),
-    )
-
-    def account_provider(now: datetime, limit: int):
-        return [
-            ArticlePollingTarget(
-                account_name=account_name,
-                priority=1,
-                poll_interval_minutes=config.pipelines.article.account_poll_interval_minutes,
-                max_articles_per_round=max_articles_per_round,
-            )
-        ]
-
-    return ArticlePollingRunner(
-        collect_service=collect_service,
-        lock_repo=(
-            MysqlUiLockRepo(engine) if lock_repo is None else lock_repo
-        ),
-        account_provider=account_provider,
-        log_repo=MysqlArticleCollectLogRepo(engine),
-        screenshot_client=DesktopScreenshotClient(),
-        screenshot_root=Path(config.runtime.screenshot_dir),
-        lease_seconds=config.pipelines.ui_resource.lock_lease_seconds,
-        lock_acquire_timeout_seconds=config.pipelines.ui_resource.lock_acquire_timeout_seconds,
-        max_accounts_per_ui_slice=1,
-        batch_id_factory=lambda selected_account_name: f"article-{uuid4().hex}",
-        progress_repo=MysqlArticleProgressRepo(engine),
-        next_core_group_due_provider=ReadOnlyCoreGroupDueProvider(
-            group_config_repo=group_config_repo,
-            poll_interval_seconds=config.pipelines.group.poll_interval_seconds,
-            now_provider=_shanghai_now,
-        ),
-        max_core_group_block_seconds=config.pipelines.ui_resource.max_core_group_block_seconds,
-        checkpoint_now_provider=_shanghai_now,
-    )
-
-
-def build_real_article_scheduler_runner(config) -> ArticlePollingRunner:
-    engine = create_mysql_engine(config.mysql)
-    article_config_repo = MysqlArticleAccountConfigRepo(engine)
-    group_config_repo = MysqlGroupConfigRepo(engine)
-    collect_service = ArticleCollectService(
-        rpa=build_real_article_rpa_client(config),
-        raw_repo=MysqlArticleRawRepo(engine),
-    )
-
-    def account_provider(now: datetime, limit: int):
-        return [
-            ArticlePollingTarget(
-                account_name=record.account_name,
-                priority=record.priority,
-                poll_interval_minutes=record.poll_interval_minutes,
-                max_articles_per_round=record.max_articles_per_round,
-            )
-            for record in article_config_repo.list_due_accounts(now, limit)
-        ]
-
-    return ArticlePollingRunner(
-        collect_service=collect_service,
-        lock_repo=MysqlUiLockRepo(engine),
-        account_provider=account_provider,
-        log_repo=MysqlArticleCollectLogRepo(engine),
-        screenshot_client=DesktopScreenshotClient(),
-        screenshot_root=Path(config.runtime.screenshot_dir),
-        lease_seconds=config.pipelines.ui_resource.lock_lease_seconds,
-        lock_acquire_timeout_seconds=config.pipelines.ui_resource.lock_acquire_timeout_seconds,
-        max_accounts_per_ui_slice=1,
-        batch_id_factory=lambda selected_account_name: f"article-{uuid4().hex}",
-        progress_repo=MysqlArticleProgressRepo(engine),
-        next_core_group_due_provider=ReadOnlyCoreGroupDueProvider(
-            group_config_repo=group_config_repo,
-            poll_interval_seconds=config.pipelines.group.poll_interval_seconds,
-            now_provider=_shanghai_now,
-        ),
-        max_core_group_block_seconds=config.pipelines.ui_resource.max_core_group_block_seconds,
-        checkpoint_now_provider=_shanghai_now,
-    )
 
 
 def build_real_article_parse_service(config) -> ArticleParseService:

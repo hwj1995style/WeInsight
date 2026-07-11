@@ -3,9 +3,28 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 
-from app.pipelines.article_polling_runner import ArticlePollingRunResult
 from app.storage.article_log_repo import ArticleCollectLogRecord
+
+
+@dataclass(frozen=True)
+class ArticlePollingRunResult:
+    attempted_count: int
+    success_count: int
+    failed_count: int
+    lock_timeout_count: int
+    interrupted_count: int = 0
+    link_count: int = 0
+    raw_insert_count: int = 0
+    duplicate_count: int = 0
+    skipped_count: int = 0
+    task_created_count: int = 0
+    stop_requested_count: int = 0
+    core_group_interrupted_count: int = 0
+    error_code: str | None = None
+    error_summary: str | None = None
+    screenshot_path: str | None = None
 
 
 class _RssStopRequested(RuntimeError):

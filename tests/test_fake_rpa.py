@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.rpa.fake_clients import FakeArticleRpaClient, FakeDesktopClient, FakeGroupRpaClient
+from app.rpa.fake_clients import FakeDesktopClient, FakeGroupRpaClient
 from app.rpa.interfaces import VisibleMessage
 
 
@@ -30,11 +30,3 @@ def test_fake_group_client_reads_messages() -> None:
     assert client.read_visible_messages() == [message]
 
 
-def test_fake_article_client_returns_limited_links_for_opened_account() -> None:
-    client = FakeArticleRpaClient(
-        links_by_account={"行业观察": ["https://mp.weixin.qq.com/s/1", "https://mp.weixin.qq.com/s/2"]}
-    )
-
-    client.open_public_account("行业观察")
-
-    assert client.copy_latest_article_links(max_articles=1) == ["https://mp.weixin.qq.com/s/1"]

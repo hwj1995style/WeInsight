@@ -13,10 +13,8 @@ import yaml
 
 from app.domain.collection_jobs import PipelineType, RunStatus
 from app.core.config import load_config
-from app.pipelines.article_polling_runner import (
-    ArticlePollingRunResult,
-    ArticlePollingTarget,
-)
+from app.pipelines.rss_article_polling_runner import ArticlePollingRunResult
+from app.pipelines.rss_article_collect_service import RssArticleTarget as ArticlePollingTarget
 from app.pipelines.group_polling_runner import (
     GroupPollingRunResult,
     GroupPollingTarget,

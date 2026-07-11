@@ -36,16 +36,3 @@ class FakeGroupRpaClient:
         self.scroll_count += pages
 
 
-class FakeArticleRpaClient:
-    def __init__(self, links_by_account: dict[str, list[str]]) -> None:
-        self.links_by_account = links_by_account
-        self.opened_accounts: list[str] = []
-
-    def open_public_account(self, account_name: str) -> None:
-        self.opened_accounts.append(account_name)
-
-    def copy_latest_article_links(self, max_articles: int) -> list[str]:
-        if not self.opened_accounts:
-            return []
-        account = self.opened_accounts[-1]
-        return self.links_by_account.get(account, [])[:max_articles]

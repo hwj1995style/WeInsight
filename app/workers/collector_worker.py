@@ -18,7 +18,7 @@ from app.domain.collection_jobs import (
     PipelineType,
     RunStatus,
 )
-from app.pipelines.article_polling_runner import ArticlePollingRunResult
+from app.pipelines.rss_article_polling_runner import ArticlePollingRunResult
 from app.storage.article_config_repo import ArticleAccountConfigRecord
 from app.pipelines.group_polling_runner import (
     GroupPollingRunResult,

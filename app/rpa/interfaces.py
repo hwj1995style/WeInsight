@@ -35,9 +35,3 @@ class WechatGroupRpaClient(Protocol):
         ...
 
 
-class WechatArticleRpaClient(Protocol):
-    def open_public_account(self, account_name: str) -> None:
-        ...
-
-    def copy_latest_article_links(self, max_articles: int) -> list[str]:
-        ...
