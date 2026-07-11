@@ -1,0 +1,64 @@
+import uuid
+from datetime import datetime, timedelta
+
+import pytest
+
+pytest.importorskip("playwright.sync_api")
+from playwright.sync_api import expect
+
+
+def test_fake_admin_login_to_report_smoke(admin_base_url, browser):
+    prefix = f"E2E-{uuid.uuid4().hex[:10]}"
+    context = browser.new_context(viewport={"width": 1440, "height": 900})
+    page = context.new_page()
+    console = []
+    pageerrors = []
+    page.on("console", lambda item: console.append(item.text) if item.type == "error" else None)
+    page.on("pageerror", lambda error: pageerrors.append(str(error)))
+
+    page.goto(f"{admin_base_url}/login")
+    page.get_by_label("用户名").fill("admin")
+    page.get_by_label("密码").fill("admin123456")
+    page.get_by_role("button", name="登录").click()
+    expect(page).to_have_url(lambda url: "/dashboard" in url)
+    expect(page.get_by_text("默认密码", exact=False)).to_be_visible()
+
+    page.goto(f"{admin_base_url}/sources/groups/new")
+    page.get_by_label("群名称").fill(prefix)
+    page.get_by_label("优先级").fill("10")
+    page.get_by_label("默认采集间隔（秒）").fill("30")
+    page.get_by_label("回溯页数").fill("1")
+    page.get_by_label("额外回溯页数").fill("0")
+    page.get_by_role("button", name="保存配置").click()
+    expect(page.get_by_text(prefix, exact=True)).to_be_visible()
+
+    now = datetime.now().replace(second=0, microsecond=0)
+    page.goto(f"{admin_base_url}/jobs/new?pipeline=group")
+    page.get_by_label("任务名称").fill(prefix + "-job")
+    page.get_by_label(prefix, exact=False).check()
+    page.get_by_label("整体开始时间").fill((now - timedelta(minutes=1)).isoformat(timespec="minutes"))
+    page.get_by_label("整体结束时间").fill((now + timedelta(minutes=30)).isoformat(timespec="minutes"))
+    page.get_by_label("每日窗口开始").fill("00:00")
+    page.get_by_label("每日窗口结束").fill("00:00")
+    page.get_by_label("采集频率（秒）").fill("30")
+    page.get_by_role("button", name="创建任务").click()
+    expect(page.get_by_text(prefix + "-job", exact=True)).to_be_visible()
+
+    expect(page.get_by_role("button", name="停止任务")).to_be_visible(timeout=30_000)
+    page.get_by_role("button", name="停止任务").click()
+    expect(page.locator("body")).to_contain_text("停止", timeout=30_000)
+    page.goto(f"{admin_base_url}/runs")
+    expect(page.locator("body")).not_to_contain_text("<img src=\"file:")
+    page.goto(f"{admin_base_url}/reports")
+    page.get_by_label("生成类型").select_option("all")
+    page.get_by_role("button", name="提交生成请求").click()
+    expect(page.locator("body")).to_contain_text("请求")
+    # Today's successful Fake report is the provisional lifecycle version (临时版).
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    for route in ("/dashboard", "/groups", "/jobs", "/runs", "/reports"):
+        page.goto(admin_base_url + route)
+        assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
+    assert console == []
+    assert pageerrors == []
+    context.close()
