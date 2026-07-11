@@ -11,6 +11,8 @@ from app.rpa.wxauto_client import (
     WxautoArticleRpaClient,
     WxautoGroupRpaClient,
     WxautoNotAvailableError,
+    _find_exact_network_search_result,
+    _find_network_search_entry,
     _history_row_click_coords,
 )
 
@@ -246,6 +248,57 @@ def test_wxauto_article_client_waits_for_account_window_after_search_fallback(
     assert fallback_calls == ["信立鸡蛋当日价格"]
     assert wait_calls == ["信立鸡蛋当日价格", "信立鸡蛋当日价格"]
     assert client.current_account_name == "信立鸡蛋当日价格"
+
+
+class FakeNetworkSearchControl:
+    def __init__(self, *, text: str, class_name: str, control_type: str = "ListItem") -> None:
+        self._text = text
+        self._class_name = class_name
+        self._control_type = control_type
+        self.element_info = SimpleNamespace(class_name=class_name, control_type=control_type)
+
+    def window_text(self) -> str:
+        return self._text
+
+    def class_name(self) -> str:
+        return self._class_name
+
+    def friendly_class_name(self) -> str:
+        return self._control_type
+
+
+class FakeNetworkSearchContainer:
+    def __init__(self, controls: list[FakeNetworkSearchControl]) -> None:
+        self._controls = controls
+
+    def descendants(self):
+        return self._controls
+
+
+def test_find_network_search_entry_requires_exact_entry_text() -> None:
+    exact = FakeNetworkSearchControl(text="搜索网络结果", class_name="mmui::XTableCell")
+    similar = FakeNetworkSearchControl(text="搜索网络结果设置", class_name="mmui::XTableCell")
+
+    assert _find_network_search_entry(FakeNetworkSearchContainer([similar, exact])) is exact
+
+
+def test_find_exact_network_search_result_rejects_partial_name() -> None:
+    partial = FakeNetworkSearchControl(
+        text="一箱蛋每日行情",
+        class_name="mmui::SearchContentCellView",
+    )
+    exact = FakeNetworkSearchControl(text="一箱蛋", class_name="mmui::SearchContentCellView")
+
+    assert _find_exact_network_search_result(FakeNetworkSearchContainer([partial, exact]), "一箱蛋") is exact
+
+
+def test_find_exact_network_search_result_returns_none_without_exact_name() -> None:
+    partial = FakeNetworkSearchControl(
+        text="一箱蛋每日行情",
+        class_name="mmui::SearchContentCellView",
+    )
+
+    assert _find_exact_network_search_result(FakeNetworkSearchContainer([partial]), "一箱蛋") is None
 
 
 def test_copy_latest_article_links_returns_empty_for_no_same_day_article(

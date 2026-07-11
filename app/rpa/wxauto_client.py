@@ -17,6 +17,8 @@ _CHAT_WITH_ATTEMPTS = 6
 _CHAT_WITH_RETRY_DELAY_SECONDS = 1.0
 _PUBLIC_ACCOUNT_WINDOW_READY_TIMEOUT_SECONDS = 3.0
 _PUBLIC_ACCOUNT_WINDOW_READY_POLL_SECONDS = 0.2
+_NETWORK_SEARCH_ENTRY_TEXT = "搜索网络结果"
+_NETWORK_RESULT_CLASS_NAMES = {"mmui::SearchContentCellView", "mmui::XTableCell"}
 _WECHAT_INIT_ATTEMPTS = 3
 _WECHAT_INIT_RETRY_DELAY_SECONDS = 1.0
 _WECHAT_BROWSER_PROCESS_NAMES = {"wechat.exe", "wechatappex.exe", "weixin.exe"}
@@ -1050,6 +1052,25 @@ def _find_main_search_result(main_window: Any, account_name: str) -> Any | None:
         return None
     candidates.sort(key=lambda item: (item[0], item[1]))
     return candidates[0][2]
+
+
+def _find_network_search_entry(main_window: Any) -> Any | None:
+    for control in _safe_descendants(main_window, limit=1200):
+        if _normalize_match_text(_safe_text(control)) != _NETWORK_SEARCH_ENTRY_TEXT:
+            continue
+        if _safe_control_type(control) in {"ListItem", "Button"}:
+            return control
+    return None
+
+
+def _find_exact_network_search_result(container: Any, account_name: str) -> Any | None:
+    expected = _normalize_match_text(account_name)
+    for control in _safe_descendants(container, limit=3000):
+        if _safe_class_name(control) not in _NETWORK_RESULT_CLASS_NAMES:
+            continue
+        if _normalize_match_text(_safe_text(control)) == expected:
+            return control
+    return None
 
 
 def _browser_current_article_urls(window: Any, max_articles: int) -> list[str]:
