@@ -10,6 +10,17 @@ WINDOWS_SCRIPTS = (
     ROOT / "scripts" / "windows" / "register_group_scheduler_task.ps1",
     ROOT / "scripts" / "windows" / "unregister_group_scheduler_task.ps1",
 )
+ADMIN_STACK_SCRIPTS = tuple(
+    ROOT / "scripts" / "windows" / name
+    for name in (
+        "start_admin_web.ps1",
+        "start_collector_worker.ps1",
+        "start_pipeline_worker.ps1",
+        "register_admin_stack.ps1",
+        "unregister_admin_stack.ps1",
+        "check_admin_stack.ps1",
+    )
+)
 
 
 def _parse_powershell_script(script: Path) -> subprocess.CompletedProcess[str]:
@@ -31,6 +42,13 @@ def _parse_powershell_script(script: Path) -> subprocess.CompletedProcess[str]:
 
 def test_windows_scheduler_scripts_are_valid_powershell() -> None:
     for script in WINDOWS_SCRIPTS:
+        result = _parse_powershell_script(script)
+        assert result.returncode == 0, result.stderr
+
+
+def test_admin_stack_scripts_are_valid_powershell() -> None:
+    for script in ADMIN_STACK_SCRIPTS:
+        assert script.exists(), script
         result = _parse_powershell_script(script)
         assert result.returncode == 0, result.stderr
 
