@@ -15,7 +15,7 @@
       <div class="form-grid">
         <div>
           <label for="request-timeout">请求超时（秒）</label>
-          <input id="request-timeout" name="request_timeout_seconds" type="number" min="1" value="{{ values.request_timeout_seconds }}" required>
+          <input id="request-timeout" name="request_timeout_seconds" type="number" min="5" max="120" value="{{ values.request_timeout_seconds }}" required>
         </div>
         <div>
           <label for="account-type">账号类型</label>
@@ -32,10 +32,6 @@
           <label for="article-interval">默认采集间隔（分钟）</label>
           <input id="article-interval" name="poll_interval_minutes" type="number" min="10" value="{{ values.poll_interval_minutes }}" required aria-describedby="interval-help">
           <p id="interval-help" class="field-help">最少 10 分钟。</p>
-        </div>
-        <div>
-          <label for="article-limit">每轮文章上限</label>
-          <input id="article-limit" name="max_articles_per_round" type="number" min="1" max="20" value="{{ values.max_articles_per_round }}" required>
         </div>
         <div>
           <label for="window-start">每日窗口开始</label>

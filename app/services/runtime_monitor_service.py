@@ -87,6 +87,10 @@ class TargetRunDetail:
     screenshot_path: object
     start_time: datetime | None
     end_time: datetime | None
+    feed_item_count: int = 0
+    invalid_count: int = 0
+    http_status: int | None = None
+    elapsed_ms: int = 0
 
 
 @dataclass(frozen=True, slots=True)

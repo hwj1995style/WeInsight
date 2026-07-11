@@ -17,6 +17,9 @@
               <th scope="col">公众号</th>
               <th scope="col">状态</th>
               <th scope="col">类型</th>
+              <th scope="col">RSS 地址</th>
+              <th scope="col">最近成功</th>
+              <th scope="col">最近错误</th>
               <th scope="col">优先级</th>
               <th scope="col">采集间隔</th>
               <th scope="col">采集窗口</th>
@@ -29,6 +32,9 @@
                 <th scope="row">{{ article.account_name }}</th>
                 <td><span class="status-text {{ 'enabled' if article.enabled else 'disabled' }}">{{ "已启用" if article.enabled else "已停用" }}</span></td>
                 <td>{{ "服务号" if article.account_type == "official" else "订阅号" }}</td>
+                <td class="path-cell"><code>{{ article.feed_url or "—" }}</code></td>
+                <td>{{ article.last_success_collect_time.strftime("%Y-%m-%d %H:%M:%S") if article.last_success_collect_time else "—" }}</td>
+                <td>{{ article.last_error_code or "—" }}</td>
                 <td>{{ article.priority }}</td>
                 <td>{{ article.poll_interval_minutes }} 分钟</td>
                 <td>{{ article.daily_window_start }}–{{ article.daily_window_end }}</td>

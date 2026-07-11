@@ -393,7 +393,9 @@ def _article_command(values: dict[str, str]) -> ArticleSourceCommand:
         poll_interval_minutes=_integer(values, "poll_interval_minutes"),
         daily_window_start=values.get("daily_window_start", ""),
         daily_window_end=values.get("daily_window_end", ""),
-        max_articles_per_round=_integer(values, "max_articles_per_round"),
+        # RSS ingestion processes the bounded feed response; this legacy RPA
+        # limit is no longer user-configurable but remains in the persistence API.
+        max_articles_per_round=5,
         collect_today_only=_checked(values, "collect_today_only"),
         remark=_optional(values, "remark"),
     )
@@ -442,7 +444,6 @@ def _article_defaults() -> dict[str, object]:
         "poll_interval_minutes": 10,
         "daily_window_start": "00:00",
         "daily_window_end": "23:59",
-        "max_articles_per_round": 5,
         "collect_today_only": True,
         "remark": "",
     }
@@ -470,7 +471,6 @@ def _article_values(source) -> dict[str, object]:
         "poll_interval_minutes": source.poll_interval_minutes,
         "daily_window_start": source.daily_window_start,
         "daily_window_end": source.daily_window_end,
-        "max_articles_per_round": source.max_articles_per_round,
         "collect_today_only": source.collect_today_only,
         "remark": source.remark or "",
     }

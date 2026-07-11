@@ -467,7 +467,12 @@ class SourceManagementService:
     def _validate_article_command(cls, command: ArticleSourceCommand) -> None:
         cls._validate_name(command.account_name, "account_name")
         cls._validate_feed_url(command.feed_url)
-        cls._validate_integer(command.request_timeout_seconds, "request_timeout_seconds", minimum=1)
+        cls._validate_integer(
+            command.request_timeout_seconds,
+            "request_timeout_seconds",
+            minimum=5,
+            maximum=120,
+        )
         if not isinstance(command.account_type, str) or command.account_type not in {
             "official",
             "subscription",

@@ -298,6 +298,34 @@ def test_run_detail_shows_local_path_as_text_only(
     assert "最近事件" in response.text
 
 
+def test_article_run_detail_shows_rss_metrics_without_rpa_presentation(
+    authenticated_client: TestClient,
+    runtime_service: FakeRuntimeMonitorService,
+) -> None:
+    runtime_service.detail = replace(
+        runtime_service.detail,
+        run=replace(runtime_service.detail.run, pipeline_type=PipelineType.ARTICLE),
+        targets=(
+            replace(
+                runtime_service.detail.targets[0],
+                http_status=200,
+                feed_item_count=12,
+                insert_count=7,
+                duplicate_count=3,
+                invalid_count=2,
+                elapsed_ms=456,
+            ),
+        ),
+    )
+
+    html = authenticated_client.get("/runs/31").text
+
+    for value in ("HTTP 状态", "Feed 条目", "新增", "重复", "无效", "耗时", "456 ms"):
+        assert value in html
+    for value in ("状态 / 阶段", "本机截图路径", "UI 锁等待", "路由阶段"):
+        assert value not in html
+
+
 def test_run_detail_orders_latest_history_ascending_and_seeds_sse_cursor(
     authenticated_client: TestClient,
     runtime_service: FakeRuntimeMonitorService,
@@ -354,6 +382,7 @@ def test_workers_page_renders_live_health_and_lock(
         "占用中",
     ):
         assert value in response.text
+    assert "微信状态和 UI 锁仅影响微信群" in response.text
 
 
 def test_workers_page_marks_ui_lock_unavailable_under_minimum_privilege(

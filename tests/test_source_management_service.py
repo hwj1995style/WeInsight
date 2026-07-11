@@ -50,6 +50,18 @@ def test_article_source_command_rejects_empty_feed_url(article_repo, group_repo)
         service.create_article(replace(ARTICLE_COMMAND, feed_url=""))
 
 
+@pytest.mark.parametrize("timeout", [4, 121])
+def test_article_source_command_rejects_timeout_outside_admin_range(
+    timeout, article_repo, group_repo
+) -> None:
+    service = SourceManagementService(group_repo, article_repo, FakeReferences())
+
+    with pytest.raises(ValueError, match="request_timeout_seconds"):
+        service.create_article(
+            replace(ARTICLE_COMMAND, request_timeout_seconds=timeout)
+        )
+
+
 @pytest.mark.parametrize("feed_url", ["ftp://example.com/feed.xml", "https:///feed.xml", "https://user:secret@example.com/feed.xml"])
 def test_article_source_command_rejects_unsafe_feed_urls(feed_url, article_repo, group_repo) -> None:
     service = SourceManagementService(group_repo, article_repo, FakeReferences())

@@ -95,6 +95,9 @@ class FakeSourceService:
                 enabled=True,
                 collect_today_only=True,
                 remark="每日采集",
+                feed_url="https://example.com/industry.xml",
+                last_success_collect_time=datetime(2026, 7, 11, 8, 30),
+                last_error_code=None,
             ),
             ArticleAccountConfigRecord(
                 id=10,
@@ -106,6 +109,8 @@ class FakeSourceService:
                 daily_window_end="18:00:00",
                 max_articles_per_round=3,
                 enabled=False,
+                feed_url="https://example.com/disabled.xml",
+                last_error_code="RSS_HTTP_ERROR",
             ),
         ]
         self.calls: list[tuple] = []
@@ -285,6 +290,33 @@ def test_article_list_uses_stable_ids_and_escapes_names(
     assert 'action="/sources/articles/10/delete"' in response.text
 
 
+def test_article_form_contains_rss_fields(
+    authenticated_client: TestClient,
+) -> None:
+    html = authenticated_client.get("/sources/articles/new").text
+
+    assert 'name="feed_url"' in html
+    assert 'name="request_timeout_seconds"' in html
+    assert 'min="5"' in html
+    assert 'max="120"' in html
+    assert "每轮文章上限" not in html
+    assert 'name="max_articles_per_round"' not in html
+
+
+def test_article_list_shows_feed_health_without_network_call(
+    authenticated_client: TestClient,
+    source_service: FakeSourceService,
+) -> None:
+    html = authenticated_client.get("/sources/articles").text
+
+    assert "RSS 地址" in html
+    assert "最近成功" in html
+    assert "最近错误" in html
+    assert "https://example.com/industry.xml" in html
+    assert "RSS_HTTP_ERROR" in html
+    assert source_service.calls == [("list_articles_page", 1, 20)]
+
+
 def test_create_group_uses_complete_command_and_redirects(
     authenticated_client: TestClient,
     source_service: FakeSourceService,
@@ -389,7 +421,6 @@ def test_create_and_update_article_use_complete_commands(
         poll_interval_minutes="15",
         daily_window_start="06:00",
         daily_window_end="20:00",
-        max_articles_per_round="8",
         collect_today_only="on",
         remark="价格信息",
     )
@@ -414,7 +445,7 @@ def test_create_and_update_article_use_complete_commands(
             poll_interval_minutes=15,
             daily_window_start="06:00",
             daily_window_end="20:00",
-            max_articles_per_round=8,
+            max_articles_per_round=5,
             collect_today_only=True,
             remark="价格信息",
         ),

@@ -377,6 +377,10 @@ def _target_detail(row) -> TargetRunDetail:
         screenshot_path=row.get("screenshot_path"),
         start_time=_optional_db_datetime(row.get("start_time")),
         end_time=_optional_db_datetime(row.get("end_time")),
+        feed_item_count=_nonnegative(row.get("feed_item_count", 0)),
+        invalid_count=_nonnegative(row.get("invalid_count", 0)),
+        http_status=_optional_int(row.get("http_status")),
+        elapsed_ms=_nonnegative(row.get("elapsed_ms", 0)),
     )
 
 
@@ -565,10 +569,16 @@ _RUN_TARGETS = text(
         target_run.duplicate_count, target_run.skipped_count,
         target_run.error_code, target_run.error_summary,
         target_run.screenshot_path, target_run.start_time,
-        target_run.end_time
+        target_run.end_time,
+        COALESCE(article_log.feed_item_count, 0) AS feed_item_count,
+        COALESCE(article_log.invalid_count, 0) AS invalid_count,
+        article_log.http_status,
+        COALESCE(article_log.elapsed_ms, 0) AS elapsed_ms
     FROM wechat_collection_job_target_run target_run
     INNER JOIN wechat_collection_job_target target
       ON target.id = target_run.job_target_id
+    LEFT JOIN wechat_article_collect_log article_log
+      ON article_log.batch_id = target_run.batch_id
     WHERE target_run.run_id = :run_id
     ORDER BY target.priority_snapshot ASC,
              target.target_name_snapshot ASC,
