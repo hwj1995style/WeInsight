@@ -38,8 +38,9 @@ def test_readme_links_controlled_poc_documents() -> None:
     assert "未经人工批准不得执行真实微信 POC" in content
 
 
-def test_admin_poc_execution_record_keeps_network_search_probe_gate() -> None:
+def test_admin_poc_record_names_direct_public_account_search_gate() -> None:
     content = RECORD.read_text(encoding="utf-8")
 
-    assert "网络搜索精确匹配" in content
+    assert "直接搜索公众号分类精确匹配" in content
     assert "重跑单目标 POC" in content
+    assert "搜索网络结果" not in content
