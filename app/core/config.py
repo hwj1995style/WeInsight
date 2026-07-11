@@ -191,9 +191,17 @@ class Config:
     def __post_init__(self) -> None:
         if self.app.env != "prod":
             return
+        host_value = self.web.host
+        if (
+            not isinstance(host_value, str)
+            or not host_value
+            or host_value != host_value.strip()
+            or any(category(character).startswith("C") for character in host_value)
+        ):
+            raise ValueError("prod web.host must be an explicit private IP")
         try:
-            host = ip_address(self.web.host)
-        except (TypeError, ValueError):
+            host = ip_address(host_value)
+        except ValueError:
             raise ValueError("prod web.host must be an explicit private IP") from None
         private_networks = (
             ip_network("10.0.0.0/8"),

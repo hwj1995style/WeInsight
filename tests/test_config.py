@@ -312,6 +312,32 @@ def test_prod_config_rejects_non_private_bind_host(
         load_config(path)
 
 
+@pytest.mark.parametrize(
+    "host",
+    [3232235777, b"\xc0\xa8\x01\x01"],
+    ids=["integer", "bytes"],
+)
+def test_prod_config_rejects_non_string_private_bind_host(
+    tmp_path: Path,
+    host: object,
+) -> None:
+    def configure_prod(raw) -> None:
+        raw["app"]["env"] = "prod"
+        raw["web"].update(
+            {
+                "host": host,
+                "secure_cookie": True,
+                "tls_certfile": "C:/certs/weinsight.crt",
+                "tls_keyfile": "C:/certs/weinsight.key",
+            }
+        )
+
+    path = _write_changed_config(tmp_path, configure_prod)
+
+    with pytest.raises(ValueError, match="private IP"):
+        load_config(path)
+
+
 @pytest.mark.parametrize("host", ["10.0.0.8", "172.16.0.8", "192.168.1.8"])
 def test_prod_config_accepts_explicit_private_bind_host(
     tmp_path: Path,
