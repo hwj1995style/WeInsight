@@ -1,6 +1,7 @@
 param(
     [string]$ProjectRoot = (Join-Path $PSScriptRoot "..\.."),
-    [string]$ConfigPath = "config\config.e2e.yaml",
+    [Parameter(Mandatory = $true)]
+    [string]$ConfigPath,
     [switch]$Stop
 )
 

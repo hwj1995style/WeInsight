@@ -13,6 +13,7 @@ def test_test_stack_fails_closed_before_starting_processes() -> None:
     for gate in ("app.env=dev", "collector_mode=fake", "Web host must be loopback", "MySQL must be loopback", "Production-like database name rejected", "disposable test/e2e database"):
         assert content.index(gate) < first_start
     assert "-WindowStyle Hidden" in content
+    assert "[Parameter(Mandatory = $true)]" in content
     for module in ("app.web", "app.workers.collector_main", "app.workers.pipeline_main"):
         assert module in content
     assert "Stop-Process -Name" not in content
