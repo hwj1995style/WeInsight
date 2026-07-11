@@ -557,7 +557,7 @@ HTMX 资产已本地保留以供后续局部交互使用；当前页面未实际
 
 ## 公众号 RSS / WeRSS 部署
 
-WeRSS 在当前 Windows 采集机的 Docker Desktop 中运行，使用固定镜像标签或摘要、独立外部 MySQL 数据库，并仅监听 `127.0.0.1`。部署时复制环境模板为本机 `.env`，不得提交真实凭据：
+WeRSS 在当前 Windows 采集机的 Docker Desktop 中运行，固定使用官方 `ghcr.io/rachelos/we-mp-rss@sha256:53912fcb3d523d1e640adcb7066cc18123f00e9510882a7982d0991f3113845f`，连接独立外部 MySQL 数据库，并仅监听 `127.0.0.1`。部署时复制环境模板为本机 `.env`，设置 NTFS ACL，且不得提交真实凭据。公众号旧 RPA 已删除；禁止使用已移除的旧采集命令，历史 POC 文档不得作为现行操作手册。
 
 ```powershell
 Copy-Item deploy\werss\.env.example deploy\werss\.env
