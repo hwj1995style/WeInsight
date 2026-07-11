@@ -326,6 +326,25 @@ def test_article_run_detail_shows_rss_metrics_without_rpa_presentation(
         assert value not in html
 
 
+def test_run_detail_help_text_is_pipeline_specific(
+    authenticated_client: TestClient,
+    runtime_service: FakeRuntimeMonitorService,
+) -> None:
+    group_html = authenticated_client.get("/runs/31").text
+    runtime_service.detail = replace(
+        runtime_service.detail,
+        run=replace(runtime_service.detail.run, pipeline_type=PipelineType.ARTICLE),
+    )
+    article_html = authenticated_client.get("/runs/31").text
+
+    group_help = "读取、新增、重复与跳过均来自目标运行记录。"
+    rss_help = "采集统计来自目标运行及对应 RSS 采集日志。"
+    assert group_help in group_html
+    assert rss_help not in group_html
+    assert rss_help in article_html
+    assert group_help not in article_html
+
+
 def test_run_detail_orders_latest_history_ascending_and_seeds_sse_cursor(
     authenticated_client: TestClient,
     runtime_service: FakeRuntimeMonitorService,

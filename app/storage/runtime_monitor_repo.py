@@ -578,7 +578,12 @@ _RUN_TARGETS = text(
     INNER JOIN wechat_collection_job_target target
       ON target.id = target_run.job_target_id
     LEFT JOIN wechat_article_collect_log article_log
-      ON article_log.batch_id = target_run.batch_id
+      ON article_log.id = (
+          SELECT MAX(latest_log.id)
+          FROM wechat_article_collect_log latest_log
+          WHERE latest_log.batch_id = target_run.batch_id
+            AND latest_log.account_name = target.target_name_snapshot
+      )
     WHERE target_run.run_id = :run_id
     ORDER BY target.priority_snapshot ASC,
              target.target_name_snapshot ASC,

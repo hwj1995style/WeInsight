@@ -185,6 +185,15 @@ def test_latest_health_window_alias_avoids_mysql_reserved_function_name() -> Non
     assert "as row_number" not in sql
 
 
+def test_run_targets_rss_metrics_join_selects_one_latest_log_for_same_account() -> None:
+    sql = " ".join(str(runtime_monitor_repo._RUN_TARGETS).lower().split())
+
+    assert "article_log.id = ( select max(latest_log.id)" in sql
+    assert "latest_log.batch_id = target_run.batch_id" in sql
+    assert "latest_log.account_name = target.target_name_snapshot" in sql
+    assert "article_log.batch_id = target_run.batch_id" not in sql
+
+
 def test_event_metrics_summary_preserves_keys_and_sanitizes_string_values() -> None:
     summary = runtime_monitor_repo._safe_metrics(
         '{"failed":1,"detail":"<b>secret</b> https://example.com/raw"}'
