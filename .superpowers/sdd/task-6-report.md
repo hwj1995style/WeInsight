@@ -60,3 +60,12 @@ pytest -q
 第二轮 RED：`10 failed, 39 passed`，失败分别对应 snapshot、claim 前过滤、配置校验和 Feed client 上限注入。
 
 第二轮 GREEN：focused `178 passed`；完整回归 `1707 passed, 2 skipped, 1 warning in 23.26s`。
+
+## Blocking Review 修复（第三轮）
+
+- 私网例外改为按 target URL 精确匹配；公网或端口不匹配的 Feed 向 `RssFeedClient` 传入 `allowed_endpoint=None`，继续走默认 SSRF 校验。
+- endpoint 规范化支持 IPv6 bracket 表示，例如配置 `[::1]:8001` 精确映射为 client endpoint `("::1", 8001)`。
+- `RssArticlePollingRunner` 新增 `max_concurrency`，在 Feed target batch 边界使用 `ThreadPoolExecutor` 并行独立 target；聚合按输入顺序确定，线程池不涉及 UI 或 Collector run/target 状态变更。
+- runtime factory 将 `rss_max_concurrency` 传给 runner。并发测试使用阻塞 fake feed 证明峰值大于 1 且不超过配置 2。
+
+第三轮 RED：新增并发与 endpoint 测试初始 `5 failed`。GREEN：runner/worker focused `64 passed`。

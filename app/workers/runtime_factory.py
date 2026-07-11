@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-import threading
 from typing import Any, Callable
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
@@ -107,9 +106,6 @@ def build_managed_collector_worker(
         rpa=group_rpa,
         repo=group_message_repo,
     )
-    rss_slots = threading.BoundedSemaphore(
-        config.pipelines.article.rss_max_concurrency
-    )
 
     def group_runner_factory(
         target: GroupPollingTarget, batch_id: str
@@ -134,25 +130,22 @@ def build_managed_collector_worker(
         batch_id: str,
         stop_provider: Callable[[], bool],
     ):
-        parsed = urlsplit(target.feed_url or "")
-        endpoint = f"{parsed.hostname}:{parsed.port or (443 if parsed.scheme == 'https' else 80)}"
-        if endpoint not in config.pipelines.article.rss_allowed_private_hosts:
-            raise ValueError("feed endpoint is not in rss_allowed_private_hosts")
-        collect_service = _ConcurrencyLimitedCollectService(
-            RssArticleCollectService(
+        collect_service = RssArticleCollectService(
                 feed_client=RssFeedClient(
-                    allowed_endpoint=(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80)),
+                    allowed_endpoint=_allowed_endpoint_for_target(
+                        target.feed_url or "",
+                        config.pipelines.article.rss_allowed_private_hosts,
+                    ),
                     max_response_bytes=config.pipelines.article.rss_max_response_bytes,
                 ),
                 raw_repo=article_raw_repo,
                 state_repo=article_config_repo,
-            ),
-            rss_slots,
         )
         runner = RssArticlePollingRunner(
             collect_service=collect_service,
             log_repo=article_log_repo,
             batch_id_factory=lambda account_name: batch_id,
+            max_concurrency=config.pipelines.article.rss_max_concurrency,
         )
         return _SingleRssTargetRunner(runner, target, stop_provider)
 
@@ -255,17 +248,19 @@ class _SingleRssTargetRunner:
         return self.runner.run((self.target,), now, self.stop_provider)
 
 
-class _ConcurrencyLimitedCollectService:
-    """Bounds RSS HTTP/persistence operations without parallelizing run DB state."""
-
-    def __init__(self, service, semaphore: threading.BoundedSemaphore) -> None:
-        self.service = service
-        self.semaphore = semaphore
-        self.raw_repo = service.raw_repo
-
-    def collect_once(self, *args, **kwargs):
-        with self.semaphore:
-            return self.service.collect_once(*args, **kwargs)
+def _allowed_endpoint_for_target(
+    feed_url: str, allowed_hosts: tuple[str, ...]
+) -> tuple[str, int] | None:
+    parsed = urlsplit(feed_url)
+    if parsed.hostname is None:
+        return None
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    normalized = (
+        f"[{parsed.hostname}]:{port}"
+        if ":" in parsed.hostname
+        else f"{parsed.hostname}:{port}"
+    )
+    return (parsed.hostname, port) if normalized in allowed_hosts else None
 
 
 class _LazyScreenshot:

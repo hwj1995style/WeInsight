@@ -1,5 +1,7 @@
 from datetime import datetime
 from types import SimpleNamespace
+import threading
+import time
 
 from app.pipelines.rss_article_collect_service import RssArticleCollectResult
 
@@ -45,3 +47,27 @@ def test_failure_log_failure_is_isolated_from_next_target():
     runner=RssArticlePollingRunner(collect_service=Service(), log_repo=FailingLogs([True, False]), batch_id_factory=lambda n:n)
     result=runner.run([SimpleNamespace(account_name="bad"), SimpleNamespace(account_name="good")], now=NOW)
     assert result.attempted_count == 2 and result.success_count == 1 and result.failed_count == 1
+
+
+def test_multiple_feeds_run_concurrently_with_configured_cap():
+    from app.pipelines.rss_article_polling_runner import RssArticlePollingRunner
+    class BlockingService(Service):
+        def __init__(self):
+            self.lock = threading.Lock(); self.active = 0; self.peak = 0
+        def collect_once(self, target, **kwargs):
+            with self.lock:
+                self.active += 1; self.peak = max(self.peak, self.active)
+            time.sleep(0.04)
+            with self.lock: self.active -= 1
+            return super().collect_once(target, **kwargs)
+
+    service = BlockingService()
+    runner = RssArticlePollingRunner(
+        collect_service=service, log_repo=Logs(), batch_id_factory=lambda n: n,
+        max_concurrency=2,
+    )
+    result = runner.run(
+        [SimpleNamespace(account_name=f"feed-{index}") for index in range(5)], NOW
+    )
+    assert result.success_count == 5
+    assert 1 < service.peak <= 2

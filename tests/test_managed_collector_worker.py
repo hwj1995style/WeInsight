@@ -1075,6 +1075,20 @@ def test_fake_runtime_factory_never_imports_or_constructs_real_adapters(
     assert group_runner.screenshot_root.is_absolute()
 
 
+@pytest.mark.parametrize(
+    ("url", "allowed", "expected"),
+    [
+        ("https://feeds.example/rss", ("127.0.0.1:8001",), None),
+        ("http://127.0.0.1:8001/rss", ("127.0.0.1:8001",), ("127.0.0.1", 8001)),
+        ("http://127.0.0.1:9000/rss", ("127.0.0.1:8001",), None),
+        ("http://[::1]:8001/rss", ("[::1]:8001",), ("::1", 8001)),
+    ],
+)
+def test_rss_private_exception_requires_exact_normalized_endpoint(url, allowed, expected):
+    from app.workers.runtime_factory import _allowed_endpoint_for_target
+    assert _allowed_endpoint_for_target(url, allowed) == expected
+
+
 class FakeWindow:
     def __init__(self, exists: bool) -> None:
         self._exists = exists
