@@ -257,3 +257,16 @@ def test_insert_raw_skips_same_account_normalized_url_with_changed_title() -> No
     assert result.duplicate_count == 1
     assert result.task_created_count == 0
     assert len(engine.connection.executions) == 2
+
+
+def test_insert_raw_counts_mixed_insert_and_duplicate_and_creates_one_task() -> None:
+    articles = [
+        RawArticleRecord("new", "账号", "新", "https://mp.weixin.qq.com/s/new", datetime(2026, 7, 11), datetime(2026, 7, 11)),
+        RawArticleRecord("duplicate", "账号", "重复", "https://mp.weixin.qq.com/s/old", datetime(2026, 7, 10), datetime(2026, 7, 11)),
+    ]
+    engine = FakeEngine(rowcounts=[1, 1], existing_url_results=[[], [(1,)]])
+
+    result = MysqlArticleRawRepo(engine).insert_raw_ignore_duplicates(articles)
+
+    assert (result.read_count, result.inserted_count, result.duplicate_count) == (2, 1, 1)
+    assert result.task_created_count == 1

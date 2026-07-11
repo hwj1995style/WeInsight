@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from email.utils import parsedate_to_datetime
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 from app.domain.hashes import article_hash
@@ -19,12 +19,7 @@ def map_feed_item(
 ) -> RawArticleRecord:
     title = _required(item.title, "title")
     link = _normalize_article_url(_required(item.link, "link"))
-    if item.published is None:
-        raise FeedItemInvalid("published is required")
-    timestamp = item.published.strip() or (item.updated or "").strip()
-    if not timestamp:
-        raise FeedItemInvalid("published is required")
-    publish_time = _parse_publish_time(timestamp)
+    publish_time = _first_valid_publish_time(item.published, item.updated)
     return RawArticleRecord(
         article_hash=article_hash(
             account_name=account_name,
@@ -52,9 +47,25 @@ def _required(value: str | None, field: str) -> str:
 
 def _normalize_article_url(value: str) -> str:
     parsed = urlsplit(value)
-    if parsed.scheme.lower() not in {"http", "https"} or (parsed.hostname or "").lower() != "mp.weixin.qq.com":
+    try:
+        explicit_port = parsed.port is not None
+    except ValueError as exc:
+        raise FeedItemInvalid("article URL has an invalid port") from exc
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or (parsed.hostname or "").lower() != "mp.weixin.qq.com"
+        or parsed.username is not None
+        or parsed.password is not None
+        or explicit_port
+    ):
         raise FeedItemInvalid("article URL is not an allowed WeChat URL")
-    if not (parsed.path == "/s" or parsed.path.startswith("/s/")):
+    path_segments = [unquote(segment) for segment in parsed.path.split("/")]
+    if any(segment in {".", ".."} for segment in path_segments):
+        raise FeedItemInvalid("article URL contains a dot segment")
+    if not (
+        parsed.path == "/s"
+        or (parsed.path.startswith("/s/") and len(path_segments) == 3 and bool(path_segments[2]))
+    ):
         raise FeedItemInvalid("URL is not a WeChat article")
     query = urlencode(sorted(parse_qsl(parsed.query, keep_blank_values=True)))
     return urlunsplit(("https", "mp.weixin.qq.com", parsed.path, query, ""))
@@ -71,3 +82,14 @@ def _parse_publish_time(value: str) -> datetime:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
     return parsed.astimezone(ZoneInfo("Asia/Shanghai")).replace(tzinfo=None)
+
+
+def _first_valid_publish_time(published: str | None, updated: str | None) -> datetime:
+    for candidate in (published, updated):
+        if not candidate or not candidate.strip():
+            continue
+        try:
+            return _parse_publish_time(candidate.strip())
+        except FeedItemInvalid:
+            continue
+    raise FeedItemInvalid("published and updated are absent or invalid")
