@@ -69,3 +69,13 @@ pytest -q
 - runtime factory 将 `rss_max_concurrency` 传给 runner。并发测试使用阻塞 fake feed 证明峰值大于 1 且不超过配置 2。
 
 第三轮 RED：新增并发与 endpoint 测试初始 `5 failed`。GREEN：runner/worker focused `64 passed`。
+
+## Blocking Review 修复（第四轮）
+
+- 将实际生产并发边界移到 `ManagedCollectorWorker.execute_run`：同一已 claim ARTICLE run 的 target 按 `rss_max_concurrency` 分块，通过有界 executor 执行完整且相互独立的 target 生命周期。
+- 每个 target 仍分别生成 batch ID、调用 `start_target` / runner / `finish_target` 并写 target event；run 在所有已启动 target 收敛后统一完成。
+- 每批提交前检查 stop，停止后不再提交剩余 queued target；GROUP 固定宽度 1，保持串行与优先语义。
+- runtime factory 将 RSS 并发配置注入 Worker；单 target wrapper 不再向 runner 传不可达的批量并发参数。
+- 集成测试验证 5 个 ARTICLE target 在 cap=2 时峰值大于 1 且不超过 2、batch ID 全部不同、5 个 target 与 run 均正确完成。
+
+第四轮 RED：生产 Worker 不接受 `article_max_concurrency`，新增集成测试失败。GREEN：managed worker `60 passed`。

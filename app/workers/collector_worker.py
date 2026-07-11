@@ -5,6 +5,7 @@ import json
 import os
 import socket
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, time
@@ -123,6 +124,7 @@ class ManagedCollectorWorker:
         version: str,
         start_time: datetime,
         run_lease_seconds: int,
+        article_max_concurrency: int = 1,
         batch_id_factory: Callable[
             [ClaimedCollectionRun, ClaimedTarget], str
         ]
@@ -147,6 +149,8 @@ class ManagedCollectorWorker:
         self.version = version
         self.start_time = start_time
         self.run_lease_seconds = run_lease_seconds
+        _positive_integer(article_max_concurrency, "article_max_concurrency")
+        self.article_max_concurrency = article_max_concurrency
         self.batch_id_factory = batch_id_factory or _default_batch_id
         self.now_provider = now_provider or _shanghai_now
         self._state_lock = threading.Lock()
@@ -258,58 +262,29 @@ class ManagedCollectorWorker:
         stopped = False
         try:
             stopped = self._stop_requested(run)
-            for item in sorted(
+            pending = list(sorted(
                 run.targets,
                 key=lambda value: (
                     value.priority,
                     value.source_name,
                     value.job_target_id,
                 ),
-            ):
+            ))
+            while pending:
                 if stopped:
                     break
-                batch_id = self.batch_id_factory(run, item)
-                _required_text(batch_id, "batch_id", 64)
-                target_run_id = self.runtime_repo.start_target(
-                    run.run_id,
-                    item.job_target_id,
-                    batch_id,
-                    now,
-                )
-                self._append_target_event(
-                    run,
-                    target_run_id,
-                    level="info",
-                    event_type="collection_target_started",
-                    message="collection target started",
-                    metrics={"job_target_id": item.job_target_id},
-                )
-                outcome = self._execute_target(
-                    run, item, batch_id, target_run_id, now
-                )
-                target_finished_at = self._current_time()
-                self.runtime_repo.finish_target(
-                    target_run_id, outcome, target_finished_at
-                )
-                self._append_target_event(
-                    run,
-                    target_run_id,
-                    level=("error" if outcome.status == "failed" else "info"),
-                    event_type="collection_target_finished",
-                    message=f"collection target finished with {outcome.status}",
-                    metrics={
-                        "read_count": outcome.read_count,
-                        "insert_count": outcome.insert_count,
-                        "duplicate_count": outcome.duplicate_count,
-                        "skipped_count": outcome.skipped_count,
-                    },
-                )
-                executed += 1
-                outcomes.append(outcome.status)
-                stopped = (
-                    outcome.status == "cancelled"
-                    or self._stop_requested(run)
-                )
+                width = self.article_max_concurrency if run.pipeline_type is PipelineType.ARTICLE else 1
+                chunk, pending = pending[:width], pending[width:]
+                if len(chunk) == 1:
+                    chunk_outcomes = [self._process_claimed_target(run, chunk[0], now)]
+                else:
+                    with ThreadPoolExecutor(max_workers=width) as executor:
+                        chunk_outcomes = list(executor.map(
+                            lambda item: self._process_claimed_target(run, item, now), chunk
+                        ))
+                executed += len(chunk_outcomes)
+                outcomes.extend(outcome.status for outcome in chunk_outcomes)
+                stopped = any(outcome.status == "cancelled" for outcome in chunk_outcomes) or self._stop_requested(run)
 
             run_finished_at = self._current_time()
             if stopped:
@@ -338,6 +313,28 @@ class ManagedCollectorWorker:
             )
         finally:
             self._clear_active_run(run.run_id)
+
+    def _process_claimed_target(self, run, item, now) -> TargetRunOutcome:
+        batch_id = self.batch_id_factory(run, item)
+        _required_text(batch_id, "batch_id", 64)
+        target_run_id = self.runtime_repo.start_target(
+            run.run_id, item.job_target_id, batch_id, now
+        )
+        self._append_target_event(
+            run, target_run_id, level="info", event_type="collection_target_started",
+            message="collection target started", metrics={"job_target_id": item.job_target_id},
+        )
+        outcome = self._execute_target(run, item, batch_id, target_run_id, now)
+        self.runtime_repo.finish_target(target_run_id, outcome, self._current_time())
+        self._append_target_event(
+            run, target_run_id,
+            level=("error" if outcome.status == "failed" else "info"),
+            event_type="collection_target_finished",
+            message=f"collection target finished with {outcome.status}",
+            metrics={"read_count": outcome.read_count, "insert_count": outcome.insert_count,
+                     "duplicate_count": outcome.duplicate_count, "skipped_count": outcome.skipped_count},
+        )
+        return outcome
 
     def heartbeat(self, now: datetime) -> None:
         _require_now(now)

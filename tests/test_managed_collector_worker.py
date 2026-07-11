@@ -329,6 +329,7 @@ def build_worker(
     factories=None,
     now_provider=lambda: NOW,
     auto_register=True,
+    article_max_concurrency=1,
 ):
     runtime = runtime or RuntimeRepo()
     health = health or HealthMonitor()
@@ -348,12 +349,40 @@ def build_worker(
         version="1.0.0",
         start_time=NOW - timedelta(minutes=5),
         run_lease_seconds=120,
+        article_max_concurrency=article_max_concurrency,
         batch_id_factory=lambda run, item: f"{run.pipeline_type.value}-{run.run_id}-{item.job_target_id}",
         now_provider=now_provider,
     )
     if auto_register:
         assert worker.register_start(NOW, 30) is True
     return worker, runtime, health, heartbeat, events, factories
+
+
+def test_article_targets_execute_concurrently_with_distinct_batches_and_bounded_cap() -> None:
+    lock = threading.Lock(); active = 0; peak = 0
+    class BlockingRunner:
+        def run_once(self, now):
+            nonlocal active, peak
+            with lock: active += 1; peak = max(peak, active)
+            threading.Event().wait(0.04)
+            with lock: active -= 1
+            return ArticlePollingRunResult(1, 1, 0, 0, raw_insert_count=1)
+    factories = Factories()
+    factories.article = lambda target, batch_id, stop: (
+        factories.article_calls.append((target, batch_id, stop)) or BlockingRunner()
+    )
+    targets = tuple(target(i, name=f"账号{i}", snapshot=article_snapshot()) for i in range(1, 6))
+    runtime = RuntimeRepo(claimed_run(PipelineType.ARTICLE, targets))
+    worker, *_ = build_worker(
+        runtime=runtime, factories=factories, article_max_concurrency=2
+    )
+    result = worker.run_tick(NOW)
+    assert result.executed_target_count == 5
+    assert 1 < peak <= 2
+    batches = [call[1] for call in factories.article_calls]
+    assert len(set(batches)) == 5
+    assert len(runtime.finish_target_calls) == 5
+    assert runtime.finish_run_calls[-1][1] is RunStatus.SUCCESS
 
 
 def test_wechat_unhealthy_blocks_group_but_not_article() -> None:
@@ -1073,6 +1102,7 @@ def test_fake_runtime_factory_never_imports_or_constructs_real_adapters(
     assert worker.health_monitor.health_repo.engine is engine
     assert worker.health_monitor.ui_lock_repo.engine is engine
     assert group_runner.screenshot_root.is_absolute()
+    assert worker.article_max_concurrency == config.pipelines.article.rss_max_concurrency
 
 
 @pytest.mark.parametrize(

@@ -145,7 +145,6 @@ def build_managed_collector_worker(
             collect_service=collect_service,
             log_repo=article_log_repo,
             batch_id_factory=lambda account_name: batch_id,
-            max_concurrency=config.pipelines.article.rss_max_concurrency,
         )
         return _SingleRssTargetRunner(runner, target, stop_provider)
 
@@ -176,6 +175,7 @@ def build_managed_collector_worker(
         version="managed-collector-v1",
         start_time=clock(),
         run_lease_seconds=config.workers.run_lease_seconds,
+        article_max_concurrency=config.pipelines.article.rss_max_concurrency,
         now_provider=clock,
     )
 
