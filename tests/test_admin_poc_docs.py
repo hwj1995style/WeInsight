@@ -21,10 +21,10 @@ def test_checklist_preserves_order_and_article_limits() -> None:
         assert phrase in content
 
 
-def test_record_does_not_prefill_a_real_poc_decision() -> None:
+def test_record_does_not_record_go_without_evidence() -> None:
     content = RECORD.read_text(encoding="utf-8")
-    assert "当前状态：Not Executed" in content
-    assert "决策：Pending" in content
+    assert "当前状态：Completed (No-Go)" in content
+    assert "决策：No-Go" in content
     assert "决策：Go" not in content
     assert "真实 POC 已通过" not in content
     for phrase in ("run ID", "UI lock", "停止耗时", "本机截图路径", "回滚"):

@@ -126,6 +126,21 @@ class WechatHealthMonitor:
         if ui_owner is not None:
             return self._defer_deep_check(now)
 
+        # wxauto4 initializes COM as STA. Probe it before pywinauto's UIA
+        # checks so the latter cannot select an incompatible apartment model.
+        available, failed_by_exception = _run_boolean_probe(self.rpa_probe)
+        if not available:
+            return self._persist(
+                WechatHealthStatus.RPA_UNAVAILABLE,
+                (
+                    "WeChat RPA probe failed safely."
+                    if failed_by_exception
+                    else "WeChat RPA adapter is unavailable."
+                ),
+                now,
+                detected_version,
+            )
+
         available, failed_by_exception = _run_boolean_probe(self.window_probe)
         if not available:
             return self._persist(
@@ -147,19 +162,6 @@ class WechatHealthMonitor:
                     "WeChat login probe failed safely."
                     if failed_by_exception
                     else "WeChat is not logged in."
-                ),
-                now,
-                detected_version,
-            )
-
-        available, failed_by_exception = _run_boolean_probe(self.rpa_probe)
-        if not available:
-            return self._persist(
-                WechatHealthStatus.RPA_UNAVAILABLE,
-                (
-                    "WeChat RPA probe failed safely."
-                    if failed_by_exception
-                    else "WeChat RPA adapter is unavailable."
                 ),
                 now,
                 detected_version,

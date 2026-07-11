@@ -297,18 +297,27 @@ def test_create_maps_missing_disabled_and_wrong_pipeline_to_safe_errors() -> Non
 
 
 @pytest.mark.parametrize(
-    ("current", "expected", "target"),
+    ("current", "has_active_run", "expected", "target"),
     [
-        (JobStatus.SCHEDULED, 3, JobStatus.STOPPED),
-        (JobStatus.ACTIVE, 3, JobStatus.STOP_REQUESTED),
+        (JobStatus.SCHEDULED, False, 3, JobStatus.STOPPED),
+        (JobStatus.ACTIVE, True, 3, JobStatus.STOP_REQUESTED),
+        (JobStatus.ACTIVE, False, 3, JobStatus.STOPPED),
     ],
 )
 def test_stop_locks_and_updates_legal_state_with_version(
-    current, expected, target
+    current, has_active_run, expected, target
 ) -> None:
     engine = Engine(
         [
-            Result(rows=[{"status": current.value, "version": expected}]),
+            Result(
+                rows=[
+                    {
+                        "status": current.value,
+                        "version": expected,
+                        "has_active_run": has_active_run,
+                    }
+                ]
+            ),
             Result(rowcount=1),
             Result(),
         ]

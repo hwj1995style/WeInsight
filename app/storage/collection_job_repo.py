@@ -245,7 +245,11 @@ class MysqlCollectionJobRepo:
             if current is JobStatus.SCHEDULED:
                 target = JobStatus.STOPPED
             elif current is JobStatus.ACTIVE:
-                target = JobStatus.STOP_REQUESTED
+                target = (
+                    JobStatus.STOP_REQUESTED
+                    if bool(row.get("has_active_run"))
+                    else JobStatus.STOPPED
+                )
             else:
                 raise JobStateTransitionError(current, "stop")
             if int(row["version"]) != expected_version:
@@ -679,9 +683,14 @@ _GET_JOB_TARGET_NAMES = text(
 
 _LOCK_JOB = text(
     """
-    SELECT status, version
-    FROM wechat_collection_job
-    WHERE id = :job_id
+    SELECT job.status, job.version,
+        EXISTS(
+            SELECT 1
+            FROM wechat_collection_job_run run
+            WHERE run.job_id = job.id AND run.status = 'running'
+        ) AS has_active_run
+    FROM wechat_collection_job job
+    WHERE job.id = :job_id
     FOR UPDATE
     """
 )

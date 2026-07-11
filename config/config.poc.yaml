@@ -1,0 +1,105 @@
+app:
+  env: dev
+  timezone: Asia/Shanghai
+  log_level: INFO
+
+wechat:
+  pc_version: "4.1.8.107"
+  window_title: "微信"
+  fixed_window: true
+  check_login_interval_seconds: 300
+
+runtime:
+  log_dir: runtime/poc/logs
+  screenshot_dir: runtime/poc/screenshots
+  report_dir: runtime/poc/reports
+
+web:
+  host: 127.0.0.1
+  port: 8850
+  secure_cookie: false
+  tls_certfile: null
+  tls_keyfile: null
+
+auth:
+  default_username: admin
+  session_cookie_name: weinsight_poc_session
+  csrf_cookie_name: weinsight_poc_csrf
+  session_idle_minutes: 480
+  session_absolute_minutes: 1440
+  login_failure_limit: 5
+  login_lock_minutes: 15
+
+workers:
+  collector_mode: real
+  schedule_tick_seconds: 5
+  heartbeat_seconds: 10
+  run_lease_seconds: 120
+  pipeline_tick_seconds: 5
+  group_clean_batch_size: 50
+  group_analysis_batch_size: 100
+  article_parse_batch_size: 20
+  article_analysis_batch_size: 20
+
+pipelines:
+  group:
+    enabled: true
+    core_group_limit: 5
+    poll_interval_seconds: 30
+    max_group_per_round: 5
+    rpa_timeout_seconds: 60
+    target_round_seconds: 60
+  article:
+    enabled: true
+    account_limit: 20
+    crawl_time: "07:30"
+    account_poll_interval_minutes: 60
+    max_articles_per_account: 5
+    max_accounts_per_ui_slice: 1
+    collect_today_only: true
+    dedup_enabled: true
+    dedup_key: article_hash
+    ui_slice_timeout_seconds: 30
+    rpa_timeout_seconds: 180
+    browser_executable_path: auto
+    state_machine_enabled: true
+    parse_after_release_ui: true
+    resume_from_progress: true
+    min_article_ui_window_seconds: 20
+    low_peak_windows:
+      - "07:30-19:30"
+    route_cache_enabled: true
+    route_probe_enabled: true
+    route_probe_failure_threshold: 3
+    route_entry_labels:
+      - 历史消息
+      - 全部消息
+      - 往期文章
+      - 文章
+      - 资讯
+      - 蛋价资讯
+      - 今日价格
+      - 闽融平台
+    link_extract_methods:
+      - copy_link_menu
+      - uia_value
+      - visible_text
+    egg_price_extraction_enabled: true
+    price_items_json_preview_limit: 20
+    image_quote_note_enabled: true
+  ui_resource:
+    mode: exclusive
+    group_priority: true
+    max_core_group_block_seconds: 10
+    lock_acquire_timeout_seconds: 5
+    lock_lease_seconds: 120
+    lock_heartbeat_interval_seconds: 10
+    stale_lock_recover_seconds: 180
+    metrics_enabled: true
+
+mysql:
+  host: 127.0.0.1
+  port: 3307
+  database: weinsight_dev
+  username: weinsight
+  password: ${WEINSIGHT_MYSQL_PASSWORD}

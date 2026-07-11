@@ -1,7 +1,7 @@
 # 微信采集管理后台受控 POC 执行记录
 
-当前状态：Not Executed  
-决策：Pending
+当前状态：Completed (No-Go)  
+决策：No-Go
 
 > 不得提前填写成功结论。真实 POC 仅限微信 PC 4.1.8.107，第一轮只允许 1 个核心群和 1 个公众号，并要求人工值守。
 
@@ -20,7 +20,7 @@
 | 检查 | 状态 | 安全证据摘要 |
 | --- | --- | --- |
 | 完整 pytest | Passed | 本次 Fake E2E 修复后的全量回归见提交记录；不包含真实微信数据。 |
-| 只读上线前检查 | Not Executed | Pending |
+| 只读上线前检查 | Passed | 2026-07-11：微信 PC 4.1.8.107 已登录，UI lock 为 free_no_row；管理后台迁移前备份已生成并完成开发库结构核验。 |
 | Fake 多目标、停止与断线 | Passed | 2026-07-11：隔离 E2E 双目标任务完成登录、名单、运行领取、停止、日报临时版与 390px 检查；测试库及临时账户已清理。 |
 | 心跳、健康、SSE 与日报 | Passed | 2026-07-11：Fake Collector/Pipeline 运行，手动当日日报请求达到成功/部分成功并展示临时版；未启动真实微信采集。 |
 
@@ -28,8 +28,8 @@
 
 | 链路 | run ID | UI lock / 等待 | 结果 | 停止耗时 | 本机截图路径 |
 | --- | --- | --- | --- | --- | --- |
-| 核心群，30 分钟 | Pending | Pending | Not Executed | Pending | Pending |
-| 公众号，最小 10 分钟、每轮 1 篇 | Pending | Pending | Not Executed | Pending | Pending |
+| 核心群，30 分钟 | 1–24 | 无超时，停止后 free_no_row | 23 次成功 | 安全检查点后停止 | 未生成 |
+| 公众号，最小 10 分钟、每轮 1 篇 | 22 | 无超时，失败后 free_no_row | 失败：WECHAT_ARTICLE_RPA_ERROR | 首次失败后立即停止后续调度 | 未生成 |
 
 截图路径仅供本机管理员排障，不粘贴截图、不提供 Web 链接。
 
@@ -37,21 +37,21 @@
 
 | 检查 | 状态 | 记录 |
 | --- | --- | --- |
-| 群优先交错运行 1 到 2 小时 | Not Executed | Pending |
+| 群优先交错运行 1 到 2 小时 | Not Executed | 公众号首跑失败，按 No-Go 门禁停止，不继续双链路观察。 |
 | 次日 00:10 前一自然日 final 日报 | Not Executed | Pending |
 | compensation all / cutoff | Not Executed | Pending |
 
 ## Go / Watch / No-Go
 
-决策：Pending
+决策：No-Go
 
-- 业务、运维、开发签署：Pending
-- 遗留风险与观察期限：Pending
-- 扩容是否获批：Pending
+- 业务、运维、开发签署：待人工确认
+- 遗留风险与观察期限：公众号 RPA 未找到目标，需排查后重新执行单目标 POC。
+- 扩容是否获批：否
 
 ## 回滚记录
 
-触发条件、回滚路径、UI lock 诊断、停止时间、恢复点和复核结果：Pending。
+触发条件：公众号首次运行失败 `WECHAT_ARTICLE_RPA_ERROR`。已从前端请求停止两个 POC 任务；群任务在运行完成后停止，公众号停止后续调度；UI lock 最终为 free_no_row。两条任务当前均为 stopped，非生产三进程已关闭。
 
 未得到明确 Go 和扩容批准前，保持单目标门禁，不启用自动扩容。
 
@@ -59,4 +59,4 @@
 
 ## 7. 本次执行结论
 
-Fake RPA 与浏览器验收已完成，但真实 POC 仍为 Not Executed。原因：当前开发数据库尚未具备管理后台任务、Worker heartbeat 与运行实例所需的迁移表；在不执行生产部署配置和数据库迁移的约束下，不创建真实任务、不触发真实微信采集，也不开始次日或扩容观察。
+Fake RPA 与浏览器验收已完成；2026-07-11 已在开发库执行首次真实单群单公众号 POC。群链路成功，公众号首跑失败并触发 No-Go；因此不执行次日或扩容观察，等待公众号 RPA 故障修复后重新评估。

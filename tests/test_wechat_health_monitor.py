@@ -216,10 +216,10 @@ def test_shallow_failure_is_saved_and_short_circuits_deep_checks(desktop_status)
 @pytest.mark.parametrize(
     ("failed_probe", "expected_status", "expected_order"),
     [
-        ("window", WechatHealthStatus.WINDOW_UNAVAILABLE, ["desktop", "window"]),
-        ("login", WechatHealthStatus.NOT_LOGGED_IN, ["desktop", "window", "login"]),
-        ("rpa", WechatHealthStatus.RPA_UNAVAILABLE, ["desktop", "window", "login", "rpa"]),
-        (None, WechatHealthStatus.OK, ["desktop", "window", "login", "rpa"]),
+        ("rpa", WechatHealthStatus.RPA_UNAVAILABLE, ["desktop", "rpa"]),
+        ("window", WechatHealthStatus.WINDOW_UNAVAILABLE, ["desktop", "rpa", "window"]),
+        ("login", WechatHealthStatus.NOT_LOGGED_IN, ["desktop", "rpa", "window", "login"]),
+        (None, WechatHealthStatus.OK, ["desktop", "rpa", "window", "login"]),
     ],
 )
 def test_deep_checks_run_in_order_and_cover_remaining_health_states(
@@ -300,7 +300,7 @@ def test_expired_ui_lock_runs_full_check_and_refreshes_stale_ok() -> None:
     assert refreshed.status is WechatHealthStatus.OK
     assert refreshed.checked_at == NOW
     assert refreshed.deep_check_deferred is False
-    assert order == ["desktop", "window", "login", "rpa"]
+    assert order == ["desktop", "rpa", "window", "login"]
     assert len(repo.inserted) == 1
     assert monitor.can_collect(NOW) is True
 

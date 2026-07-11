@@ -27,10 +27,10 @@ def test_scaleout_record_has_metrics_and_rollback_gates() -> None:
         assert phrase in content
 
 
-def test_scaleout_requires_signed_single_target_go() -> None:
+def test_scaleout_stays_blocked_after_single_target_no_go() -> None:
     content = SCALEOUT.read_text(encoding="utf-8")
     poc = POC_RECORD.read_text(encoding="utf-8")
     assert "单目标 POC 明确 Go" in content
     assert "未经签署不得开始任一扩容批次" in content
-    assert "决策：Pending" in poc
-    assert "扩容是否获批：Pending" in poc
+    assert "决策：No-Go" in poc
+    assert "扩容是否获批：否" in poc
