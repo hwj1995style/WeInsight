@@ -29,4 +29,3 @@ def test_fake_group_client_reads_messages() -> None:
     assert client.scroll_count == 2
     assert client.read_visible_messages() == [message]
 
-

@@ -34,4 +34,3 @@ class WechatGroupRpaClient(Protocol):
     def scroll_up_messages(self, pages: int = 1) -> None:
         ...
 
-

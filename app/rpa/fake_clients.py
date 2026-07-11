@@ -35,4 +35,3 @@ class FakeGroupRpaClient:
     def scroll_up_messages(self, pages: int = 1) -> None:
         self.scroll_count += pages
 
-
