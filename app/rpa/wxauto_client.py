@@ -187,7 +187,12 @@ class WxautoArticleRpaClient:
         if self.open_account_search_fallback_enabled and not self._wait_for_public_account_window(
             account_name
         ):
-            if not self._open_public_account_from_main_search(
+            if self._open_public_account_from_main_search(
+                account_name
+            ) and self._wait_for_public_account_window(account_name):
+                self.current_account_name = account_name
+                return
+            if not self._open_public_account_from_network_search(
                 account_name
             ) or not self._wait_for_public_account_window(account_name):
                 raise RuntimeError("public account window not found")
@@ -551,6 +556,50 @@ class WxautoArticleRpaClient:
             pyperclip.copy(account_name)
             keyboard.send_keys("^a{BACKSPACE}^v")
             result = _wait_for_main_search_result(main_window, account_name)
+            if result is None:
+                return False
+            _activate_control(result, prefer_physical=True)
+            time.sleep(1.0)
+            return True
+        finally:
+            try:
+                pyperclip.copy(previous_clipboard)
+            except Exception:
+                pass
+
+    def _open_public_account_from_network_search(self, account_name: str) -> bool:
+        try:
+            pyperclip = importlib.import_module("pyperclip")
+            pywinauto = importlib.import_module("pywinauto")
+            keyboard = importlib.import_module("pywinauto.keyboard")
+        except Exception:
+            return False
+
+        desktop = pywinauto.Desktop(backend="uia")
+        main_window = _find_wechat_main_window(desktop)
+        if main_window is None:
+            return False
+        search_edit = _find_main_search_edit(main_window)
+        if search_edit is None:
+            return False
+
+        previous_clipboard = ""
+        try:
+            previous_clipboard = pyperclip.paste()
+        except Exception:
+            previous_clipboard = ""
+
+        try:
+            _focus_window(main_window)
+            _activate_control(search_edit, prefer_physical=True)
+            time.sleep(0.2)
+            pyperclip.copy(account_name)
+            keyboard.send_keys("^a{BACKSPACE}^v")
+            entry = _wait_for_network_search_entry(main_window)
+            if entry is None:
+                return False
+            _activate_control(entry, prefer_physical=True)
+            result = _wait_for_exact_network_search_result(main_window, account_name)
             if result is None:
                 return False
             _activate_control(result, prefer_physical=True)
@@ -1063,6 +1112,16 @@ def _find_network_search_entry(main_window: Any) -> Any | None:
     return None
 
 
+def _wait_for_network_search_entry(main_window: Any, timeout_seconds: float = 4.0) -> Any | None:
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        entry = _find_network_search_entry(main_window)
+        if entry is not None:
+            return entry
+        time.sleep(0.2)
+    return None
+
+
 def _find_exact_network_search_result(container: Any, account_name: str) -> Any | None:
     expected = _normalize_match_text(account_name)
     for control in _safe_descendants(container, limit=3000):
@@ -1070,6 +1129,20 @@ def _find_exact_network_search_result(container: Any, account_name: str) -> Any 
             continue
         if _normalize_match_text(_safe_text(control)) == expected:
             return control
+    return None
+
+
+def _wait_for_exact_network_search_result(
+    container: Any,
+    account_name: str,
+    timeout_seconds: float = 4.0,
+) -> Any | None:
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        result = _find_exact_network_search_result(container, account_name)
+        if result is not None:
+            return result
+        time.sleep(0.2)
     return None
 
 

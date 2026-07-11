@@ -250,6 +250,56 @@ def test_wxauto_article_client_waits_for_account_window_after_search_fallback(
     assert client.current_account_name == "信立鸡蛋当日价格"
 
 
+def test_wxauto_article_client_uses_network_search_after_local_search_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = WxautoArticleRpaClient(
+        wx=FakeArticleWx(),
+        open_account_search_fallback_enabled=True,
+    )
+    waits = iter([False, True])
+    network_calls: list[str] = []
+
+    monkeypatch.setattr(client, "_wait_for_public_account_window", lambda account_name: next(waits))
+    monkeypatch.setattr(client, "_open_public_account_from_main_search", lambda account_name: False)
+    monkeypatch.setattr(
+        client,
+        "_open_public_account_from_network_search",
+        lambda account_name: network_calls.append(account_name) or True,
+        raising=False,
+    )
+
+    client.open_public_account("一箱蛋")
+
+    assert network_calls == ["一箱蛋"]
+    assert client.current_account_name == "一箱蛋"
+
+
+def test_wxauto_article_client_rejects_network_search_without_ready_target_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = WxautoArticleRpaClient(
+        wx=FakeArticleWx(),
+        open_account_search_fallback_enabled=True,
+    )
+    waits = iter([False, False])
+    network_calls: list[str] = []
+
+    monkeypatch.setattr(client, "_wait_for_public_account_window", lambda account_name: next(waits))
+    monkeypatch.setattr(client, "_open_public_account_from_main_search", lambda account_name: False)
+    monkeypatch.setattr(
+        client,
+        "_open_public_account_from_network_search",
+        lambda account_name: network_calls.append(account_name) or True,
+        raising=False,
+    )
+
+    with pytest.raises(RuntimeError, match="public account window not found"):
+        client.open_public_account("一箱蛋")
+
+    assert network_calls == ["一箱蛋"]
+
+
 class FakeNetworkSearchControl:
     def __init__(self, *, text: str, class_name: str, control_type: str = "ListItem") -> None:
         self._text = text
