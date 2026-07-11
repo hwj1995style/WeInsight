@@ -1,6 +1,8 @@
 import re
 from pathlib import Path
 
+import pytest
+
 
 POC_RECORD = Path("docs/operations/公众号RSS受控POC验收记录.md")
 
@@ -17,9 +19,16 @@ def _section(text: str, heading: str) -> str:
 
 
 def _table(section: str, required_headers: tuple[str, ...]) -> tuple[list[str], list[list[str]]]:
-    tables = re.findall(r"(?m)(?:^\|.*\|\s*$\n)+", section)
+    tables: list[list[str]] = []
+    current: list[str] = []
+    for line in (*section.splitlines(), ""):
+        if line.strip().startswith("|") and line.strip().endswith("|"):
+            current.append(line)
+        elif current:
+            tables.append(current)
+            current = []
     for block in tables:
-        lines = [line for line in block.splitlines() if line.strip()]
+        lines = [line for line in block if line.strip()]
         headers = [cell.strip() for cell in lines[0].strip("|").split("|")]
         if all(header in headers for header in required_headers):
             rows = [
@@ -35,6 +44,69 @@ def _column(headers: list[str], rows: list[list[str]], name: str) -> list[str]:
     return [row[index] for row in rows]
 
 
+BLANK_VALUES = {"", "____", "未执行", "未评审"}
+
+
+def _replace_in_section(text: str, heading: str, old: str, new: str) -> str:
+    section = _section(text, heading)
+    assert old in section, f"mutation target absent in {heading}: {old}"
+    return text.replace(section, section.replace(old, new, 1), 1)
+
+
+def _assert_blank_columns(section: str, headers: tuple[str, ...], blank_columns: tuple[str, ...]) -> None:
+    actual_headers, rows = _table(section, headers)
+    for name in blank_columns:
+        assert set(_column(actual_headers, rows, name)) <= BLANK_VALUES, f"filled {name} in {headers[0]}"
+
+
+def _assert_blank_key_values(section: str, labels: tuple[str, ...]) -> None:
+    for label in labels:
+        match = re.search(rf"{re.escape(label)}[：:]\s*([^；。\n]*)", section)
+        assert match, f"missing key-value field: {label}"
+        assert match.group(1).strip() in BLANK_VALUES, f"filled key-value field: {label}"
+
+
+def _assert_unexecuted_integrity(text: str) -> None:
+    assert re.search(r"状态[：:]\s*未执行", _section(text, "文档状态"))
+
+    basic = _section(text, "基本记录")
+    headers, rows = _table(basic, ("字段", "人工填写"))
+    assert set(_column(headers, rows, "人工填写")) <= BLANK_VALUES
+
+    _assert_blank_columns(
+        _section(text, "24 小时观测总表"),
+        ("序号", "计划/实际轮询时间（含时区）", "新文章数", "证据位置"),
+        ("计划/实际轮询时间（含时区）", "RSS HTTP/解析结果", "新文章数", "重复拦截数", "入库成功/失败数", "最早发现至入库延迟", "锁审计结果", "群探针结果", "证据位置", "执行人"),
+    )
+    _assert_blank_columns(
+        _section(text, "RSS 完整性与时效"),
+        ("RSS GUID/链接", "入库时间", "结果", "证据位置"),
+        ("RSS GUID/链接", "标题", "源发布时间", "首次抓取时间", "入库时间", "延迟", "业务文章 ID", "结果", "证据位置"),
+    )
+    _assert_blank_key_values(
+        _section(text, "业务去重"),
+        ("去重键", "核对总数", "重复数", "SQL/结果证据位置", "执行人", "复核人", "结果（通过/不通过）"),
+    )
+    _assert_blank_key_values(
+        _section(text, "UI 锁隔离"),
+        ("检查时间范围", "查询语句/过滤条件", "命中数", "证据位置", "结果（通过/不通过）"),
+    )
+    _assert_blank_columns(
+        _section(text, "WeRSS 停止检查"),
+        ("检查项", "实测/时间", "证据位置", "结果（通过/不通过）"),
+        ("实测/时间", "证据位置", "结果（通过/不通过）"),
+    )
+    _assert_blank_columns(
+        _section(text, "群链路隔离"),
+        ("检查点", "时间", "证据位置", "结果（通过/不通过）"),
+        ("时间", "群/任务标识", "输入消息 ID", "采集结果 ID", "后处理/进度状态", "锁与错误摘要", "证据位置", "结果（通过/不通过）"),
+    )
+    _assert_blank_key_values(
+        _section(text, "最终删除公众号 RPA 门禁"),
+        ("删除执行时间", "操作者", "目标资源", "删除记录证据位置", "RSS 复测", "群链路复测", "告警复测", "删除后证据位置", "复核人", "最终状态（通过/不通过）"),
+    )
+
+
 def test_status_and_measured_results_are_unexecuted_blank_template():
     status = _section(_text(), "文档状态")
     assert re.search(r"状态[：:]\s*未执行", status)
@@ -45,6 +117,27 @@ def test_status_and_measured_results_are_unexecuted_blank_template():
     for name in ("实测值/摘要", "证据位置", "结果（通过/不通过）"):
         assert set(_column(headers, rows, name)) <= {"", "____", "未评审"}
     assert not re.search(r"20\d{2}[-/]\d{1,2}[-/]\d{1,2}", summary)
+    _assert_unexecuted_integrity(_text())
+
+
+@pytest.mark.parametrize(
+    ("heading", "old", "new"),
+    (
+        ("基本记录", "| 开始时间（含时区） |  |", "| 开始时间（含时区） | 2026-07-12 09:00 +08:00 |"),
+        ("24 小时观测总表", "| 1 |  |", "| 1 | 2026-07-12 09:15 +08:00 |"),
+        ("RSS 完整性与时效", "| ____ | ____ | ____ | ____ | ____ | ____ | ____ | ____ | ____ |", "| ____ | ____ | ____ | ____ | ____ | ____ | ____ | ____ | /tmp/evidence |"),
+        ("业务去重", "重复数：____", "重复数：1"),
+        ("UI 锁隔离", "命中数：____", "命中数：0"),
+        ("WeRSS 停止检查", "| WeRSS 停止与告警 |  |  |  |", "| WeRSS 停止与告警 | 2026-07-12 10:00 | /tmp/log | 通过 |"),
+        ("群链路隔离", "| 窗口前 |  |", "| 窗口前 | 2026-07-12 09:00 |"),
+        ("最终删除公众号 RPA 门禁", "删除执行时间：____", "删除执行时间：2026-07-13 10:00 +08:00"),
+        ("最终删除公众号 RPA 门禁", "RSS 复测：____", "RSS 复测：通过"),
+    ),
+)
+def test_unexecuted_integrity_validator_rejects_injected_measurements(heading, old, new):
+    mutated = _replace_in_section(_text(), heading, old, new)
+    with pytest.raises(AssertionError):
+        _assert_unexecuted_integrity(mutated)
 
 
 def test_admission_and_final_decisions_use_explicit_binary_values_and_start_blank():
@@ -80,6 +173,13 @@ def test_werss_stop_section_co_locates_isolation_continuity_and_recovery_evidenc
     ):
         assert requirement in werss
     _table(werss, ("检查项", "实测/时间", "证据位置", "结果（通过/不通过）"))
+
+
+def test_execution_sections_use_consistent_binary_result_labels():
+    for heading in ("业务去重", "UI 锁隔离", "群链路隔离"):
+        section = _section(_text(), heading)
+        assert "通过/失败" not in section
+        assert "结果（通过/不通过）" in section
 
 
 def test_each_gate_has_auditable_columns_and_empty_evidence_fields():
