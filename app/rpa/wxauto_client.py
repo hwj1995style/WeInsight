@@ -15,6 +15,8 @@ from app.rpa.interfaces import VisibleMessage
 
 _CHAT_WITH_ATTEMPTS = 6
 _CHAT_WITH_RETRY_DELAY_SECONDS = 1.0
+_PUBLIC_ACCOUNT_WINDOW_READY_TIMEOUT_SECONDS = 3.0
+_PUBLIC_ACCOUNT_WINDOW_READY_POLL_SECONDS = 0.2
 _WECHAT_INIT_ATTEMPTS = 3
 _WECHAT_INIT_RETRY_DELAY_SECONDS = 1.0
 _WECHAT_BROWSER_PROCESS_NAMES = {"wechat.exe", "wechatappex.exe", "weixin.exe"}
@@ -180,8 +182,12 @@ class WxautoArticleRpaClient:
         if not hasattr(self.wx, "ChatWith"):
             raise AttributeError("wxauto WeChat object does not expose ChatWith(account_name).")
         _chat_with_retry(self.wx, account_name)
-        if self.open_account_search_fallback_enabled and not self._public_account_window_visible(account_name):
-            if not self._open_public_account_from_main_search(account_name):
+        if self.open_account_search_fallback_enabled and not self._wait_for_public_account_window(
+            account_name
+        ):
+            if not self._open_public_account_from_main_search(
+                account_name
+            ) or not self._wait_for_public_account_window(account_name):
                 raise RuntimeError("public account window not found")
         self.current_account_name = account_name
 
@@ -547,12 +553,20 @@ class WxautoArticleRpaClient:
                 return False
             _activate_control(result, prefer_physical=True)
             time.sleep(1.0)
-            return self._public_account_window_visible(account_name)
+            return True
         finally:
             try:
                 pyperclip.copy(previous_clipboard)
             except Exception:
                 pass
+
+    def _wait_for_public_account_window(self, account_name: str) -> bool:
+        deadline = time.monotonic() + _PUBLIC_ACCOUNT_WINDOW_READY_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            if self._public_account_window_visible(account_name):
+                return True
+            time.sleep(_PUBLIC_ACCOUNT_WINDOW_READY_POLL_SECONDS)
+        return self._public_account_window_visible(account_name)
 
     def _click_account_info_entry_if_browser_missing(self, account_window: Any) -> bool:
         if self._large_browser_window_visible():

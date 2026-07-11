@@ -175,8 +175,13 @@ def test_wxauto_article_client_uses_search_fallback_when_chatwith_does_not_open_
     wx = FakeArticleWx()
     client = WxautoArticleRpaClient(wx=wx, open_account_search_fallback_enabled=True)
     fallback_calls: list[str] = []
+    wait_results = iter([False, True])
 
-    monkeypatch.setattr(client, "_public_account_window_visible", lambda account_name: False)
+    monkeypatch.setattr(
+        client,
+        "_wait_for_public_account_window",
+        lambda account_name: next(wait_results),
+    )
     monkeypatch.setattr(
         client,
         "_open_public_account_from_main_search",
@@ -187,6 +192,59 @@ def test_wxauto_article_client_uses_search_fallback_when_chatwith_does_not_open_
 
     assert wx.opened == ["信立鸡蛋当日价格"]
     assert fallback_calls == ["信立鸡蛋当日价格"]
+    assert client.current_account_name == "信立鸡蛋当日价格"
+
+
+def test_wxauto_article_client_waits_for_account_window_before_search_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = WxautoArticleRpaClient(
+        wx=FakeArticleWx(),
+        open_account_search_fallback_enabled=True,
+    )
+    visibility = iter([False, False, True])
+    sleep_calls: list[float] = []
+
+    monkeypatch.setattr(client, "_public_account_window_visible", lambda account_name: next(visibility))
+    monkeypatch.setattr(
+        client,
+        "_open_public_account_from_main_search",
+        lambda account_name: pytest.fail("search fallback should not run while the account window is loading"),
+    )
+    monkeypatch.setattr("app.rpa.wxauto_client.time.sleep", lambda seconds: sleep_calls.append(seconds))
+
+    client.open_public_account("信立鸡蛋当日价格")
+
+    assert sleep_calls == [0.2, 0.2]
+    assert client.current_account_name == "信立鸡蛋当日价格"
+
+
+def test_wxauto_article_client_waits_for_account_window_after_search_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = WxautoArticleRpaClient(
+        wx=FakeArticleWx(),
+        open_account_search_fallback_enabled=True,
+    )
+    fallback_calls: list[str] = []
+    wait_calls: list[str] = []
+    wait_results = iter([False, True])
+
+    monkeypatch.setattr(
+        client,
+        "_wait_for_public_account_window",
+        lambda account_name: wait_calls.append(account_name) or next(wait_results),
+    )
+    monkeypatch.setattr(
+        client,
+        "_open_public_account_from_main_search",
+        lambda account_name: fallback_calls.append(account_name) or True,
+    )
+
+    client.open_public_account("信立鸡蛋当日价格")
+
+    assert fallback_calls == ["信立鸡蛋当日价格"]
+    assert wait_calls == ["信立鸡蛋当日价格", "信立鸡蛋当日价格"]
     assert client.current_account_name == "信立鸡蛋当日价格"
 
 
