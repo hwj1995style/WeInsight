@@ -48,7 +48,11 @@ class RssFeedClient:
                         if response.status_code in {301, 302, 303, 307, 308}:
                             if redirects == 3 or not response.headers.get("location"):
                                 raise FeedFetchError("feed_redirect_blocked")
-                            current, addresses = self._validate(urljoin(current, response.headers["location"]), initial=False)
+                            redirect_url = urljoin(current, response.headers["location"])
+                            if self._origin(current) != self._origin(redirect_url):
+                                headers.pop("If-None-Match", None)
+                                headers.pop("If-Modified-Since", None)
+                            current, addresses = self._validate(redirect_url, initial=False)
                             continue
                         if response.status_code == 304:
                             return self._result(response, (), True, started)
@@ -60,7 +64,7 @@ class RssFeedClient:
                             if len(body) > MAX_BODY_BYTES:
                                 raise FeedFetchError("feed_too_large")
                         parsed = feedparser.parse(bytes(body))
-                        if parsed.bozo or not parsed.entries:
+                        if parsed.bozo or not parsed.version:
                             raise FeedFetchError("feed_invalid_format")
                         items = tuple(self._item(entry) for entry in parsed.entries)
                         return self._result(response, items, False, started)
@@ -89,8 +93,16 @@ class RssFeedClient:
                 literal = True
             except ValueError:
                 literal = False
-            return normalized, ([host] if exception or literal else answers)
-        except FeedUrlBlocked:
+            if exception and not literal:
+                answers = list(self._resolver(host))
+                if not answers:
+                    raise FeedFetchError("feed_redirect_blocked")
+                for answer in answers:
+                    ip_address(answer)
+            return normalized, ([host] if literal else answers)
+        except FeedFetchError:
+            raise
+        except (FeedUrlBlocked, OSError, ValueError):
             raise FeedFetchError("feed_redirect_blocked") from None
 
     def _pin(self, url: str, headers: dict[str, str], addresses: list[str]):
@@ -104,7 +116,8 @@ class RssFeedClient:
         if port != (443 if parsed.scheme == "https" else 80): netloc += f":{port}"
         pinned = urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, ""))
         outgoing = dict(headers)
-        outgoing["Host"] = host if port in {80, 443} else f"{host}:{port}"
+        default_port = 443 if parsed.scheme == "https" else 80
+        outgoing["Host"] = host if port == default_port else f"{host}:{port}"
         extensions = {"sni_hostname": host.encode()} if parsed.scheme == "https" else {}
         return pinned, outgoing, extensions
 
@@ -112,6 +125,11 @@ class RssFeedClient:
     def _item(entry) -> FeedItem:
         link = entry.get("link", "")
         return FeedItem(entry.get("title", ""), link, entry.get("published"), entry.get("updated"), entry.get("author"), entry.get("summary") or entry.get("description"))
+
+    @staticmethod
+    def _origin(url: str) -> tuple[str, str, int]:
+        parsed = urlsplit(url)
+        return parsed.scheme.lower(), (parsed.hostname or "").lower(), parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
 
     @staticmethod
     def _result(response, items, not_modified, started):

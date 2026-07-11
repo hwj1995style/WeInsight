@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import httpx
 import pytest
+import gzip
+from urllib.parse import urlsplit
 
 from app.rss.feed_client import FeedFetchError, RssFeedClient
 
@@ -34,6 +36,15 @@ def test_fetch_returns_not_modified():
     assert client.fetch("https://feed.example/rss", timeout_seconds=30, etag='"v1"', modified=None).not_modified
 
 
+def test_fetch_sends_if_modified_since():
+    seen = {}
+    def handler(request):
+        seen["value"] = request.headers["If-Modified-Since"]
+        return httpx.Response(304)
+    make_client(handler).fetch("https://feed.example/rss", timeout_seconds=3, etag=None, modified="Sat, 11 Jul 2026 10:00:00 GMT")
+    assert seen["value"] == "Sat, 11 Jul 2026 10:00:00 GMT"
+
+
 def test_fetch_maps_atom():
     result = make_client(lambda request: httpx.Response(200, content=ATOM)).fetch("https://feed.example/a", timeout_seconds=3, etag=None, modified=None)
     assert (result.items[0].title, result.items[0].author) == ("Atom item", "Bob")
@@ -53,7 +64,8 @@ def test_fetch_maps_timeout():
 
 
 def test_fetch_rejects_decompressed_body_over_five_mib():
-    client = make_client(lambda request: httpx.Response(200, content=b"x" * (5 * 1024 * 1024 + 1)))
+    compressed = gzip.compress(b"x" * (5 * 1024 * 1024 + 1))
+    client = make_client(lambda request: httpx.Response(200, headers={"Content-Encoding": "gzip"}, content=compressed))
     with pytest.raises(FeedFetchError, match="feed_too_large"):
         client.fetch("https://feed.example/rss", timeout_seconds=3, etag=None, modified=None)
 
@@ -72,6 +84,78 @@ def test_transport_is_pinned_to_validated_dns_answer():
         return httpx.Response(304)
     make_client(handler, resolver=lambda host: ["93.184.216.34"]).fetch("https://feed.example/rss", timeout_seconds=3, etag=None, modified=None)
     assert seen == {"url": "https://93.184.216.34/rss", "host": "feed.example"}
+
+
+def test_trusted_hostname_is_resolved_once_and_pinned_even_when_private():
+    calls = []
+    seen = {}
+    def resolver(host):
+        calls.append(host)
+        return ["127.0.0.1"]
+    def handler(request):
+        seen["url"] = str(request.url)
+        return httpx.Response(304)
+    make_client(handler, resolver=resolver, allowed_endpoint=("werss.local", 8001)).fetch("http://werss.local:8001/feed", timeout_seconds=3, etag=None, modified=None)
+    assert calls == ["werss.local"]
+    assert seen["url"] == "http://127.0.0.1:8001/feed"
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [("http://feed.example:443/rss", "feed.example:443"), ("https://feed.example:80/rss", "feed.example:80")],
+)
+def test_host_header_keeps_non_default_port(url, expected):
+    seen = {}
+    def handler(request):
+        seen["host"] = request.headers["host"]
+        return httpx.Response(304)
+    make_client(handler, allowed_endpoint=("feed.example", int(urlsplit(url).port))).fetch(url, timeout_seconds=3, etag=None, modified=None)
+    assert seen["host"] == expected
+
+
+def test_cross_origin_redirect_strips_conditional_headers():
+    requests = []
+    def handler(request):
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(302, headers={"Location": "https://other.example/feed"})
+        return httpx.Response(304)
+    make_client(handler).fetch("https://feed.example/rss", timeout_seconds=3, etag='"v1"', modified="yesterday")
+    assert "If-None-Match" not in requests[1].headers
+    assert "If-Modified-Since" not in requests[1].headers
+
+
+def test_same_origin_redirect_preserves_conditional_headers():
+    requests = []
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(302, headers={"Location": "/next"}) if len(requests) == 1 else httpx.Response(304)
+    make_client(handler).fetch("https://feed.example/rss", timeout_seconds=3, etag='"v1"', modified=None)
+    assert requests[1].headers["If-None-Match"] == '"v1"'
+
+
+@pytest.mark.parametrize("content", [b"<rss version='2.0'><channel></channel></rss>", b"<feed xmlns='http://www.w3.org/2005/Atom'></feed>"])
+def test_valid_empty_feed_succeeds(content):
+    result = make_client(lambda request: httpx.Response(200, content=content)).fetch("https://feed.example/rss", timeout_seconds=3, etag=None, modified=None)
+    assert result.items == ()
+
+
+def test_allows_at_most_three_redirects():
+    count = 0
+    def handler(request):
+        nonlocal count
+        count += 1
+        return httpx.Response(302, headers={"Location": f"/hop-{count}"})
+    with pytest.raises(FeedFetchError, match="feed_redirect_blocked"):
+        make_client(handler).fetch("https://feed.example/rss", timeout_seconds=3, etag=None, modified=None)
+    assert count == 4
+
+
+@pytest.mark.parametrize("status,headers", [(302, {}), (500, {})])
+def test_redirect_without_location_and_http_failure_are_mapped(status, headers):
+    code = "feed_redirect_blocked" if status == 302 else "feed_http_error"
+    with pytest.raises(FeedFetchError, match=code):
+        make_client(lambda request: httpx.Response(status, headers=headers)).fetch("https://feed.example/rss", timeout_seconds=3, etag=None, modified=None)
 
 
 def test_fetch_accepts_a_public_ip_literal():
