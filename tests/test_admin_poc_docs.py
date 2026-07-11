@@ -36,3 +36,10 @@ def test_readme_links_controlled_poc_documents() -> None:
     assert "微信采集管理后台受控POC验收清单.md" in content
     assert "微信采集管理后台受控POC执行记录.md" in content
     assert "未经人工批准不得执行真实微信 POC" in content
+
+
+def test_admin_poc_execution_record_keeps_network_search_probe_gate() -> None:
+    content = RECORD.read_text(encoding="utf-8")
+
+    assert "网络搜索精确匹配" in content
+    assert "重跑单目标 POC" in content
