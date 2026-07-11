@@ -93,7 +93,7 @@ def test_structured_and_generic_failures_persist_error_without_cache_or_success_
     for error, code in ((FeedFetchError("feed_timeout"), "feed_timeout"), (RuntimeError("boom"), "RSS_ARTICLE_COLLECT_ERROR")):
         service = StatefulService([error])
         RssArticlePollingRunner(collect_service=service, log_repo=Logs(), batch_id_factory=lambda n:n).run([target], NOW)
-        assert service.state_repo.calls == [(7, {"error_code": code})]
+        assert service.state_repo.calls == [(7, {"etag": "etag", "modified": "mod", "success_time": None, "error_code": code})]
 
 
 def test_success_after_failure_clears_error_and_preserves_cache_values():
@@ -102,5 +102,5 @@ def test_success_after_failure_clears_error_and_preserves_cache_values():
     service = StatefulService([FeedFetchError("feed_timeout"), None])
     runner = RssArticlePollingRunner(collect_service=service, log_repo=Logs(), batch_id_factory=lambda n:n)
     runner.run([target], NOW); runner.run([target], NOW)
-    assert service.state_repo.calls[0] == (8, {"error_code": "feed_timeout"})
+    assert service.state_repo.calls[0] == (8, {"etag": "etag", "modified": "mod", "success_time": None, "error_code": "feed_timeout"})
     assert service.state_repo.calls[1][1] == {"etag": "etag", "modified": "mod", "success_time": NOW, "error_code": None}

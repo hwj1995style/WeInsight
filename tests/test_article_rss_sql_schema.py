@@ -26,6 +26,18 @@ def test_article_rss_migration_is_retry_safe_and_uses_full_url_hash_uniqueness()
     assert "feed_url_hash BINARY(32)" in init_sql
     assert "UNIQUE KEY uk_public_account_feed_url_hash (feed_url_hash)" in init_sql
     assert "feed_url(255)" not in init_sql
+    helper = "migrate_20260711_001"
+    assert migration.index(f"DROP PROCEDURE IF EXISTS {helper}") < migration.index(f"CREATE PROCEDURE {helper}")
+    assert migration.index(f"CREATE PROCEDURE {helper}") < migration.index(f"CALL {helper}()")
+    assert migration.index(f"CALL {helper}()") < migration.rindex(f"DROP PROCEDURE {helper}")
+
+
+def test_drop_rpa_migration_helper_can_recover_after_failed_call() -> None:
+    migration = Path("sql/migrations/20260711_003_drop_article_rpa_state.sql").read_text("utf-8")
+    helper = "migrate_20260711_003_feed_hash"
+    assert migration.index(f"DROP PROCEDURE IF EXISTS {helper}") < migration.index(f"CREATE PROCEDURE {helper}")
+    assert migration.index(f"CREATE PROCEDURE {helper}") < migration.index(f"CALL {helper}()")
+    assert migration.index(f"CALL {helper}()") < migration.rindex(f"DROP PROCEDURE {helper}")
 
 
 def test_article_rss_init_schema_matches_migration() -> None:

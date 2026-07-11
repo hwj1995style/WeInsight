@@ -434,9 +434,6 @@ class MysqlArticleAccountConfigRepo:
                 last_feed_etag,
                 last_feed_modified,
                 last_error_code,
-                last_feed_etag,
-                last_feed_modified,
-                last_error_code,
                 remark
             FROM wechat_public_account_config
             WHERE enabled = 1

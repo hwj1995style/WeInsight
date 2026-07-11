@@ -1,5 +1,6 @@
 -- Retry-safe two-stage RSS migration. feed_url remains nullable until verified backfill.
 DELIMITER $$
+DROP PROCEDURE IF EXISTS migrate_20260711_001$$
 CREATE PROCEDURE migrate_20260711_001()
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='wechat_public_account_config' AND COLUMN_NAME='feed_url') THEN

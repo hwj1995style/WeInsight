@@ -17,6 +17,7 @@ DEALLOCATE PREPARE feed_url_gate;
 
 -- Upgrade databases where _001 was applied before full-URL hash uniqueness was introduced.
 DELIMITER $$
+DROP PROCEDURE IF EXISTS migrate_20260711_003_feed_hash$$
 CREATE PROCEDURE migrate_20260711_003_feed_hash()
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='wechat_public_account_config' AND COLUMN_NAME='feed_url_hash') THEN

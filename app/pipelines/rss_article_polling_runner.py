@@ -157,7 +157,13 @@ class RssArticlePollingRunner:
         state_repo = getattr(self.collect_service, "state_repo", None)
         source_id = getattr(target, "id", None)
         if state_repo is not None and source_id is not None:
-            state_repo.update_feed_state(source_id, error_code=error_code)
+            state_repo.update_feed_state(
+                source_id,
+                etag=getattr(target, "last_feed_etag", None),
+                modified=getattr(target, "last_feed_modified", None),
+                success_time=None,
+                error_code=error_code,
+            )
 
 
 def _error_code(exc: Exception) -> str:
