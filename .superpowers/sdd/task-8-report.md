@@ -32,7 +32,7 @@
 - Initial follow-up full run: `9 failed, 1573 passed, 2 skipped`; all failures were stale `tests/test_main.py` RPA cases.
 - Second full run: `1 failed, 1573 passed, 2 skipped`; remaining failure was the stale sensitive-output command list.
 - Removed route-cache/progress dependencies from source-reference and source-mutation repositories, fresh-schema DDL, and collector-role grants; updated durable-history tests accordingly.
-- Final verification: `1574 passed, 2 skipped, 1 warning` and `git diff --check` exited zero.
+- Final verification: `1578 passed, 2 skipped, 1 warning` and `git diff --check` exited zero.
 
 ## Human-review corrections
 
