@@ -384,14 +384,12 @@ def _has_current_history(
         )
     elif source_type == "article":
         history_sources = (
-            ("wechat_article_route_cache", "account_name"),
             ("wechat_article_raw", "account_name"),
             ("wechat_article_clean", "account_name"),
             ("wechat_article_analysis", "account_name"),
             ("wechat_article_egg_price_item", "account_name"),
             ("wechat_article_daily_report", "account_name"),
             ("wechat_article_collect_log", "account_name"),
-            ("wechat_article_collect_progress", "account_name"),
         )
     else:
         raise ValueError("source_type must be group or article")

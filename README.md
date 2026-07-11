@@ -272,19 +272,6 @@ python -m app.main article-account-disable --config config/config.dev.yaml --acc
 
 以上命令只读写 `wechat_public_account_config`，不占用微信 UI，不读写微信群任务表、游标、采集日志或日报。
 
-真实 UI 拿链接 POC：
-
-```powershell
-$env:WEINSIGHT_MYSQL_PASSWORD='weinsight_dev'
-python -m app.main collect-article-once --config config/config.dev.yaml --account-name "授权公众号名称" --max-articles-per-round 1
-```
-
-`collect-article-once` 必须显式传入 `--account-name`，只对该账号执行一次，不自动扫描全部公众号/订阅号。该命令会占用 `wechat_ui_lock`，拿到链接或失败后释放锁；输出只包含账号名和计数，不输出文章链接或正文。开发阶段仍然手动执行，不注册 Windows 计划任务。
-
-公众号/订阅号真实取链会优先使用“复制链接”，失败时使用 UIA Value 兜底；账号级路由缓存只保存入口能力，不保存真实文章链接。
-
-如果执行期间检测到核心群已到期，article 链路会在安全检查点写入 `wechat_article_collect_progress` 并中断，本轮释放微信 UI；后续再次执行时会从记录的阶段和最近已保存文章链接后继续。
-
 文章链接解析：
 
 ```powershell

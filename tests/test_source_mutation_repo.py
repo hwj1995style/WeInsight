@@ -140,7 +140,7 @@ def test_delete_locks_and_rechecks_disabled_and_all_references() -> None:
     assert "enabled = 0" in statements[2]
 
 
-def test_article_rename_checks_route_cache_with_current_locking_read() -> None:
+def test_article_rename_checks_article_raw_with_current_locking_read() -> None:
     engine = Engine(
         [
             Result(rows=[{"id": 9, "source_name": "旧账号", "enabled": 1}]),
@@ -172,7 +172,7 @@ def test_article_rename_checks_route_cache_with_current_locking_read() -> None:
 
     statements = [sql for sql, _ in engine.connection.executions]
     assert "FOR UPDATE" in statements[0]
-    assert "wechat_article_route_cache" in statements[2]
+    assert "wechat_article_raw" in statements[2]
     assert "FOR SHARE" in statements[2]
     assert "UPDATE wechat_public_account_config" in statements[-1]
 

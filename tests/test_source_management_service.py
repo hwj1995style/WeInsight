@@ -547,26 +547,25 @@ def test_reference_repo_checks_all_business_history_tables() -> None:
     assert MysqlSourceReferenceRepo(article_engine).has_article_history("行业观察") is False
     article_sql, _ = article_engine.connection.executions[0]
     for table in (
-        "wechat_article_route_cache",
         "wechat_article_raw",
         "wechat_article_clean",
         "wechat_article_analysis",
         "wechat_article_egg_price_item",
         "wechat_article_daily_report",
         "wechat_article_collect_log",
-        "wechat_article_collect_progress",
     ):
         assert table in article_sql
 
 
-def test_article_history_route_cache_deletion_mutation_guard() -> None:
+def test_article_history_uses_durable_rss_and_downstream_tables() -> None:
     engine = QueryEngine([QueryResult(scalar=0)])
 
     MysqlSourceReferenceRepo(engine).has_article_history("行业观察")
 
     sql, _ = engine.connection.executions[0]
     assert "EXISTS(" in sql
-    assert "FROM wechat_article_route_cache" in sql
+    assert "FROM wechat_article_raw" in sql
+    assert "wechat_article_route_cache" not in sql
 
 
 def test_non_foreign_key_integrity_error_is_not_mapped(service, group_repo) -> None:

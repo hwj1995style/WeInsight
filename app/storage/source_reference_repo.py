@@ -122,10 +122,6 @@ _ARTICLE_HISTORY_STATEMENT = text(
     """
     SELECT (
         EXISTS(
-            SELECT 1 FROM wechat_article_route_cache
-            WHERE account_name = :source_name LIMIT 1
-        )
-        OR EXISTS(
             SELECT 1 FROM wechat_article_raw
             WHERE account_name = :source_name LIMIT 1
         )
@@ -147,10 +143,6 @@ _ARTICLE_HISTORY_STATEMENT = text(
         )
         OR EXISTS(
             SELECT 1 FROM wechat_article_collect_log
-            WHERE account_name = :source_name LIMIT 1
-        )
-        OR EXISTS(
-            SELECT 1 FROM wechat_article_collect_progress
             WHERE account_name = :source_name LIMIT 1
         )
     ) AS has_history

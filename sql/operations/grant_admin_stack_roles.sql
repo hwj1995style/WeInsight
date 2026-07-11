@@ -44,8 +44,6 @@ GRANT SELECT, INSERT ON `weinsight_prod`.`wechat_client_health_check` TO 'weinsi
 GRANT INSERT ON `weinsight_prod`.`wechat_group_msg_raw` TO 'weinsight_collector_role';
 GRANT SELECT, INSERT ON `weinsight_prod`.`wechat_article_raw` TO 'weinsight_collector_role';
 GRANT SELECT, INSERT, UPDATE ON `weinsight_prod`.`wechat_group_collect_cursor` TO 'weinsight_collector_role';
-GRANT SELECT, INSERT, UPDATE ON `weinsight_prod`.`wechat_article_route_cache` TO 'weinsight_collector_role';
-GRANT SELECT, INSERT, UPDATE ON `weinsight_prod`.`wechat_article_collect_progress` TO 'weinsight_collector_role';
 GRANT INSERT ON `weinsight_prod`.`wechat_group_collect_log` TO 'weinsight_collector_role';
 GRANT INSERT ON `weinsight_prod`.`wechat_article_collect_log` TO 'weinsight_collector_role';
 GRANT INSERT ON `weinsight_prod`.`wechat_group_process_task` TO 'weinsight_collector_role';

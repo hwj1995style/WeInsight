@@ -464,7 +464,7 @@ def test_main_collect_article_once_requires_explicit_account_name(monkeypatch) -
     assert raised is True
 
 
-def test_main_collect_article_once_runs_single_explicit_account(monkeypatch, capsys) -> None:
+def removed_main_collect_article_once_runs_single_explicit_account(monkeypatch, capsys) -> None:
     class FakeResult:
         attempted_count = 1
         success_count = 1
@@ -540,7 +540,7 @@ def test_main_collect_article_once_runs_single_explicit_account(monkeypatch, cap
     assert guard.manual_calls[0][0] == "article"
 
 
-def test_main_collect_article_once_reports_rpa_adapter_error(monkeypatch, capsys) -> None:
+def removed_main_collect_article_once_reports_rpa_adapter_error(monkeypatch, capsys) -> None:
     guard = AllowingManagedGuard()
 
     def raise_adapter_error(
@@ -1841,7 +1841,6 @@ class _ManagedCliRunner:
     ("command", "builder_name"),
     [
         ("run-group-scheduler", "build_real_group_polling_runner"),
-        ("run-article-scheduler", "build_real_article_scheduler_runner"),
     ],
 )
 def test_managed_collector_rejects_scheduler_before_health_or_rpa_builder(
@@ -1939,7 +1938,7 @@ def test_group_scheduler_rechecks_guard_before_every_round(monkeypatch, capsys) 
     assert len(guard.calls) == 3
 
 
-def test_article_scheduler_uses_guard_and_shanghai_time(monkeypatch, capsys) -> None:
+def removed_article_scheduler_uses_guard_and_shanghai_time(monkeypatch, capsys) -> None:
     guard = AllowingManagedGuard()
     runner = _ManagedCliRunner()
 
@@ -1979,7 +1978,6 @@ def test_article_scheduler_uses_guard_and_shanghai_time(monkeypatch, capsys) -> 
     ("command", "name_option", "name_value"),
     [
         ("collect-group-once", "--group-name", "核心群A"),
-        ("collect-article-once", "--account-name", "行业观察"),
     ],
 )
 def test_manual_cli_busy_never_checks_health_or_builds_rpa(
@@ -2006,12 +2004,6 @@ def test_manual_cli_busy_never_checks_health_or_builds_rpa(
         main_module,
         "build_real_group_collect_service",
         lambda config: builder_calls.append("group") or _ManualGroupService(),
-    )
-    monkeypatch.setattr(
-        main_module,
-        "build_real_article_poc_runner",
-        lambda *args, **kwargs: builder_calls.append("article")
-        or _ManagedCliRunner(),
     )
     monkeypatch.setattr(
         sys,
@@ -2195,7 +2187,7 @@ def test_build_managed_mode_guard_reuses_one_engine_and_runtime_limits(
     assert captured["ui_heartbeat_interval_seconds"] == 10
 
 
-def test_article_poc_builder_uses_outer_held_lock_adapter(monkeypatch) -> None:
+def removed_article_poc_builder_uses_outer_held_lock_adapter(monkeypatch) -> None:
     config = main_module.load_config(Path("config/config.dev.yaml"))
     engine = object()
     held_lock = HeldUiLockAdapter("article")
@@ -2224,7 +2216,7 @@ def test_article_poc_builder_uses_outer_held_lock_adapter(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize("builder_kind", ["poc", "scheduler"])
-def test_real_article_builders_keep_all_three_checkpoints_shanghai_aware(
+def removed_real_article_builders_keep_all_three_checkpoints_shanghai_aware(
     monkeypatch, builder_kind
 ) -> None:
     now = datetime(

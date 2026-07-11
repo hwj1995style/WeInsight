@@ -188,8 +188,6 @@ def test_collector_role_is_limited_to_collection_runtime_policy() -> None:
                 "wechat_collection_job_target_run",
                 "wechat_worker_heartbeat",
                 "wechat_group_collect_cursor",
-                "wechat_article_route_cache",
-                "wechat_article_collect_progress",
             )
         },
         "wechat_client_health_check": {"SELECT", "INSERT"},
