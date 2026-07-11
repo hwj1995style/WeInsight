@@ -82,11 +82,12 @@ $legacyTaskNames = @(
     "WeInsight-Group-Scheduler",
     "WeInsight Group Scheduler"
 )
+$allScheduledTasks = @(Get-ScheduledTask -ErrorAction Stop)
 foreach ($legacyTaskName in $legacyTaskNames) {
-    $legacyTask = Get-ScheduledTask `
-        -TaskName $legacyTaskName `
-        -ErrorAction SilentlyContinue
-    if ($null -ne $legacyTask) {
+    $legacyTask = @(
+        $allScheduledTasks | Where-Object { $_.TaskName -eq $legacyTaskName }
+    )
+    if ($legacyTask.Count -gt 0) {
         throw [System.InvalidOperationException]::new(
             "Legacy scheduled task must be removed before registration: $legacyTaskName"
         )
@@ -116,10 +117,27 @@ Resolve-PersistedRequiredEnv -Name "WEINSIGHT_TLS_KEYFILE" | Out-Null
 
 $python = Get-Command python -CommandType Application -ErrorAction Stop
 $powerShell = Get-Command powershell.exe -CommandType Application -ErrorAction Stop
-$currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+$currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$currentUser = $currentIdentity.Name
 if ([string]::IsNullOrWhiteSpace($currentUser)) {
     throw [System.InvalidOperationException]::new(
         "Unable to resolve the current interactive Windows identity."
+    )
+}
+$isServiceIdentity = (
+    $currentIdentity.IsSystem -or
+    $currentUser.StartsWith(
+        "NT AUTHORITY\",
+        [StringComparison]::OrdinalIgnoreCase
+    ) -or
+    $currentUser.StartsWith(
+        "NT SERVICE\",
+        [StringComparison]::OrdinalIgnoreCase
+    )
+)
+if (-not [Environment]::UserInteractive -or $isServiceIdentity) {
+    throw [System.InvalidOperationException]::new(
+        "Registration rejects a service or non-interactive identity."
     )
 }
 $principal = New-ScheduledTaskPrincipal `

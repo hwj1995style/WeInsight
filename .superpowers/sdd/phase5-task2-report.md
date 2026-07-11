@@ -31,13 +31,13 @@
 - `WEINSIGHT_COLLECTOR_MYSQL_PASSWORD`
 - `WEINSIGHT_PIPELINE_MYSQL_PASSWORD`
 
-读取顺序为 Process → User → Machine，随后仅在当前子进程环境映射为现有 Python 配置使用的 `WEINSIGHT_MYSQL_PASSWORD`。公共密码仅保留为开发或旧版手工启动兼容 fallback。Web 还要求 host、TLS cert 和 TLS key 环境变量；任何值都不会进入参数或日志。
+读取顺序为 Process → User → Machine，随后仅在当前子进程环境映射为现有 Python 配置使用的 `WEINSIGHT_MYSQL_PASSWORD`。角色密码缺失时默认 fail closed；公共密码仅在人工启动时显式传入 `AllowSharedMysqlPasswordFallback` switch 才可作为开发/旧版兼容 fallback，三个计划任务 action 均不传该开关。Web 还要求 host、TLS cert 和 TLS key 环境变量；任何值都不会进入参数或日志。
 
 ## Register 与 Unregister
 
 `register_admin_stack.ps1` 在首次 `Register-ScheduledTask` 之前完成全部预检：
 
-1. 同时查询并拒绝 `WeInsight-Group-Scheduler` 和 `WeInsight Group Scheduler`；
+1. 通过一次 `Get-ScheduledTask -ErrorAction Stop` fail-closed 获取任务全集，再同时匹配并拒绝 `WeInsight-Group-Scheduler` 和 `WeInsight Group Scheduler`；查询异常会在任何注册前终止；
 2. 校验项目根、三个 start 脚本和三份配置文件；
 3. 保持 `ConfigPath` 兼容入口，并支持 `WebConfigPath`、`CollectorConfigPath`、`PipelineConfigPath` 独立 override；
 4. 要求三个角色密码和 Web host/TLS 变量存在于 User 或 Machine 持久环境，避免仅 Process 变量导致下次登录任务启动失败；
@@ -49,7 +49,7 @@
 - `WeInsight-Collector-Worker`
 - `WeInsight-Pipeline-Worker`
 
-当前交互用户通过 `WindowsIdentity.GetCurrent().Name` 获取限定域身份并校验非空。三个任务使用同一 `Interactive`、`Limited` principal，AtLogOn trigger 明确绑定同一用户；设置 `IgnoreNew`、失败重启 3 次、间隔 1 分钟和无限执行时间。三个 action 分别接收各自规范配置路径。
+当前交互用户通过 `WindowsIdentity.GetCurrent()` 获取限定域身份；注册前拒绝空名称、非 `UserInteractive`、SYSTEM、`NT AUTHORITY\*` 和 `NT SERVICE\*` 身份。三个任务使用同一 `Interactive`、`Limited` principal，AtLogOn trigger 明确绑定同一合格用户；设置 `IgnoreNew`、失败重启 3 次、间隔 1 分钟和无限执行时间。三个 action 分别接收各自规范配置路径。
 
 `unregister_admin_stack.ps1` 只遍历上述三个固定新任务并使用 `-Confirm:$false` 注销。不存在时输出 `status=none`；不处理两个 legacy 名称，不删除日志、数据库、脚本或证书。
 
@@ -86,13 +86,16 @@ RED 首先确认六个脚本不存在，随后按 start、register/unregister、
 - 配置路径必须为 Leaf 文件；
 - 非规范整数式 IPv4 拒绝；
 - principal 和 AtLogOn trigger 使用同一限定域身份。
+- 共享 MySQL 密码 fallback 默认关闭且计划任务不 opt-in；
+- legacy 任务枚举失败时在任何注册前 fail closed；
+- SYSTEM、NT AUTHORITY、NT SERVICE 和非交互身份不得创建 principal。
 
-独立复审发现的三个 Important 和两个 Minor 均已关闭。最终复审未发现 Critical、Important 或 Minor，Assessment 为 Ready。
+初轮独立复审发现的三个 Important 和两个 Minor，以及提交前复核发现的三个 fail-closed Important 均已关闭。最终复审未发现 Critical、Important 或 Minor，Assessment 为 Ready。
 
 ## 最终验证
 
-- Windows scheduler + admin stack 专项：`27 passed`
-- 最终全量：`1581 passed, 1 skipped`
+- Windows scheduler + admin stack 专项：`29 passed`
+- 最终全量：`1583 passed, 1 skipped`
 - 六个新脚本均通过 Windows PowerShell 5.1 AST Parser
 - `git diff --check`：通过
 - 新增/修改文件严格 UTF-8 解码：通过

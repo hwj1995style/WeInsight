@@ -1,6 +1,7 @@
 param(
     [string]$ProjectRoot = (Join-Path $PSScriptRoot "..\.."),
-    [string]$ConfigPath = "config\config.prod.yaml"
+    [string]$ConfigPath = "config\config.prod.yaml",
+    [switch]$AllowSharedMysqlPasswordFallback
 )
 
 $ErrorActionPreference = "Stop"
@@ -84,6 +85,11 @@ try {
 
     $mysqlPassword = Resolve-OptionalEnv -Name "WEINSIGHT_COLLECTOR_MYSQL_PASSWORD"
     if ([string]::IsNullOrWhiteSpace($mysqlPassword)) {
+        if (-not $AllowSharedMysqlPasswordFallback) {
+            throw [System.InvalidOperationException]::new(
+                "Role-specific MySQL password is required."
+            )
+        }
         # Compatibility fallback for development or legacy manual launches only.
         $mysqlPassword = Resolve-RequiredEnv -Name "WEINSIGHT_MYSQL_PASSWORD"
     }

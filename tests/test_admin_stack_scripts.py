@@ -142,9 +142,12 @@ def test_start_scripts_prefer_role_mysql_password_with_compatibility_fallback(
     content = _content(START_SCRIPTS[process_name][0])
     role_env = ROLE_MYSQL_ENV[process_name]
 
+    assert "[switch]$AllowSharedMysqlPasswordFallback" in content
     assert f'Resolve-OptionalEnv -Name "{role_env}"' in content
     assert 'Resolve-RequiredEnv -Name "WEINSIGHT_MYSQL_PASSWORD"' in content
     assert content.index(role_env) < content.index("WEINSIGHT_MYSQL_PASSWORD")
+    assert "if (-not $AllowSharedMysqlPasswordFallback)" in content
+    assert "Role-specific MySQL password is required." in content
     assert (
         '[Environment]::SetEnvironmentVariable('
         '"WEINSIGHT_MYSQL_PASSWORD", $mysqlPassword, "Process")'
@@ -198,6 +201,18 @@ def test_register_preflights_legacy_names_paths_and_environment_first() -> None:
     assert "Unregister-ScheduledTask" not in content
 
 
+def test_register_legacy_query_fails_closed_before_name_matching() -> None:
+    content = _content(WINDOWS_DIR / "register_admin_stack.ps1")
+
+    query = "$allScheduledTasks = @(Get-ScheduledTask -ErrorAction Stop)"
+    assert query in content
+    assert "Get-ScheduledTask `" not in content
+    assert "-ErrorAction SilentlyContinue" not in content
+    assert "Where-Object { $_.TaskName -eq $legacyTaskName }" in content
+    assert content.index(query) < content.index("foreach ($legacyTaskName")
+    assert content.index(query) < content.index("Register-ScheduledTask")
+
+
 def test_register_requires_persisted_environment_for_future_logons() -> None:
     content = _content(WINDOWS_DIR / "register_admin_stack.ps1")
 
@@ -233,8 +248,14 @@ def test_register_supports_distinct_config_paths_for_three_actions() -> None:
 def test_register_uses_fixed_interactive_limited_task_contract() -> None:
     content = _content(WINDOWS_DIR / "register_admin_stack.ps1")
 
-    assert "[Security.Principal.WindowsIdentity]::GetCurrent().Name" in content
+    assert "$currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()" in content
+    assert "$currentUser = $currentIdentity.Name" in content
     assert "[string]::IsNullOrWhiteSpace($currentUser)" in content
+    assert "[Environment]::UserInteractive" in content
+    assert "$currentIdentity.IsSystem" in content
+    assert '"NT AUTHORITY\\"' in content
+    assert '"NT SERVICE\\"' in content
+    assert "service or non-interactive identity" in content
     assert "New-ScheduledTaskPrincipal" in content
     assert "-UserId $currentUser" in content
     assert "-LogonType Interactive" in content
@@ -250,6 +271,18 @@ def test_register_uses_fixed_interactive_limited_task_contract() -> None:
     assert "ServiceAccount" not in content
     assert "-RunLevel Highest" not in content
     assert '-File "{0}" -ProjectRoot "{1}" -ConfigPath "{2}"' in content
+
+    identity_check = content.index("$currentIdentity.IsSystem")
+    interactive_check = content.index("[Environment]::UserInteractive")
+    principal_build = content.index("$principal = New-ScheduledTaskPrincipal")
+    assert identity_check < principal_build
+    assert interactive_check < principal_build
+
+
+def test_scheduled_actions_do_not_opt_in_to_shared_mysql_password() -> None:
+    content = _content(WINDOWS_DIR / "register_admin_stack.ps1")
+
+    assert "AllowSharedMysqlPasswordFallback" not in content
 
 
 def test_unregister_only_targets_three_fixed_admin_stack_tasks() -> None:
