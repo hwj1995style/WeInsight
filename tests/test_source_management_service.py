@@ -605,3 +605,25 @@ def test_same_state_enable_is_idempotent(service, group_repo, article_repo) -> N
 
     assert group_repo.enabled_calls == [(7, True)]
     assert article_repo.enabled_calls == [(9, True)]
+
+
+def test_mutation_repo_cannot_enable_article_with_invalid_persisted_feed_url(
+    group_repo, article_repo, refs
+) -> None:
+    class RecordingMutationRepo:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def set_article_enabled(self, source_id: int, enabled: bool) -> None:
+            self.calls.append((source_id, enabled))
+
+    mutation_repo = RecordingMutationRepo()
+    article_repo.record = replace(article_repo.record, feed_url=None, enabled=False)
+    service = SourceManagementService(
+        group_repo, article_repo, refs, mutation_repo=mutation_repo
+    )
+
+    with pytest.raises(ValueError, match="feed_url"):
+        service.set_article_enabled(9, True)
+
+    assert mutation_repo.calls == []

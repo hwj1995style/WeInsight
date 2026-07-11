@@ -178,6 +178,16 @@ def test_real_mysql_same_state_enable_and_disable_are_idempotent() -> None:
     engine = Engine(
         [
             Result(rows=[{"id": 7, "source_name": "核心群A", "enabled": 0}]),
+            Result(rows=[{
+                "id": 9, "account_name": "行业观察", "account_type": "subscription",
+                "feed_url": "https://example.com/industry.xml", "source_type": "rss",
+                "request_timeout_seconds": 30, "enabled": 1, "priority": 2,
+                "poll_interval_minutes": 10, "daily_window_start": "07:30:00",
+                "daily_window_end": "19:30:00", "max_articles_per_round": 5,
+                "collect_today_only": 1, "dedup_key": "article_hash",
+                "last_success_collect_time": None, "last_feed_etag": None,
+                "last_feed_modified": None, "last_error_code": None, "remark": None,
+            }]),
             Result(rows=[{"id": 9, "source_name": "行业观察", "enabled": 1}]),
         ]
     )
@@ -190,9 +200,9 @@ def test_real_mysql_same_state_enable_and_disable_are_idempotent() -> None:
     service.set_group_enabled(7, False)
     service.set_article_enabled(9, True)
 
-    assert engine.begin_count == 2
-    assert len(engine.connection.executions) == 2
-    assert all("FOR UPDATE" in sql for sql, _ in engine.connection.executions)
+    assert engine.begin_count == 3
+    assert len(engine.connection.executions) == 3
+    assert all("FOR UPDATE" in engine.connection.executions[index][0] for index in (0, 2))
 
 
 def test_job_target_guard_locks_enabled_source_in_callers_transaction() -> None:

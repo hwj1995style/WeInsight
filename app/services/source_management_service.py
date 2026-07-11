@@ -333,15 +333,14 @@ class SourceManagementService:
     def set_article_enabled(self, source_id: int, enabled: bool) -> None:
         self._validate_source_id(source_id)
         self._validate_enabled(enabled)
+        current = self._get_article(source_id)
+        if enabled:
+            self._validate_feed_url(current.feed_url)
         if self.mutation_repo is not None:
             self._run_mutation(
                 lambda: self.mutation_repo.set_article_enabled(source_id, enabled)
             )
             return
-        if enabled:
-            current = self._get_article(source_id)
-            self._validate_feed_url(current.feed_url)
-        self._get_article(source_id)
         if not enabled:
             jobs = self.reference_repo.list_referencing_jobs(
                 "article", source_id, active_only=True
