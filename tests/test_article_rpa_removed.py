@@ -20,6 +20,7 @@ def test_article_rpa_modules_and_cli_are_removed() -> None:
     main = Path("app/main.py").read_text(encoding="utf-8")
     assert "collect-article-once" not in main
     assert "run-article-scheduler" not in main
+    assert "article-rpa-probe" not in main
 
 
 def test_public_account_rpa_types_are_removed_but_group_rpa_remains() -> None:
@@ -35,7 +36,7 @@ def test_public_account_rpa_types_are_removed_but_group_rpa_remains() -> None:
     assert "WxautoGroupRpaClient" in wxauto_client
 
 
-def test_drop_migration_has_operational_gate_and_validated_feed_url_backfill() -> None:
+def test_drop_migration_aborts_on_missing_feed_url_before_not_null() -> None:
     migration = Path("sql/migrations/20260711_003_drop_article_rpa_state.sql")
     sql = migration.read_text(encoding="utf-8")
     normalized = sql.upper()
@@ -44,5 +45,7 @@ def test_drop_migration_has_operational_gate_and_validated_feed_url_backfill() -
     assert "BACKUP" in normalized or "备份" in sql
     assert "DROP TABLE IF EXISTS WECHAT_ARTICLE_ROUTE_CACHE" in normalized
     assert "DROP TABLE IF EXISTS WECHAT_ARTICLE_COLLECT_PROGRESS" in normalized
-    assert normalized.index("FEED_URL IS NULL") < normalized.index("MODIFY COLUMN FEED_URL")
+    assert "SIGNAL SQLSTATE '45000'" in normalized
+    assert "BACKFILL REAL FEED_URL" in normalized
+    assert normalized.index("SIGNAL SQLSTATE") < normalized.index("MODIFY COLUMN FEED_URL")
     assert "FEED_URL VARCHAR(2048) NOT NULL" in normalized

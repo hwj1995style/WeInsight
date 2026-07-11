@@ -33,3 +33,10 @@
 - Second full run: `1 failed, 1573 passed, 2 skipped`; remaining failure was the stale sensitive-output command list.
 - Removed route-cache/progress dependencies from source-reference and source-mutation repositories, fresh-schema DDL, and collector-role grants; updated durable-history tests accordingly.
 - Final verification: `1574 passed, 2 skipped, 1 warning` and `git diff --check` exited zero.
+
+## Human-review corrections
+
+- `_003` now uses an explicit `SIGNAL SQLSTATE '45000'` gate when any `feed_url` is null/blank. It instructs operators to backfill verified real URLs and rerun; it never invents URLs.
+- Physically deleted the dormant public-account RPA tests from `test_main.py` and added `article-rpa-probe` to primary removal assertions.
+- Parent `test_wxauto_client.py` contained 84 tests: 77 were exclusively for `WxautoArticleRpaClient`, public-account navigation, route caching, article-card discovery, or link extraction and were removed. Seven group/shared tests remain, covering message normalization, scrolling, transient chat retry, wxauto4 preference, prepare-and-retry, bounded initialization, and wrapped initialization errors.
+- Focused correction suite: `63 passed`.
