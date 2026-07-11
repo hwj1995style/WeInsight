@@ -45,6 +45,22 @@ def _column(headers: list[str], rows: list[list[str]], name: str) -> list[str]:
 
 
 BLANK_VALUES = {"", "____", "未执行", "未评审"}
+EXECUTION_COLUMN_MARKERS = (
+    "时间",
+    "结果",
+    "实测",
+    "证据",
+    "执行人",
+    "复核人",
+    "责任人",
+    "审批人",
+    "标识",
+    "ID",
+    "数量",
+    "数",
+    "状态",
+    "延迟",
+)
 
 
 def _replace_in_section(text: str, heading: str, old: str, new: str) -> str:
@@ -59,11 +75,28 @@ def _assert_blank_columns(section: str, headers: tuple[str, ...], blank_columns:
         assert set(_column(actual_headers, rows, name)) <= BLANK_VALUES, f"filled {name} in {headers[0]}"
 
 
+def _execution_columns(headers: list[str], static_columns: tuple[str, ...] = ()) -> tuple[str, ...]:
+    return tuple(
+        header
+        for header in headers
+        if header not in static_columns and any(marker in header for marker in EXECUTION_COLUMN_MARKERS)
+    )
+
+
+def _assert_table_execution_fields_blank(section: str, required_headers: tuple[str, ...], static_columns: tuple[str, ...] = ()) -> None:
+    headers, rows = _table(section, required_headers)
+    columns = _execution_columns(headers, static_columns)
+    assert columns, f"no execution columns classified for {required_headers[0]}"
+    for name in columns:
+        assert set(_column(headers, rows, name)) <= BLANK_VALUES, f"filled execution column: {name}"
+
+
 def _assert_blank_key_values(section: str, labels: tuple[str, ...]) -> None:
     for label in labels:
-        match = re.search(rf"{re.escape(label)}[：:]\s*([^；。\n]*)", section)
-        assert match, f"missing key-value field: {label}"
-        assert match.group(1).strip() in BLANK_VALUES, f"filled key-value field: {label}"
+        matches = re.findall(rf"{re.escape(label)}(?:[：:]|\s+)\s*([^；。\n]*)", section)
+        values = [value.strip() for value in matches if "|" not in value]
+        assert values, f"missing key-value field: {label}"
+        assert all(value in BLANK_VALUES for value in values), f"filled key-value field: {label}"
 
 
 def _assert_unexecuted_integrity(text: str) -> None:
@@ -77,6 +110,10 @@ def _assert_unexecuted_integrity(text: str) -> None:
         _section(text, "24 小时观测总表"),
         ("序号", "计划/实际轮询时间（含时区）", "新文章数", "证据位置"),
         ("计划/实际轮询时间（含时区）", "RSS HTTP/解析结果", "新文章数", "重复拦截数", "入库成功/失败数", "最早发现至入库延迟", "锁审计结果", "群探针结果", "证据位置", "执行人"),
+    )
+    _assert_blank_key_values(
+        _section(text, "24 小时观测总表"),
+        ("发生时间", "恢复时间", "影响范围", "处置", "原始证据位置", "执行人", "复核人"),
     )
     _assert_blank_columns(
         _section(text, "RSS 完整性与时效"),
@@ -101,9 +138,19 @@ def _assert_unexecuted_integrity(text: str) -> None:
         ("检查点", "时间", "证据位置", "结果（通过/不通过）"),
         ("时间", "群/任务标识", "输入消息 ID", "采集结果 ID", "后处理/进度状态", "锁与错误摘要", "证据位置", "结果（通过/不通过）"),
     )
+    _assert_table_execution_fields_blank(
+        _section(text, "汇总结论"),
+        ("验收项", "实测值/摘要", "证据位置", "结果（通过/不通过）", "复核人"),
+        ("验收项", "通过标准"),
+    )
+    _assert_table_execution_fields_blank(
+        _section(text, "最终删除公众号 RPA 门禁"),
+        ("删除前置条件", "结果（通过/不通过）", "审批/证据位置及校验值", "责任人", "时间"),
+        ("删除前置条件",),
+    )
     _assert_blank_key_values(
         _section(text, "最终删除公众号 RPA 门禁"),
-        ("删除执行时间", "操作者", "目标资源", "删除记录证据位置", "RSS 复测", "群链路复测", "告警复测", "删除后证据位置", "复核人", "最终状态（通过/不通过）"),
+        ("删除决定（批准/拒绝）", "变更单", "审批人", "批准时间", "删除执行时间", "操作者", "目标资源", "删除记录证据位置", "RSS 复测", "群链路复测", "告警复测", "删除后证据位置", "复核人", "最终状态（通过/不通过）"),
     )
 
 
@@ -132,6 +179,12 @@ def test_status_and_measured_results_are_unexecuted_blank_template():
         ("群链路隔离", "| 窗口前 |  |", "| 窗口前 | 2026-07-12 09:00 |"),
         ("最终删除公众号 RPA 门禁", "删除执行时间：____", "删除执行时间：2026-07-13 10:00 +08:00"),
         ("最终删除公众号 RPA 门禁", "RSS 复测：____", "RSS 复测：通过"),
+        ("24 小时观测总表", "发生时间 ____", "发生时间 2026-07-12 11:00"),
+        ("24 小时观测总表", "原始证据位置 ____", "原始证据位置 /tmp/incident.log"),
+        ("汇总结论", "| 连续性 | 连续 24 小时且无证据缺口 |  |  |  |  |", "| 连续性 | 连续 24 小时且无证据缺口 |  |  |  | 张三 |"),
+        ("最终删除公众号 RPA 门禁", "| 24 小时 POC 最终通过且无未关闭例外 |  |  |  |  |", "| 24 小时 POC 最终通过且无未关闭例外 | 通过 | /tmp/approval | 张三 | 2026-07-13 |"),
+        ("最终删除公众号 RPA 门禁", "删除决定（批准/拒绝）：____", "删除决定（批准/拒绝）：批准"),
+        ("最终删除公众号 RPA 门禁", "审批人：____", "审批人：张三"),
     ),
 )
 def test_unexecuted_integrity_validator_rejects_injected_measurements(heading, old, new):
