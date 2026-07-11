@@ -17,10 +17,8 @@ from app.domain.collection_jobs import (
     PipelineType,
     RunStatus,
 )
-from app.pipelines.article_polling_runner import (
-    ArticlePollingRunResult,
-    ArticlePollingTarget,
-)
+from app.pipelines.article_polling_runner import ArticlePollingRunResult
+from app.storage.article_config_repo import ArticleAccountConfigRecord
 from app.pipelines.group_polling_runner import (
     GroupPollingRunResult,
     GroupPollingTarget,
@@ -50,6 +48,9 @@ _GROUP_SNAPSHOT_FIELDS = frozenset(
 _ARTICLE_SNAPSHOT_FIELDS = frozenset(
     {
         "account_type",
+        "feed_url",
+        "source_type",
+        "request_timeout_seconds",
         "poll_interval_minutes",
         "daily_window_start",
         "daily_window_end",
@@ -113,7 +114,7 @@ class ManagedCollectorWorker:
             [GroupPollingTarget, str], SingleTargetRunner
         ],
         article_runner_factory: Callable[
-            [ArticlePollingTarget, str, Callable[[], bool]],
+            [ArticleAccountConfigRecord, str, Callable[[], bool]],
             SingleTargetRunner,
         ],
         worker_id: str,
@@ -192,8 +193,6 @@ class ManagedCollectorWorker:
             return _tick("stopping")
         if degraded:
             return _tick("degraded")
-        if not self.health_monitor.can_collect(now):
-            return _tick("paused_unhealthy")
         try:
             run = self.runtime_repo.claim_next_due(
                 now, self.worker_id, self.run_lease_seconds
@@ -203,6 +202,9 @@ class ManagedCollectorWorker:
             return _tick("degraded")
         if run is None:
             return _tick("idle")
+        if not self.can_claim(run.pipeline_type, now):
+            self.runtime_repo.finish_run(run.run_id, RunStatus.CANCELLED, now)
+            return _tick("paused_unhealthy")
         try:
             self._append_event(
                 run,
@@ -229,6 +231,15 @@ class ManagedCollectorWorker:
                 ),
                 executed_target_count=0,
             )
+
+    def can_claim(
+        self, pipeline_type: PipelineType, now: datetime | None = None
+    ) -> bool:
+        now = now or self.now_provider()
+        _require_now(now)
+        if pipeline_type is PipelineType.ARTICLE:
+            return True
+        return self.health_monitor.can_collect(now) is True
 
     def execute_run(
         self,
@@ -655,11 +666,15 @@ def _group_target(item: ClaimedTarget) -> GroupPollingTarget:
     )
 
 
-def _article_target(item: ClaimedTarget) -> ArticlePollingTarget:
+def _article_target(item: ClaimedTarget) -> ArticleAccountConfigRecord:
     data = _snapshot_object(item.config_snapshot_json, _ARTICLE_SNAPSHOT_FIELDS)
     if data["account_type"] not in {"official", "subscription"}:
         raise SnapshotValidationError("account_type is invalid")
     poll_interval = _snapshot_positive_int(data, "poll_interval_minutes")
+    request_timeout = _snapshot_positive_int(data, "request_timeout_seconds")
+    feed_url = _snapshot_required_text(data["feed_url"], "feed_url", 2048)
+    if data["source_type"] != "rss":
+        raise SnapshotValidationError("source_type must be rss")
     max_articles = _snapshot_positive_int(data, "max_articles_per_round")
     _snapshot_time(data, "daily_window_start")
     _snapshot_time(data, "daily_window_end")
@@ -668,8 +683,13 @@ def _article_target(item: ClaimedTarget) -> ArticlePollingTarget:
     _snapshot_required_text(data["dedup_key"], "dedup_key", 50)
     _snapshot_optional_text(data["remark"], "remark", 500)
     _claimed_identity(item)
-    return ArticlePollingTarget(
+    return ArticleAccountConfigRecord(
+        id=item.source_id,
         account_name=item.source_name,
+        account_type=data["account_type"],
+        feed_url=feed_url,
+        source_type="rss",
+        request_timeout_seconds=request_timeout,
         priority=item.priority,
         poll_interval_minutes=poll_interval,
         max_articles_per_round=max_articles,

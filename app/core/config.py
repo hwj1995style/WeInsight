@@ -66,26 +66,17 @@ class ArticlePipelineConfig:
     crawl_time: str
     account_poll_interval_minutes: int
     max_articles_per_account: int
-    max_accounts_per_ui_slice: int
     collect_today_only: bool
     dedup_enabled: bool
     dedup_key: str
-    ui_slice_timeout_seconds: int
-    rpa_timeout_seconds: int
     browser_executable_path: str | None
-    state_machine_enabled: bool
     parse_after_release_ui: bool
-    resume_from_progress: bool
-    min_article_ui_window_seconds: int
-    low_peak_windows: tuple[str, ...]
-    route_cache_enabled: bool
-    route_probe_enabled: bool
-    route_probe_failure_threshold: int
-    route_entry_labels: tuple[str, ...]
-    link_extract_methods: tuple[str, ...]
     egg_price_extraction_enabled: bool
     price_items_json_preview_limit: int
     image_quote_note_enabled: bool
+    rss_max_concurrency: int = 4
+    rss_max_response_bytes: int = 5_242_880
+    rss_allowed_private_hosts: tuple[str, ...] = ("127.0.0.1:8001",)
 
 
 @dataclass(frozen=True)
@@ -235,24 +226,9 @@ def load_config(path: Path) -> Config:
     data = _expand_env(raw)
     article_data = {
         "browser_executable_path": "auto",
-        "route_cache_enabled": True,
-        "route_probe_enabled": True,
-        "route_probe_failure_threshold": 3,
-        "route_entry_labels": [
-            "历史消息",
-            "全部消息",
-            "往期文章",
-            "文章",
-            "资讯",
-            "蛋价资讯",
-            "今日价格",
-            "闽融平台",
-        ],
-        "link_extract_methods": [
-            "copy_link_menu",
-            "uia_value",
-            "visible_text",
-        ],
+        "rss_max_concurrency": 4,
+        "rss_max_response_bytes": 5_242_880,
+        "rss_allowed_private_hosts": ["127.0.0.1:8001"],
         "egg_price_extraction_enabled": True,
         "price_items_json_preview_limit": 20,
         "image_quote_note_enabled": True,
@@ -268,9 +244,7 @@ def load_config(path: Path) -> Config:
             article=ArticlePipelineConfig(
                 **{
                     **article_data,
-                    "low_peak_windows": tuple(article_data["low_peak_windows"]),
-                    "route_entry_labels": tuple(article_data["route_entry_labels"]),
-                    "link_extract_methods": tuple(article_data["link_extract_methods"]),
+                    "rss_allowed_private_hosts": tuple(article_data["rss_allowed_private_hosts"]),
                 }
             ),
             ui_resource=UiResourceConfig(**data["pipelines"]["ui_resource"]),

@@ -9,14 +9,9 @@ from sqlalchemy.engine import Engine
 
 from app.core.config import Config
 from app.domain.collection_jobs import APPLICATION_TIMEZONE
-from app.pipelines.article_collect_service import ArticleCollectService
-from app.pipelines.article_core_group_due_provider import (
-    ReadOnlyCoreGroupDueProvider,
-)
-from app.pipelines.article_polling_runner import (
-    ArticlePollingRunner,
-    ArticlePollingTarget,
-)
+from app.pipelines.rss_article_collect_service import RssArticleCollectService, RssArticleTarget
+from app.pipelines.rss_article_polling_runner import RssArticlePollingRunner
+from app.rss.feed_client import RssFeedClient
 from app.pipelines.group_collect_service import GroupCollectService
 from app.pipelines.group_polling_runner import (
     GroupPollingRunner,
@@ -28,21 +23,18 @@ from app.rpa.desktop_probe import (
     WechatHealthStatus,
 )
 from app.rpa.fake_clients import (
-    FakeArticleRpaClient,
     FakeDesktopClient,
     FakeGroupRpaClient,
 )
 from app.services.wechat_health_monitor import WechatHealthMonitor
 from app.storage.article_log_repo import MysqlArticleCollectLogRepo
-from app.storage.article_progress_repo import MysqlArticleProgressRepo
+from app.storage.article_config_repo import MysqlArticleAccountConfigRepo
 from app.storage.article_raw_repo import MysqlArticleRawRepo
-from app.storage.article_route_cache_repo import MysqlArticleRouteCacheRepo
 from app.storage.collection_event_repo import MysqlCollectionEventRepo
 from app.storage.collection_runtime_repo import MysqlCollectionRuntimeRepo
 from app.storage.db import create_mysql_engine
 from app.storage.group_repo import (
     MysqlGroupCollectLogRepo,
-    MysqlGroupConfigRepo,
     MysqlGroupMessageRepo,
 )
 from app.storage.lock_repo import MysqlUiLockRepo
@@ -82,20 +74,13 @@ def build_managed_collector_worker(
     health_repo = MysqlWechatHealthRepo(shared_engine)
     ui_lock_repo = MysqlUiLockRepo(shared_engine)
     group_message_repo = MysqlGroupMessageRepo(shared_engine)
-    group_config_repo = MysqlGroupConfigRepo(shared_engine)
     group_log_repo = MysqlGroupCollectLogRepo(shared_engine)
     article_raw_repo = MysqlArticleRawRepo(shared_engine)
     article_log_repo = MysqlArticleCollectLogRepo(shared_engine)
-    article_progress_repo = MysqlArticleProgressRepo(shared_engine)
-    next_core_group_due_provider = ReadOnlyCoreGroupDueProvider(
-        group_config_repo=group_config_repo,
-        poll_interval_seconds=config.pipelines.group.poll_interval_seconds,
-        now_provider=clock,
-    )
+    article_config_repo = MysqlArticleAccountConfigRepo(shared_engine)
 
     if mode == "fake":
         group_rpa: Any = FakeGroupRpaClient([])
-        article_rpa: Any = FakeArticleRpaClient({})
         screenshot_client: Any = FakeDesktopClient(
             version=config.wechat.pc_version,
             logged_in=True,
@@ -108,7 +93,6 @@ def build_managed_collector_worker(
     else:
         real_bundle = _LazyRealAdapters(config, shared_engine)
         group_rpa = _LazyGroupRpa(real_bundle)
-        article_rpa = _LazyArticleRpa(real_bundle)
         screenshot_client = _LazyScreenshot(real_bundle)
         desktop_probe = WechatDesktopProbe(
             expected_version=config.wechat.pc_version
@@ -121,9 +105,12 @@ def build_managed_collector_worker(
         rpa=group_rpa,
         repo=group_message_repo,
     )
-    article_collect_service = ArticleCollectService(
-        rpa=article_rpa,
+    allowed_host = config.pipelines.article.rss_allowed_private_hosts[0]
+    host, _, port = allowed_host.partition(":")
+    article_collect_service = RssArticleCollectService(
+        feed_client=RssFeedClient(allowed_endpoint=(host, int(port or 8001))),
         raw_repo=article_raw_repo,
+        state_repo=article_config_repo,
     )
 
     def group_runner_factory(
@@ -145,31 +132,16 @@ def build_managed_collector_worker(
         )
 
     def article_runner_factory(
-        target: ArticlePollingTarget,
+        target: RssArticleTarget,
         batch_id: str,
         stop_provider: Callable[[], bool],
-    ) -> ArticlePollingRunner:
-        return ArticlePollingRunner(
+    ):
+        runner = RssArticlePollingRunner(
             collect_service=article_collect_service,
-            lock_repo=ui_lock_repo,
-            account_provider=lambda current, limit: (target,),
             log_repo=article_log_repo,
-            screenshot_client=screenshot_client,
-            screenshot_root=Path(config.runtime.screenshot_dir).resolve(),
-            lease_seconds=config.pipelines.ui_resource.lock_lease_seconds,
-            lock_acquire_timeout_seconds=(
-                config.pipelines.ui_resource.lock_acquire_timeout_seconds
-            ),
-            max_accounts_per_ui_slice=1,
             batch_id_factory=lambda account_name: batch_id,
-            progress_repo=article_progress_repo,
-            next_core_group_due_provider=next_core_group_due_provider,
-            max_core_group_block_seconds=(
-                config.pipelines.ui_resource.max_core_group_block_seconds
-            ),
-            stop_requested_provider=stop_provider,
-            checkpoint_now_provider=clock,
         )
+        return _SingleRssTargetRunner(runner, target, stop_provider)
 
     health_monitor = WechatHealthMonitor(
         desktop_probe=desktop_probe,
@@ -224,16 +196,11 @@ class _LazyRealAdapters:
         self.config = config
         self.engine = engine
         self._group = None
-        self._article = None
         self._screenshot = None
 
     def group(self):
         self._ensure_rpa()
         return self._group
-
-    def article(self):
-        self._ensure_rpa()
-        return self._article
 
     def screenshot(self):
         if self._screenshot is None:
@@ -245,40 +212,10 @@ class _LazyRealAdapters:
     def _ensure_rpa(self) -> None:
         if self._group is not None:
             return
-        from app.rpa.wxauto_client import (
-            WxautoArticleRpaClient,
-            WxautoGroupRpaClient,
-        )
+        from app.rpa.wxauto_client import WxautoGroupRpaClient
 
         group = WxautoGroupRpaClient()
-        route_cache_repo = (
-            MysqlArticleRouteCacheRepo(self.engine)
-            if self.config.pipelines.article.route_cache_enabled
-            else None
-        )
-        article = WxautoArticleRpaClient(
-            wx=group.wx,
-            route_cache_repo=route_cache_repo,
-            route_cache_enabled=(
-                self.config.pipelines.article.route_cache_enabled
-            ),
-            route_probe_enabled=(
-                self.config.pipelines.article.route_probe_enabled
-            ),
-            route_probe_failure_threshold=(
-                self.config.pipelines.article.route_probe_failure_threshold
-            ),
-            route_entry_labels=(
-                self.config.pipelines.article.route_entry_labels
-            ),
-            link_extract_methods=(
-                self.config.pipelines.article.link_extract_methods
-            ),
-            close_browser_after_extract=True,
-            open_account_search_fallback_enabled=True,
-        )
         self._group = group
-        self._article = article
 
 
 class _LazyGroupRpa:
@@ -295,15 +232,14 @@ class _LazyGroupRpa:
         self.bundle.group().scroll_up_messages(pages)
 
 
-class _LazyArticleRpa:
-    def __init__(self, bundle: _LazyRealAdapters) -> None:
-        self.bundle = bundle
+class _SingleRssTargetRunner:
+    def __init__(self, runner, target, stop_provider) -> None:
+        self.runner = runner
+        self.target = target
+        self.stop_provider = stop_provider
 
-    def open_public_account(self, account_name: str) -> None:
-        self.bundle.article().open_public_account(account_name)
-
-    def copy_latest_article_links(self, max_articles: int):
-        return self.bundle.article().copy_latest_article_links(max_articles)
+    def run_once(self, now: datetime):
+        return self.runner.run((self.target,), now, self.stop_provider)
 
 
 class _LazyScreenshot:
@@ -345,14 +281,11 @@ class _RealRpaProbe:
 
     def check(self) -> bool:
         group = self.bundle.group()
-        article = self.bundle.article()
         return all(
             callable(value)
             for value in (
                 getattr(group, "open_group", None),
                 getattr(group, "read_visible_messages", None),
-                getattr(article, "open_public_account", None),
-                getattr(article, "copy_latest_article_links", None),
             )
         )
 

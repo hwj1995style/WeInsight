@@ -50,6 +50,9 @@ def group_snapshot(**changes) -> str:
 def article_snapshot(**changes) -> str:
     values = {
         "account_type": "subscription",
+        "feed_url": "http://127.0.0.1:8001/feed/industry.xml",
+        "source_type": "rss",
+        "request_timeout_seconds": 30,
         "poll_interval_minutes": 10,
         "daily_window_start": "07:30:00",
         "daily_window_end": "19:30:00",
@@ -353,18 +356,13 @@ def build_worker(
     return worker, runtime, health, heartbeat, events, factories
 
 
-def test_unhealthy_wechat_does_not_claim_run() -> None:
+def test_wechat_unhealthy_blocks_group_but_not_article() -> None:
     worker, runtime, health, _, events, _ = build_worker(
         health=HealthMonitor(False)
     )
-
-    result = worker.run_tick(NOW)
-
-    assert result.status == "paused_unhealthy"
-    assert result.run_id is None
-    assert runtime.claim_calls == []
+    assert worker.can_claim(PipelineType.GROUP, NOW) is False
+    assert worker.can_claim(PipelineType.ARTICLE, NOW) is True
     assert health.can_collect_calls == [NOW]
-    assert events.events == []
 
 
 def test_healthy_idle_tick_claims_at_most_once_without_log_flood() -> None:
@@ -1011,10 +1009,8 @@ def test_fake_runtime_factory_never_imports_or_constructs_real_adapters(
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", guarded_import)
-    from app.rpa.fake_clients import FakeArticleRpaClient, FakeGroupRpaClient
-    from app.pipelines.article_core_group_due_provider import (
-        ReadOnlyCoreGroupDueProvider,
-    )
+    from app.rpa.fake_clients import FakeGroupRpaClient
+    from app.storage.article_config_repo import ArticleAccountConfigRecord
     from app.storage.article_raw_repo import MysqlArticleRawRepo
     from app.storage.group_repo import MysqlGroupConfigRepo, MysqlGroupMessageRepo
     from app.workers.runtime_factory import build_managed_collector_worker
@@ -1034,36 +1030,25 @@ def test_fake_runtime_factory_never_imports_or_constructs_real_adapters(
         GroupPollingTarget("核心群", 1, 30), "group-batch"
     )
     article_runner = worker.article_runner_factory(
-        ArticlePollingTarget("行业观察", 1, 10, 5),
+        ArticleAccountConfigRecord(
+            id=1, account_name="行业观察", account_type="subscription",
+            feed_url="http://127.0.0.1:8001/feed.xml",
+        ),
         "article-batch",
         lambda: False,
     )
     assert isinstance(group_runner.collect_service.rpa, FakeGroupRpaClient)
-    assert isinstance(article_runner.collect_service.rpa, FakeArticleRpaClient)
     assert isinstance(group_runner.collect_service.repo, MysqlGroupMessageRepo)
-    assert isinstance(article_runner.collect_service.raw_repo, MysqlArticleRawRepo)
+    assert isinstance(article_runner.runner.collect_service.raw_repo, MysqlArticleRawRepo)
     assert group_runner.collect_service.repo.engine is engine
-    assert article_runner.collect_service.raw_repo.engine is engine
-    assert isinstance(
-        article_runner.next_core_group_due_provider,
-        ReadOnlyCoreGroupDueProvider,
-    )
-    assert isinstance(
-        article_runner.next_core_group_due_provider.group_config_repo,
-        MysqlGroupConfigRepo,
-    )
-    assert (
-        article_runner.next_core_group_due_provider.group_config_repo.engine
-        is engine
-    )
-    assert article_runner.next_core_group_due_provider.now_provider() == NOW
-    assert article_runner.checkpoint_now_provider() == NOW
+    assert article_runner.runner.collect_service.raw_repo.engine is engine
+    assert not hasattr(article_runner, "lock_repo")
+    assert not hasattr(article_runner, "screenshot_root")
     assert worker.runtime_repo.engine is engine
     assert worker.heartbeat_repo.engine is engine
     assert worker.health_monitor.health_repo.engine is engine
     assert worker.health_monitor.ui_lock_repo.engine is engine
     assert group_runner.screenshot_root.is_absolute()
-    assert article_runner.screenshot_root.is_absolute()
 
 
 class FakeWindow:

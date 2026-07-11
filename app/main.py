@@ -1209,15 +1209,13 @@ def build_real_article_account_config_repo(config) -> MysqlArticleAccountConfigR
 def build_real_article_rpa_client(config) -> WxautoArticleRpaClient:
     engine = create_mysql_engine(config.mysql)
     route_cache_repo = (
-        MysqlArticleRouteCacheRepo(engine) if config.pipelines.article.route_cache_enabled else None
+        MysqlArticleRouteCacheRepo(engine)
     )
     return WxautoArticleRpaClient(
         route_cache_repo=route_cache_repo,
-        route_cache_enabled=config.pipelines.article.route_cache_enabled,
-        route_probe_enabled=config.pipelines.article.route_probe_enabled,
-        route_probe_failure_threshold=config.pipelines.article.route_probe_failure_threshold,
-        route_entry_labels=config.pipelines.article.route_entry_labels,
-        link_extract_methods=config.pipelines.article.link_extract_methods,
+        route_cache_enabled=True,
+        route_probe_enabled=True,
+        route_probe_failure_threshold=3,
         close_browser_after_extract=True,
         open_account_search_fallback_enabled=True,
     )
@@ -1304,7 +1302,7 @@ def build_real_article_scheduler_runner(config) -> ArticlePollingRunner:
         screenshot_root=Path(config.runtime.screenshot_dir),
         lease_seconds=config.pipelines.ui_resource.lock_lease_seconds,
         lock_acquire_timeout_seconds=config.pipelines.ui_resource.lock_acquire_timeout_seconds,
-        max_accounts_per_ui_slice=config.pipelines.article.max_accounts_per_ui_slice,
+        max_accounts_per_ui_slice=1,
         batch_id_factory=lambda selected_account_name: f"article-{uuid4().hex}",
         progress_repo=MysqlArticleProgressRepo(engine),
         next_core_group_due_provider=ReadOnlyCoreGroupDueProvider(

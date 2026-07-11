@@ -27,22 +27,13 @@ def test_pipeline_capacity_defaults_match_design() -> None:
     assert config.pipelines.group.core_group_limit == 5
     assert config.pipelines.article.account_limit == 20
     assert config.pipelines.article.crawl_time == "07:30"
-    assert config.pipelines.article.low_peak_windows == ("07:30-19:30",)
     assert config.pipelines.article.account_poll_interval_minutes == 60
-    assert config.pipelines.article.max_accounts_per_ui_slice == 1
+    assert config.pipelines.article.rss_max_concurrency == 4
+    assert config.pipelines.article.rss_max_response_bytes == 5_242_880
+    assert config.pipelines.article.rss_allowed_private_hosts == ("127.0.0.1:8001",)
     assert config.pipelines.article.collect_today_only is True
     assert config.pipelines.article.dedup_enabled is True
     assert config.pipelines.article.dedup_key == "article_hash"
-    assert config.pipelines.article.route_cache_enabled is True
-    assert config.pipelines.article.route_probe_enabled is True
-    assert config.pipelines.article.route_probe_failure_threshold == 3
-    assert "蛋价资讯" in config.pipelines.article.route_entry_labels
-    assert "今日价格" in config.pipelines.article.route_entry_labels
-    assert config.pipelines.article.link_extract_methods == (
-        "copy_link_menu",
-        "uia_value",
-        "visible_text",
-    )
     assert config.pipelines.article.egg_price_extraction_enabled is True
     assert config.pipelines.article.price_items_json_preview_limit == 20
     assert config.pipelines.article.image_quote_note_enabled is True
@@ -181,21 +172,11 @@ def test_prod_example_config_loads_without_plaintext_password(monkeypatch) -> No
     assert config.pipelines.group.poll_interval_seconds == 30
     assert config.pipelines.article.account_limit == 20
     assert config.pipelines.article.crawl_time == "07:30"
-    assert config.pipelines.article.low_peak_windows == ("07:30-19:30",)
     assert config.pipelines.article.account_poll_interval_minutes == 60
-    assert config.pipelines.article.max_accounts_per_ui_slice == 1
     assert config.pipelines.article.collect_today_only is True
     assert config.pipelines.article.dedup_enabled is True
     assert config.pipelines.article.dedup_key == "article_hash"
-    assert config.pipelines.article.route_cache_enabled is True
-    assert config.pipelines.article.route_probe_enabled is True
-    assert config.pipelines.article.route_probe_failure_threshold == 3
-    assert "蛋价资讯" in config.pipelines.article.route_entry_labels
-    assert config.pipelines.article.link_extract_methods == (
-        "copy_link_menu",
-        "uia_value",
-        "visible_text",
-    )
+    assert config.pipelines.article.rss_max_concurrency == 4
     assert config.pipelines.article.egg_price_extraction_enabled is True
     assert config.pipelines.article.price_items_json_preview_limit == 20
     assert config.pipelines.article.image_quote_note_enabled is True
