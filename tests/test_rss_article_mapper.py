@@ -68,6 +68,9 @@ def test_map_item_rejects_non_wechat_article_url(url):
         "https://mp.weixin.qq.com/s/../not-article",
         "https://mp.weixin.qq.com/s/",
         "https://mp.weixin.qq.com/s/./a",
+        "https://mp.weixin.qq.com/s/%2e%2e%2fnot-article",
+        "https://mp.weixin.qq.com/s/%2e%2e%5cnot-article",
+        "https://mp.weixin.qq.com/s/a%2fb",
     ],
 )
 def test_map_item_rejects_ambiguous_or_malicious_article_url(url):

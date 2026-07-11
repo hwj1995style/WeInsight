@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
@@ -62,10 +63,12 @@ def _normalize_article_url(value: str) -> str:
     path_segments = [unquote(segment) for segment in parsed.path.split("/")]
     if any(segment in {".", ".."} for segment in path_segments):
         raise FeedItemInvalid("article URL contains a dot segment")
-    if not (
-        parsed.path == "/s"
-        or (parsed.path.startswith("/s/") and len(path_segments) == 3 and bool(path_segments[2]))
-    ):
+    short_id_is_safe = (
+        parsed.path.startswith("/s/")
+        and len(path_segments) == 3
+        and re.fullmatch(r"[A-Za-z0-9_-]+", path_segments[2]) is not None
+    )
+    if not (parsed.path == "/s" or short_id_is_safe):
         raise FeedItemInvalid("URL is not a WeChat article")
     query = urlencode(sorted(parse_qsl(parsed.query, keep_blank_values=True)))
     return urlunsplit(("https", "mp.weixin.qq.com", parsed.path, query, ""))
