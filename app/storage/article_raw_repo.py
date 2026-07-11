@@ -124,6 +124,54 @@ class MysqlArticleRawRepo:
             task_created_count=task_created_count,
         )
 
+    def insert_raw_ignore_duplicates(
+        self, articles: list[RawArticleRecord]
+    ) -> ArticleRawInsertResult:
+        read_count = inserted_count = duplicate_count = task_created_count = 0
+        with self.engine.begin() as connection:
+            for account_name in sorted({article.account_name for article in articles}):
+                _SOURCE_WRITE_GUARD.lock_for_history_write(connection, "article", account_name)
+            for article in articles:
+                read_count += 1
+                duplicate = connection.execute(
+                    _SELECT_DUPLICATE_ARTICLE_SQL,
+                    {
+                        "article_hash": article.article_hash,
+                        "account_name": article.account_name,
+                        "article_url": article.article_url,
+                    },
+                ).first()
+                if duplicate is not None:
+                    duplicate_count += 1
+                    continue
+                publish_date = article.publish_time.date() if article.publish_time else None
+                raw_result = connection.execute(
+                    _INSERT_ARTICLE_RAW_SQL,
+                    {
+                        "article_hash": article.article_hash,
+                        "account_name": article.account_name,
+                        "title": article.title,
+                        "article_url": article.article_url,
+                        "publish_time": article.publish_time,
+                        "publish_date": publish_date,
+                        "author": article.author,
+                        "digest": article.digest,
+                        "collect_batch_id": article.collect_batch_id,
+                        "collect_time": article.collect_time,
+                    },
+                )
+                if raw_result.rowcount <= 0:
+                    duplicate_count += 1
+                    continue
+                inserted_count += 1
+                task_result = connection.execute(
+                    _INSERT_CLEAN_ARTICLE_TASK_SQL,
+                    {"task_type": "clean_article", "ref_type": "article", "ref_id": article.article_hash},
+                )
+                if task_result.rowcount > 0:
+                    task_created_count += task_result.rowcount
+        return ArticleRawInsertResult(read_count, inserted_count, duplicate_count, 0, task_created_count)
+
 
 _SELECT_DUPLICATE_ARTICLE_URL_SQL = text(
     """
@@ -132,6 +180,16 @@ _SELECT_DUPLICATE_ARTICLE_URL_SQL = text(
     WHERE account_name = :account_name
       AND publish_date = :publish_date
       AND article_url = :article_url
+    LIMIT 1
+    """
+)
+
+_SELECT_DUPLICATE_ARTICLE_SQL = text(
+    """
+    SELECT 1
+    FROM wechat_article_raw
+    WHERE article_hash = :article_hash
+       OR (account_name = :account_name AND article_url = :article_url)
     LIMIT 1
     """
 )

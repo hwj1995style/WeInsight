@@ -215,3 +215,45 @@ def test_mysql_article_raw_repo_sql_is_isolated_from_group_tables() -> None:
     assert "wechat_article_raw" in executed_sql
     assert "wechat_article_process_task" in executed_sql
     assert "wechat_group_" not in executed_sql
+
+
+def test_insert_raw_accepts_historical_article_and_checks_hash_and_account_url() -> None:
+    article = RawArticleRecord(
+        article_hash="historical-hash",
+        account_name="行业观察",
+        title="旧标题",
+        article_url="https://mp.weixin.qq.com/s/a?a=1&b=2",
+        publish_time=datetime(2020, 1, 2, 3, 4),
+        collect_time=datetime(2026, 7, 11, 8),
+    )
+    engine = FakeEngine(rowcounts=[1, 1])
+
+    result = MysqlArticleRawRepo(engine).insert_raw_ignore_duplicates([article])
+
+    assert result.inserted_count == 1
+    assert result.skipped_count == 0
+    duplicate_sql, params = engine.connection.executions[1]
+    assert "article_hash = :article_hash" in duplicate_sql
+    assert "account_name = :account_name" in duplicate_sql
+    assert "article_url = :article_url" in duplicate_sql
+    assert "publish_date" not in duplicate_sql
+    assert params["article_hash"] == "historical-hash"
+
+
+def test_insert_raw_skips_same_account_normalized_url_with_changed_title() -> None:
+    article = RawArticleRecord(
+        article_hash="new-title-hash",
+        account_name="行业观察",
+        title="新标题",
+        article_url="https://mp.weixin.qq.com/s/a?a=1&b=2",
+        publish_time=datetime(2026, 7, 11, 8),
+        collect_time=datetime(2026, 7, 11, 9),
+    )
+    engine = FakeEngine(rowcounts=[], existing_url_results=[[(1,)]])
+
+    result = MysqlArticleRawRepo(engine).insert_raw_ignore_duplicates([article])
+
+    assert result.inserted_count == 0
+    assert result.duplicate_count == 1
+    assert result.task_created_count == 0
+    assert len(engine.connection.executions) == 2
