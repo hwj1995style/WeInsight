@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import socket
 from collections.abc import Callable, Sequence
-from ipaddress import ip_address
+from ipaddress import ip_address, ip_network
 from urllib.parse import urlsplit, urlunsplit
 
 
@@ -23,6 +23,8 @@ def resolve_host(host: str) -> Sequence[str]:
 
 def _is_forbidden(address: str) -> bool:
     value = ip_address(address)
+    if value in ip_network("100.64.0.0/10"):
+        return True
     return any(
         (
             value.is_private,
