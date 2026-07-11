@@ -9,6 +9,9 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 ROLE_SQL = ROOT / "sql" / "operations" / "grant_admin_stack_roles.sql"
+UI_LOCK_DIAGNOSTIC_SQL = (
+    ROOT / "sql" / "operations" / "check_wechat_ui_lock.sql"
+)
 INIT_SQL = ROOT / "sql" / "init.sql"
 DEPLOYMENT_GUIDE = ROOT / "docs" / "operations" / "微信采集管理后台部署与回滚手册.md"
 SCHEMA = "weinsight_prod"
@@ -135,130 +138,99 @@ def test_role_template_creates_only_three_roles_without_secrets_or_high_privileg
 
 def test_web_role_has_control_plane_crud_and_safe_read_policy() -> None:
     web = _role_grants()["weinsight_web_role"]
-
-    assert web["weinsight_admin_user"] == {"SELECT", "INSERT", "UPDATE"}
-    assert web["weinsight_admin_session"] == {"SELECT", "INSERT", "UPDATE"}
-    assert web["wechat_group_config"] == {"SELECT", "INSERT", "UPDATE", "DELETE"}
-    assert web["wechat_public_account_config"] == {
-        "SELECT",
-        "INSERT",
-        "UPDATE",
-        "DELETE",
+    expected = {
+        "weinsight_admin_user": {"SELECT", "INSERT", "UPDATE"},
+        "weinsight_admin_session": {"SELECT", "INSERT", "UPDATE"},
+        "wechat_group_config": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+        "wechat_public_account_config": {
+            "SELECT", "INSERT", "UPDATE", "DELETE"
+        },
+        "wechat_collection_job": {"SELECT", "INSERT", "UPDATE"},
+        "wechat_collection_job_target": {"SELECT", "INSERT"},
+        "wechat_report_generation_request": {"SELECT", "INSERT"},
+        "wechat_collection_job_event": {"SELECT", "INSERT"},
+        **{
+            table: {"SELECT"}
+            for table in (
+                "wechat_collection_job_run",
+                "wechat_collection_job_target_run",
+                "wechat_worker_heartbeat",
+                "wechat_client_health_check",
+                "wechat_group_collect_log",
+                "wechat_article_collect_log",
+                "wechat_group_msg_clean",
+                "wechat_group_msg_analysis",
+                "wechat_article_clean",
+                "wechat_article_analysis",
+                "wechat_article_egg_price_item",
+                "wechat_group_daily_report",
+                "wechat_article_daily_report",
+                "wechat_group_process_task",
+                "wechat_article_process_task",
+            )
+        },
     }
-    assert web["wechat_collection_job"] == {"SELECT", "INSERT", "UPDATE"}
-    assert web["wechat_collection_job_target"] == {"SELECT", "INSERT"}
-    assert web["wechat_report_generation_request"] == {"SELECT", "INSERT"}
-    assert web["wechat_collection_job_event"] == {"SELECT", "INSERT"}
 
-    read_only = {
-        "wechat_collection_job_run",
-        "wechat_collection_job_target_run",
-        "wechat_worker_heartbeat",
-        "wechat_client_health_check",
-        "wechat_group_collect_log",
-        "wechat_article_collect_log",
-        "wechat_group_msg_clean",
-        "wechat_group_msg_analysis",
-        "wechat_article_clean",
-        "wechat_article_analysis",
-        "wechat_article_egg_price_item",
-        "wechat_group_daily_report",
-        "wechat_article_daily_report",
-        "wechat_group_process_task",
-        "wechat_article_process_task",
-    }
-    for table in read_only:
-        assert web[table] == {"SELECT"}
-
-    for forbidden_table in (
-        "wechat_group_msg_raw",
-        "wechat_article_raw",
-        "wechat_ui_lock",
-        "wechat_group_collect_cursor",
-        "wechat_article_route_cache",
-        "wechat_article_collect_progress",
-    ):
-        assert forbidden_table not in web
+    assert web == expected
 
 
 def test_collector_role_is_limited_to_collection_runtime_policy() -> None:
     collector = _role_grants()["weinsight_collector_role"]
-
-    for table in ("wechat_group_config", "wechat_collection_job_target"):
-        assert collector[table] == {"SELECT"}
-    assert collector["wechat_public_account_config"] == {"SELECT", "UPDATE"}
-    assert collector["wechat_collection_job"] == {"SELECT", "UPDATE"}
-    for table in (
-        "wechat_collection_job_run",
-        "wechat_collection_job_target_run",
-        "wechat_worker_heartbeat",
-        "wechat_group_collect_cursor",
-        "wechat_article_route_cache",
-        "wechat_article_collect_progress",
-    ):
-        assert collector[table] == {"SELECT", "INSERT", "UPDATE"}
-    assert collector["wechat_client_health_check"] == {"SELECT", "INSERT"}
-    assert collector["wechat_group_msg_raw"] == {"INSERT"}
-    assert collector["wechat_article_raw"] == {"SELECT", "INSERT"}
-    for table in ("wechat_group_collect_log", "wechat_article_collect_log"):
-        assert collector[table] == {"INSERT"}
-    for table in ("wechat_group_process_task", "wechat_article_process_task"):
-        assert collector[table] == {"INSERT"}
-    assert collector["wechat_ui_lock"] == {
-        "SELECT",
-        "INSERT",
-        "UPDATE",
-        "DELETE",
+    expected = {
+        "wechat_group_config": {"SELECT"},
+        "wechat_public_account_config": {"SELECT", "UPDATE"},
+        "wechat_collection_job": {"SELECT", "UPDATE"},
+        "wechat_collection_job_target": {"SELECT"},
+        **{
+            table: {"SELECT", "INSERT", "UPDATE"}
+            for table in (
+                "wechat_collection_job_run",
+                "wechat_collection_job_target_run",
+                "wechat_worker_heartbeat",
+                "wechat_group_collect_cursor",
+                "wechat_article_route_cache",
+                "wechat_article_collect_progress",
+            )
+        },
+        "wechat_client_health_check": {"SELECT", "INSERT"},
+        "wechat_group_msg_raw": {"INSERT"},
+        "wechat_article_raw": {"SELECT", "INSERT"},
+        "wechat_group_collect_log": {"INSERT"},
+        "wechat_article_collect_log": {"INSERT"},
+        "wechat_group_process_task": {"INSERT"},
+        "wechat_article_process_task": {"INSERT"},
+        "wechat_ui_lock": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+        "wechat_collection_job_event": {"INSERT"},
     }
-    assert collector["wechat_collection_job_event"] == {"INSERT"}
 
-    for forbidden_table in (
-        "weinsight_admin_user",
-        "weinsight_admin_session",
-        "wechat_report_generation_request",
-        "wechat_group_daily_report",
-        "wechat_article_daily_report",
-        "wechat_group_msg_clean",
-        "wechat_group_msg_analysis",
-        "wechat_article_clean",
-        "wechat_article_analysis",
-        "wechat_article_egg_price_item",
-    ):
-        assert forbidden_table not in collector
+    assert collector == expected
 
 
 def test_pipeline_role_cannot_access_admin_ui_lock_or_job_runs() -> None:
     pipeline = _role_grants()["weinsight_pipeline_role"]
+    expected = {
+        "wechat_group_msg_raw": {"SELECT"},
+        "wechat_article_raw": {"SELECT"},
+        **{
+            table: {"SELECT", "INSERT", "UPDATE"}
+            for table in (
+                "wechat_group_process_task",
+                "wechat_article_process_task",
+                "wechat_group_msg_clean",
+                "wechat_group_msg_analysis",
+                "wechat_article_clean",
+                "wechat_article_analysis",
+                "wechat_group_daily_report",
+                "wechat_article_daily_report",
+                "wechat_report_generation_request",
+            )
+        },
+        "wechat_article_egg_price_item": {"INSERT", "DELETE"},
+        "wechat_worker_heartbeat": {"INSERT", "UPDATE"},
+        "wechat_collection_job_event": {"INSERT"},
+    }
 
-    assert pipeline["wechat_group_msg_raw"] == {"SELECT"}
-    assert pipeline["wechat_article_raw"] == {"SELECT"}
-    for table in ("wechat_group_process_task", "wechat_article_process_task"):
-        assert pipeline[table] == {"SELECT", "INSERT", "UPDATE"}
-    for table in (
-        "wechat_group_msg_clean",
-        "wechat_group_msg_analysis",
-        "wechat_article_clean",
-        "wechat_article_analysis",
-        "wechat_group_daily_report",
-        "wechat_article_daily_report",
-        "wechat_report_generation_request",
-    ):
-        assert pipeline[table] == {"SELECT", "INSERT", "UPDATE"}
-    assert pipeline["wechat_article_egg_price_item"] == {"INSERT", "DELETE"}
-    assert pipeline["wechat_worker_heartbeat"] == {"INSERT", "UPDATE"}
-    assert pipeline["wechat_collection_job_event"] == {"INSERT"}
-
-    for forbidden_table in (
-        "weinsight_admin_user",
-        "weinsight_admin_session",
-        "wechat_ui_lock",
-        "wechat_collection_job",
-        "wechat_collection_job_target",
-        "wechat_collection_job_run",
-        "wechat_collection_job_target_run",
-        "wechat_client_health_check",
-    ):
-        assert forbidden_table not in pipeline
+    assert pipeline == expected
 
 
 def test_every_init_table_has_an_explicit_role_policy() -> None:
@@ -271,6 +243,68 @@ def test_every_init_table_has_an_explicit_role_policy() -> None:
 
     assert granted_tables == _init_tables()
     assert all(table in _init_tables() for tables in grants.values() for table in tables)
+
+
+def test_ui_lock_diagnostic_is_single_read_only_lease_query() -> None:
+    assert UI_LOCK_DIAGNOSTIC_SQL.exists(), UI_LOCK_DIAGNOSTIC_SQL
+    sql = _strip_sql_comments(
+        UI_LOCK_DIAGNOSTIC_SQL.read_text(encoding="utf-8")
+    ).strip()
+    statements = [item.strip() for item in sql.split(";") if item.strip()]
+
+    assert len(statements) == 1
+    statement = statements[0]
+    assert re.match(r"^SELECT\s+", statement, re.IGNORECASE)
+    assert re.search(
+        r"FROM\s+`weinsight_prod`\.`wechat_ui_lock`",
+        statement,
+        re.IGNORECASE,
+    )
+    assert "expire_time" in statement
+    assert "CURRENT_TIMESTAMP" in statement.upper()
+    assert "lease_until" in statement
+    assert "free_no_row" in statement
+    assert "free_expired" in statement
+    assert "held" in statement
+    assert not re.search(
+        r"\b(INSERT|UPDATE|DELETE|REPLACE|ALTER|DROP|TRUNCATE|CREATE)\b",
+        statement,
+        re.IGNORECASE,
+    )
+    assert "FOR UPDATE" not in statement.upper()
+
+
+def test_deployment_gates_use_dba_or_collector_ui_lock_diagnostic() -> None:
+    content = DEPLOYMENT_GUIDE.read_text(encoding="utf-8")
+    acceptance = content.split("## 8. 启动与验收", 1)[1].split(
+        "## 9. 回滚路径", 1
+    )[0]
+    rollback = content.split("## 9. 回滚路径", 1)[1]
+    managed = rollback.split("### 回滚三：暂停全部托管采集", 1)[1]
+    managed = managed.split("### 回滚四：恢复旧手动 CLI", 1)[0]
+    manual_cli = rollback.split("### 回滚四：恢复旧手动 CLI", 1)[1]
+
+    for marker in (
+        "sql\\operations\\check_wechat_ui_lock.sql",
+        "<COLLECTOR_DB_USER>",
+        "--password",
+        "free_no_row",
+        "free_expired",
+        "held",
+        "数据库返回的 CURRENT_TIMESTAMP",
+        "不得使用 Web 账号",
+    ):
+        assert marker in content
+    assert "UI lock 同时持有数为 0" not in acceptance
+    assert "七键检查不查询 `wechat_ui_lock`" in acceptance
+    assert managed.index("check_wechat_ui_lock.sql") < managed.index(
+        'Stop-ScheduledTask -TaskName "WeInsight-Collector-Worker"'
+    )
+    assert "check_wechat_ui_lock.sql" in manual_cli
+    recovery = managed.split("恢复前", 1)[1]
+    assert recovery.index("check_admin_stack.ps1") < recovery.index(
+        "check_wechat_ui_lock.sql"
+    )
 
 
 def test_deployment_guide_covers_secure_order_and_independent_accounts() -> None:
