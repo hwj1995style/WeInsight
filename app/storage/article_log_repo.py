@@ -25,6 +25,11 @@ class ArticleCollectLogRecord:
     error_code: str | None = None
     error_msg: str | None = None
     screenshot_path: str | None = None
+    feed_item_count: int = 0
+    duplicate_count: int = 0
+    invalid_count: int = 0
+    http_status: int | None = None
+    elapsed_ms: int = 0
 
 
 class MysqlArticleCollectLogRepo:
@@ -45,7 +50,12 @@ class MysqlArticleCollectLogRepo:
                 stage,
                 error_code,
                 error_msg,
-                screenshot_path
+                screenshot_path,
+                feed_item_count,
+                duplicate_count,
+                invalid_count,
+                http_status,
+                elapsed_ms
             ) VALUES (
                 :batch_id,
                 :account_name,
@@ -57,7 +67,12 @@ class MysqlArticleCollectLogRepo:
                 :stage,
                 :error_code,
                 :error_msg,
-                :screenshot_path
+                :screenshot_path,
+                :feed_item_count,
+                :duplicate_count,
+                :invalid_count,
+                :http_status,
+                :elapsed_ms
             )
             """
         )

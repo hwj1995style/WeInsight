@@ -72,3 +72,15 @@ def test_mysql_article_collect_log_repo_inserts_article_log_without_group_tables
     assert params["insert_count"] == 1
     assert params["status"] == "success"
     assert params["stage"] == "save_links"
+
+
+def test_rss_metrics_are_written_as_structured_columns() -> None:
+    from app.storage.article_log_repo import ArticleCollectLogRecord, MysqlArticleCollectLogRepo
+    engine = FakeEngine()
+    MysqlArticleCollectLogRepo(engine).insert_collect_log(ArticleCollectLogRecord(
+        batch_id="b", account_name="a", start_time=datetime(2026, 7, 11), end_time=None,
+        status="success", feed_item_count=4, duplicate_count=2, invalid_count=1,
+        http_status=304, elapsed_ms=9))
+    sql, params = engine.connection.executions[1]
+    for name in ("feed_item_count", "duplicate_count", "invalid_count", "http_status", "elapsed_ms"):
+        assert name in sql and params[name] is not None
