@@ -42,6 +42,27 @@ def test_pipeline_capacity_defaults_match_design() -> None:
     assert config.pipelines.ui_resource.lock_lease_seconds == 120
 
 
+@pytest.mark.parametrize("field", ["rss_max_concurrency", "rss_max_response_bytes"])
+def test_rss_config_rejects_nonpositive_limits(tmp_path, field) -> None:
+    path = _write_changed_config(
+        tmp_path, lambda raw: raw["pipelines"]["article"].update({field: 0})
+    )
+    with pytest.raises(ValueError, match=field):
+        load_config(path)
+
+
+@pytest.mark.parametrize("hosts", [[], ["127.0.0.1"], ["127.0.0.1:0"], [" host:8001"]])
+def test_rss_config_requires_exact_nonempty_host_port_entries(tmp_path, hosts) -> None:
+    path = _write_changed_config(
+        tmp_path,
+        lambda raw: raw["pipelines"]["article"].update(
+            {"rss_allowed_private_hosts": hosts}
+        ),
+    )
+    with pytest.raises(ValueError, match="rss_allowed_private_hosts"):
+        load_config(path)
+
+
 def test_admin_web_config_defaults_are_explicit() -> None:
     config = load_config(Path("config/config.dev.yaml"))
 

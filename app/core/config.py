@@ -78,6 +78,21 @@ class ArticlePipelineConfig:
     rss_max_response_bytes: int = 5_242_880
     rss_allowed_private_hosts: tuple[str, ...] = ("127.0.0.1:8001",)
 
+    def __post_init__(self) -> None:
+        for field in ("rss_max_concurrency", "rss_max_response_bytes"):
+            value = getattr(self, field)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{field} must be a positive integer")
+        if not self.rss_allowed_private_hosts:
+            raise ValueError("rss_allowed_private_hosts must not be empty")
+        pattern = re.compile(r"^(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\]):([1-9][0-9]{0,4})$")
+        for endpoint in self.rss_allowed_private_hosts:
+            if not isinstance(endpoint, str) or endpoint != endpoint.strip():
+                raise ValueError("rss_allowed_private_hosts entries must be exact host:port values")
+            match = pattern.fullmatch(endpoint)
+            if match is None or int(match.group(1)) > 65535:
+                raise ValueError("rss_allowed_private_hosts entries must be exact host:port values")
+
 
 @dataclass(frozen=True)
 class UiResourceConfig:

@@ -28,10 +28,14 @@ class RssFeedClient:
         transport: httpx.BaseTransport | None = None,
         resolver: Callable[[str], Sequence[str]] = resolve_host,
         allowed_endpoint: tuple[str, int] | None = None,
+        max_response_bytes: int = MAX_BODY_BYTES,
     ) -> None:
         self._transport = transport
         self._resolver = resolver
         self._allowed_endpoint = allowed_endpoint
+        if isinstance(max_response_bytes, bool) or not isinstance(max_response_bytes, int) or max_response_bytes < 1:
+            raise ValueError("max_response_bytes must be a positive integer")
+        self._max_response_bytes = max_response_bytes
 
     def fetch(self, url: str, *, timeout_seconds: int, etag: str | None, modified: str | None) -> FeedFetchResult:
         started = time.monotonic()
@@ -62,7 +66,7 @@ class RssFeedClient:
                         body = bytearray()
                         for chunk in response.iter_bytes():
                             body.extend(chunk)
-                            if len(body) > MAX_BODY_BYTES:
+                            if len(body) > self._max_response_bytes:
                                 raise FeedFetchError("feed_too_large")
                         parsed = feedparser.parse(bytes(body))
                         recoverable_bozo = isinstance(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 
 import pytest
 
@@ -11,7 +12,10 @@ from app.storage.source_mutation_repo import (
     MysqlSourceMutationRepo,
     MysqlSourceWriteGuard,
     SourceGuardDisabledError,
+    _source_creation_config,
 )
+from app.storage.collection_runtime_repo import ClaimedTarget
+from app.workers.collector_worker import _article_target
 from app.storage.source_reference_repo import MysqlSourceReferenceRepo
 
 
@@ -58,6 +62,24 @@ class Engine:
     def begin(self):
         self.begin_count += 1
         return self.connection
+
+
+def test_article_source_creation_snapshot_reaches_rss_runner_target() -> None:
+    row = {
+        "account_type": "subscription", "feed_url": "http://127.0.0.1:8001/feed.xml",
+        "source_type": "rss", "request_timeout_seconds": 25,
+        "collect_today_only": True, "daily_window_end": "19:30:00",
+        "daily_window_start": "07:30:00", "dedup_key": "article_hash",
+        "max_articles_per_round": 5, "poll_interval_minutes": 10, "remark": None,
+    }
+    snapshot = _source_creation_config("article", row)
+    target = _article_target(ClaimedTarget(
+        job_target_id=3, source_id=9, source_name="行业观察", priority=1,
+        config_snapshot_json=json.dumps(snapshot),
+    ))
+    assert target.feed_url == row["feed_url"]
+    assert target.source_type == "rss"
+    assert target.request_timeout_seconds == 25
 
 
 def test_group_rename_locks_and_rechecks_in_one_transaction() -> None:

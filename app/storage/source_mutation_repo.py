@@ -322,6 +322,9 @@ def _source_creation_lock_statement(source_type: str):
             enabled,
             priority,
             account_type,
+            feed_url,
+            source_type,
+            request_timeout_seconds,
             poll_interval_minutes,
             daily_window_start,
             daily_window_end,
@@ -354,6 +357,9 @@ def _source_creation_config(source_type: str, row) -> dict[str, Any]:
         }
     return {
         "account_type": str(row["account_type"]),
+        "feed_url": str(row["feed_url"]),
+        "source_type": str(row["source_type"]),
+        "request_timeout_seconds": int(row["request_timeout_seconds"]),
         "collect_today_only": bool(row["collect_today_only"]),
         "daily_window_end": row["daily_window_end"],
         "daily_window_start": row["daily_window_start"],

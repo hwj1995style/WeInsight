@@ -63,6 +63,9 @@ def article_row(source_id: int, **changes):
         "enabled": 1,
         "priority": 3,
         "account_type": "subscription",
+        "feed_url": "http://127.0.0.1:8001/feed/industry.xml",
+        "source_type": "rss",
+        "request_timeout_seconds": 30,
         "poll_interval_minutes": 10,
         "daily_window_start": timedelta(hours=7, minutes=30),
         "daily_window_end": time(19, 30),
@@ -211,11 +214,11 @@ def test_create_builds_canonical_safe_article_snapshot_from_locked_row() -> None
     assert params["config_snapshot_json"] == (
         '{"account_type":"subscription","collect_today_only":true,'
         '"daily_window_end":"19:30:00","daily_window_start":"07:30:00",'
-        '"dedup_key":"article_hash","max_articles_per_round":5,'
-        '"poll_interval_minutes":10,"remark":null}'
+        '"dedup_key":"article_hash","feed_url":"http://127.0.0.1:8001/feed/industry.xml",'
+        '"max_articles_per_round":5,"poll_interval_minutes":10,'
+        '"remark":null,"request_timeout_seconds":30,"source_type":"rss"}'
     )
     assert "password" not in params["config_snapshot_json"].lower()
-    assert "url" not in params["config_snapshot_json"].lower()
 
 
 def test_create_rejects_actual_overlapping_candidate_before_any_insert() -> None:

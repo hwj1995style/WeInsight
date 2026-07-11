@@ -47,3 +47,16 @@ pytest -q
 - RSS runner 装配对象上无 `lock_repo` 和 `screenshot_root`，测试明确覆盖。
 - real RPA probe 只检查 group RPA 能力，不再初始化公众号 RPA。
 - 精确 WeRSS 例外为单一 host:port，RSS 重定向仍沿用 Feed client 的默认重新校验规则。
+
+## Blocking Review 修复（第二轮）
+
+- `_source_creation_config` 的 article 锁定查询和 canonical snapshot 已补齐 `feed_url`、`source_type`、`request_timeout_seconds`；新增测试从真实 source snapshot 一直解析为 RSS runner target。
+- `claim_next_due` 新增 SQL 级 `pipeline_types` 过滤。Worker 在 claim 前读取微信健康；异常时只允许 ARTICLE，GROUP 不创建 run、不获取 lease、仍保持 due 状态。
+- RSS 配置新增正整数和非空精确 `host:port` 校验，拒绝裸 host、非法端口及带空白条目。
+- `rss_max_response_bytes` 现注入 `RssFeedClient` 并实际限制解压后响应体。
+- `rss_max_concurrency` 现构造共享 `BoundedSemaphore`，限制 RSS collect 临界操作；现有 job/run DB 状态机继续串行，避免并行 target 状态写入竞态。
+- runtime factory 根据每个 target URL 精确匹配白名单 endpoint，不再索引并忽略其他配置项。
+
+第二轮 RED：`10 failed, 39 passed`，失败分别对应 snapshot、claim 前过滤、配置校验和 Feed client 上限注入。
+
+第二轮 GREEN：focused `178 passed`；完整回归 `1707 passed, 2 skipped, 1 warning in 23.26s`。

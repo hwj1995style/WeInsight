@@ -155,7 +155,11 @@ def test_claim_prefers_group_uses_skip_locked_and_creates_owned_run() -> None:
     assert "next_run_at ASC, id ASC" in select_sql
     assert "status IN ('scheduled', 'active')" in select_sql
     assert "NOT EXISTS" in select_sql
-    assert select_params == {"now": datetime(2026, 7, 10, 9, 25)}
+    assert select_params == {
+        "now": datetime(2026, 7, 10, 9, 25),
+        "allow_group": True,
+        "allow_article": True,
+    }
     insert_sql, insert_params = engine.connection.executions[1]
     assert "INSERT INTO" in insert_sql
     assert "INSERT IGNORE" not in insert_sql
@@ -163,6 +167,18 @@ def test_claim_prefers_group_uses_skip_locked_and_creates_owned_run() -> None:
     assert insert_params["worker_id"] == "collector-1"
     assert insert_params["lease_expires_at"] == datetime(2026, 7, 10, 9, 27)
     assert insert_params["scheduled_at"] == datetime(2026, 7, 10, 9, 20)
+
+
+def test_claim_can_exclude_group_before_acquiring_lease() -> None:
+    engine = claim_engine(None)
+    claimed = MysqlCollectionRuntimeRepo(engine).claim_next_due(
+        NOW, "collector-1", 120, (PipelineType.ARTICLE,)
+    )
+    assert claimed is None
+    sql, params = engine.connection.executions[0]
+    assert "pipeline_type = 'group' AND :allow_group" in sql
+    assert params["allow_group"] is False
+    assert params["allow_article"] is True
 
 
 def test_claim_uses_persisted_target_snapshots_and_stable_order() -> None:

@@ -72,7 +72,7 @@ class CollectorTickResult:
 
 
 class RuntimeRepo(Protocol):
-    def claim_next_due(self, now, worker_id, lease_seconds): ...
+    def claim_next_due(self, now, worker_id, lease_seconds, pipeline_types=None): ...
     def heartbeat_run(self, run_id, worker_id, now, lease_seconds): ...
     def is_stop_requested(self, job_id): ...
     def start_target(self, run_id, job_target_id, batch_id, now): ...
@@ -193,18 +193,21 @@ class ManagedCollectorWorker:
             return _tick("stopping")
         if degraded:
             return _tick("degraded")
+        group_healthy = self.health_monitor.can_collect(now) is True
+        pipeline_types = (
+            tuple(PipelineType)
+            if group_healthy
+            else (PipelineType.ARTICLE,)
+        )
         try:
             run = self.runtime_repo.claim_next_due(
-                now, self.worker_id, self.run_lease_seconds
+                now, self.worker_id, self.run_lease_seconds, pipeline_types
             )
         except Exception as exc:
             self._mark_degraded("claim failed", exc)
             return _tick("degraded")
         if run is None:
             return _tick("idle")
-        if not self.can_claim(run.pipeline_type, now):
-            self.runtime_repo.finish_run(run.run_id, RunStatus.CANCELLED, now)
-            return _tick("paused_unhealthy")
         try:
             self._append_event(
                 run,

@@ -79,13 +79,24 @@ class MysqlCollectionRuntimeRepo:
         now: datetime,
         worker_id: str,
         lease_seconds: int,
+        pipeline_types: tuple[PipelineType, ...] | None = None,
     ) -> ClaimedCollectionRun | None:
         _shanghai_datetime(now, "now")
         _required_text(worker_id, "worker_id", 100)
         _positive_integer(lease_seconds, "lease_seconds")
+        selected = tuple(PipelineType) if pipeline_types is None else pipeline_types
+        if not selected or any(not isinstance(item, PipelineType) for item in selected):
+            raise ValueError("pipeline_types must contain pipeline types")
         db_now = _to_db_datetime(now)
         with self.engine.begin() as connection:
-            row = connection.execute(_LOCK_NEXT_DUE, {"now": db_now}).mappings().first()
+            row = connection.execute(
+                _LOCK_NEXT_DUE,
+                {
+                    "now": db_now,
+                    "allow_group": PipelineType.GROUP in selected,
+                    "allow_article": PipelineType.ARTICLE in selected,
+                },
+            ).mappings().first()
             if row is None:
                 return None
             spec = _schedule_from_row(row)
@@ -578,6 +589,8 @@ _LOCK_NEXT_DUE = text(
     FROM wechat_collection_job
     WHERE status IN ('scheduled', 'active')
       AND next_run_at <= :now
+      AND ((pipeline_type = 'group' AND :allow_group = 1)
+        OR (pipeline_type = 'article' AND :allow_article = 1))
       AND NOT EXISTS (
           SELECT 1 FROM wechat_collection_job_run active_run
           WHERE active_run.job_id = wechat_collection_job.id

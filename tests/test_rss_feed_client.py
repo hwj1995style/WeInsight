@@ -76,6 +76,16 @@ def test_fetch_rejects_decompressed_body_over_five_mib():
         client.fetch("https://feed.example/rss", timeout_seconds=3, etag=None, modified=None)
 
 
+def test_fetch_uses_configured_response_limit():
+    client = RssFeedClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, content=RSS)),
+        resolver=lambda _host: ["93.184.216.34"],
+        max_response_bytes=len(RSS) - 1,
+    )
+    with pytest.raises(FeedFetchError, match="feed_too_large"):
+        client.fetch("https://feed.example/rss", timeout_seconds=3, etag=None, modified=None)
+
+
 def test_redirect_is_validated_without_initial_endpoint_exception():
     def handler(request): return httpx.Response(302, headers={"Location": "http://127.0.0.1/private"})
     client = make_client(handler, resolver=lambda host: ["127.0.0.1"], allowed_endpoint=("werss.local", 8001))

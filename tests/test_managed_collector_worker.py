@@ -127,8 +127,8 @@ class RuntimeRepo:
         self.finish_target_error = None
         self.finish_run_error = None
 
-    def claim_next_due(self, now, worker_id, lease_seconds):
-        self.claim_calls.append((now, worker_id, lease_seconds))
+    def claim_next_due(self, now, worker_id, lease_seconds, pipeline_types=None):
+        self.claim_calls.append((now, worker_id, lease_seconds, pipeline_types))
         if self.claim_error is not None:
             raise self.claim_error
         result, self.run = self.run, None
@@ -363,6 +363,30 @@ def test_wechat_unhealthy_blocks_group_but_not_article() -> None:
     assert worker.can_claim(PipelineType.GROUP, NOW) is False
     assert worker.can_claim(PipelineType.ARTICLE, NOW) is True
     assert health.can_collect_calls == [NOW]
+
+
+def test_unhealthy_wechat_claims_only_article_without_group_lease() -> None:
+    runtime = RuntimeRepo(claimed_run(PipelineType.ARTICLE))
+    worker, _, health, _, _, factories = build_worker(
+        runtime=runtime, health=HealthMonitor(False)
+    )
+    result = worker.run_tick(NOW)
+    assert result.pipeline_type is PipelineType.ARTICLE
+    assert runtime.claim_calls == [(NOW, worker.worker_id, 120, (PipelineType.ARTICLE,))]
+    assert health.can_collect_calls == [NOW]
+    assert len(factories.article_calls) == 1
+
+
+def test_unhealthy_wechat_leaves_group_due_work_unclaimed() -> None:
+    runtime = RuntimeRepo(None)
+    worker, _, health, _, events, _ = build_worker(
+        runtime=runtime, health=HealthMonitor(False)
+    )
+    result = worker.run_tick(NOW)
+    assert result.status == "idle"
+    assert runtime.claim_calls == [(NOW, worker.worker_id, 120, (PipelineType.ARTICLE,))]
+    assert runtime.finish_run_calls == []
+    assert events.events == []
 
 
 def test_healthy_idle_tick_claims_at_most_once_without_log_flood() -> None:
