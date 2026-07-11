@@ -57,6 +57,8 @@ def test_admin_web_config_defaults_are_explicit() -> None:
     assert config.web.host == "127.0.0.1"
     assert config.web.port == 8848
     assert config.web.secure_cookie is False
+    assert config.web.tls_certfile is None
+    assert config.web.tls_keyfile is None
     assert config.auth.default_username == "admin"
     assert config.auth.session_cookie_name == "weinsight_session"
     assert config.auth.csrf_cookie_name == "weinsight_csrf"
@@ -162,6 +164,8 @@ def test_prod_example_config_loads_without_plaintext_password(monkeypatch) -> No
 
     monkeypatch.setenv("WEINSIGHT_MYSQL_PASSWORD", "prod-secret-for-test")
     monkeypatch.setenv("WEINSIGHT_WEB_HOST", "10.20.30.40")
+    monkeypatch.setenv("WEINSIGHT_TLS_CERTFILE", "C:/certs/weinsight.crt")
+    monkeypatch.setenv("WEINSIGHT_TLS_KEYFILE", "C:/certs/weinsight.key")
     config = load_config(path)
 
     assert config.app.env == "prod"
@@ -198,7 +202,9 @@ def test_prod_example_config_loads_without_plaintext_password(monkeypatch) -> No
     assert config.pipelines.article.browser_executable_path == "auto"
     assert config.web.host == "10.20.30.40"
     assert config.web.secure_cookie is True
-    assert config.workers.collector_mode == "fake"
+    assert config.web.tls_certfile == "C:/certs/weinsight.crt"
+    assert config.web.tls_keyfile == "C:/certs/weinsight.key"
+    assert config.workers.collector_mode == "real"
     assert config.workers.schedule_tick_seconds == 5
     assert config.workers.heartbeat_seconds == 10
     assert config.workers.run_lease_seconds == 120
@@ -210,3 +216,133 @@ def test_prod_example_config_loads_without_plaintext_password(monkeypatch) -> No
 
     raw = yaml.safe_load(content)
     assert raw["mysql"]["password"] == "${WEINSIGHT_MYSQL_PASSWORD}"
+    assert raw["web"]["tls_certfile"] == "${WEINSIGHT_TLS_CERTFILE}"
+    assert raw["web"]["tls_keyfile"] == "${WEINSIGHT_TLS_KEYFILE}"
+
+
+def test_web_config_rejects_tls_certificate_without_key(tmp_path: Path) -> None:
+    path = _write_changed_config(
+        tmp_path,
+        lambda raw: raw["web"].update(
+            {
+                "tls_certfile": "C:/certs/weinsight.crt",
+                "tls_keyfile": None,
+            }
+        ),
+    )
+
+    with pytest.raises(ValueError, match="configured together"):
+        load_config(path)
+
+
+def test_web_config_requires_tls_when_secure_cookie_is_enabled(
+    tmp_path: Path,
+) -> None:
+    path = _write_changed_config(
+        tmp_path,
+        lambda raw: raw["web"].update(
+            {
+                "secure_cookie": True,
+                "tls_certfile": None,
+                "tls_keyfile": None,
+            }
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="secure_cookie requires TLS certificate and key",
+    ):
+        load_config(path)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("tls_certfile", ""),
+        ("tls_keyfile", " C:/certs/weinsight.key"),
+        ("tls_certfile", "C:/certs/weinsight\n.crt"),
+        ("tls_certfile", "C:/certs/weinsight\u0080.crt"),
+        ("tls_keyfile", "C:/certs/weinsight\u200b.key"),
+        ("tls_keyfile", "C:/certs/weinsight\u202e.key"),
+    ],
+)
+def test_web_config_rejects_unsafe_tls_paths(
+    tmp_path: Path,
+    field: str,
+    value: str,
+) -> None:
+    path = _write_changed_config(
+        tmp_path,
+        lambda raw: raw["web"].update(
+            {
+                "tls_certfile": "C:/certs/weinsight.crt",
+                "tls_keyfile": "C:/certs/weinsight.key",
+                field: value,
+            }
+        ),
+    )
+
+    with pytest.raises(ValueError, match=field):
+        load_config(path)
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["", "localhost", "0.0.0.0", "::", "8.8.8.8", "224.0.0.1"],
+)
+def test_prod_config_rejects_non_private_bind_host(
+    tmp_path: Path,
+    host: str,
+) -> None:
+    def configure_prod(raw) -> None:
+        raw["app"]["env"] = "prod"
+        raw["web"].update(
+            {
+                "host": host,
+                "secure_cookie": True,
+                "tls_certfile": "C:/certs/weinsight.crt",
+                "tls_keyfile": "C:/certs/weinsight.key",
+            }
+        )
+
+    path = _write_changed_config(tmp_path, configure_prod)
+
+    with pytest.raises(ValueError, match="private IP"):
+        load_config(path)
+
+
+@pytest.mark.parametrize("host", ["10.0.0.8", "172.16.0.8", "192.168.1.8"])
+def test_prod_config_accepts_explicit_private_bind_host(
+    tmp_path: Path,
+    host: str,
+) -> None:
+    def configure_prod(raw) -> None:
+        raw["app"]["env"] = "prod"
+        raw["web"].update(
+            {
+                "host": host,
+                "secure_cookie": True,
+                "tls_certfile": "C:/certs/weinsight.crt",
+                "tls_keyfile": "C:/certs/weinsight.key",
+            }
+        )
+
+    config = load_config(_write_changed_config(tmp_path, configure_prod))
+
+    assert config.web.host == host
+
+
+@pytest.mark.parametrize("env", ["production", "Prod", "prod ", ""])
+def test_config_rejects_unknown_environment_before_host_safety_check(
+    tmp_path: Path,
+    env: str,
+) -> None:
+    def configure_unknown_environment(raw) -> None:
+        raw["app"]["env"] = env
+        raw["web"]["host"] = "0.0.0.0"
+
+    path = _write_changed_config(tmp_path, configure_unknown_environment)
+
+    with pytest.raises(ValueError, match="app.env"):
+        load_config(path)

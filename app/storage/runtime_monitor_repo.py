@@ -11,7 +11,7 @@ from sqlalchemy.engine import Engine
 
 from app.domain.admin_results import PagedResult
 from app.domain.collection_jobs import APPLICATION_TIMEZONE, PipelineType, RunStatus
-from app.rpa.desktop_probe import WechatHealthStatus
+from app.domain.wechat_health import WechatHealthStatus
 from app.services.runtime_monitor_service import (
     ACTIVE_WORKER_STATUSES,
     EventListFilter,

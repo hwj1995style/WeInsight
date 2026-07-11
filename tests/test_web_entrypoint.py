@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import builtins
 import importlib
+import json
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,50 +16,45 @@ def _fresh_entrypoint():
 
 
 def test_web_entrypoint_import_has_no_runtime_side_effects_or_rpa_imports(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    imported: list[str] = []
-    actions: list[str] = []
-    real_import = builtins.__import__
+    script = """
+import builtins
+import json
+import sys
 
-    def tracked_import(name, *args, **kwargs):
-        imported.append(name)
-        return real_import(name, *args, **kwargs)
+imported = []
+real_import = builtins.__import__
 
-    monkeypatch.setattr(builtins, "__import__", tracked_import)
-    sys.modules.pop("app.web.app", None)
-    from app.web.app import create_app
+def tracked_import(name, *args, **kwargs):
+    imported.append(name)
+    return real_import(name, *args, **kwargs)
 
-    assert callable(create_app)
-
-    config_module = importlib.import_module("app.core.config")
-    web_app_module = importlib.import_module("app.web.app")
-    uvicorn_module = importlib.import_module("uvicorn")
-    monkeypatch.setattr(
-        config_module,
-        "load_config",
-        lambda path: actions.append("load_config"),
+builtins.__import__ = tracked_import
+import app.web.__main__ as entrypoint
+forbidden = [
+    name for name in imported
+    if name == "app.main"
+    or name.startswith(("app.rpa", "app.worker", "app.workers"))
+]
+print(json.dumps({
+    "callable": callable(entrypoint.main),
+    "forbidden": forbidden,
+    "rpa_loaded": "app.rpa.desktop_probe" in sys.modules,
+}))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
     )
-    monkeypatch.setattr(
-        web_app_module,
-        "create_app",
-        lambda config: actions.append("create_app"),
-    )
-    monkeypatch.setattr(
-        uvicorn_module,
-        "run",
-        lambda *args, **kwargs: actions.append("uvicorn.run"),
-    )
+    observed = json.loads(result.stdout)
 
-    entrypoint = _fresh_entrypoint()
-
-    assert callable(entrypoint.main)
-    assert actions == []
-    assert not any(
-        name == "app.main"
-        or name.startswith(("app.rpa", "app.worker", "app.workers"))
-        for name in imported
-    )
+    assert observed == {
+        "callable": True,
+        "forbidden": [],
+        "rpa_loaded": False,
+    }
 
 
 @pytest.mark.parametrize(
@@ -79,7 +75,13 @@ def test_web_entrypoint_runs_startup_in_order_with_configured_bind_address(
     entrypoint = _fresh_entrypoint()
     calls: list[tuple[object, ...]] = []
     config = SimpleNamespace(
-        web=SimpleNamespace(host="127.0.0.8", port=8765),
+        web=SimpleNamespace(
+            host="127.0.0.8",
+            port=8765,
+            secure_cookie=False,
+            tls_certfile=None,
+            tls_keyfile=None,
+        ),
     )
 
     class BootstrapAuthService:
@@ -102,8 +104,24 @@ def test_web_entrypoint_runs_startup_in_order_with_configured_bind_address(
     def fake_ensure_bootstrap_admin() -> None:
         calls.append(("ensure_bootstrap_admin",))
 
-    def fake_uvicorn_run(received_app, *, host: str, port: int) -> None:
-        calls.append(("uvicorn.run", received_app, host, port))
+    def fake_uvicorn_run(
+        received_app,
+        *,
+        host: str,
+        port: int,
+        ssl_certfile: str | None,
+        ssl_keyfile: str | None,
+    ) -> None:
+        calls.append(
+            (
+                "uvicorn.run",
+                received_app,
+                host,
+                port,
+                ssl_certfile,
+                ssl_keyfile,
+            )
+        )
 
     monkeypatch.setattr(entrypoint, "load_config", fake_load_config)
     monkeypatch.setattr(entrypoint, "create_app", fake_create_app)
@@ -121,5 +139,93 @@ def test_web_entrypoint_runs_startup_in_order_with_configured_bind_address(
         ("load_config", expected_config_path),
         ("create_app", config),
         ("ensure_bootstrap_admin",),
-        ("uvicorn.run", app, config.web.host, config.web.port),
+        (
+            "uvicorn.run",
+            app,
+            config.web.host,
+            config.web.port,
+            None,
+            None,
+        ),
     ]
+
+
+def test_web_entrypoint_passes_tls_paths_to_uvicorn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entrypoint = _fresh_entrypoint()
+    config = SimpleNamespace(
+        web=SimpleNamespace(
+            host="10.20.30.40",
+            port=8848,
+            secure_cookie=True,
+            tls_certfile="C:/certs/weinsight.crt",
+            tls_keyfile="C:/certs/weinsight.key",
+        ),
+    )
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            auth_service=SimpleNamespace(ensure_bootstrap_admin=lambda: None),
+        ),
+    )
+    uvicorn_calls: list[tuple[object, dict[str, object]]] = []
+
+    monkeypatch.setattr(entrypoint, "load_config", lambda path: config)
+    monkeypatch.setattr(entrypoint, "create_app", lambda received: app)
+    monkeypatch.setattr(
+        entrypoint.uvicorn,
+        "run",
+        lambda received, **kwargs: uvicorn_calls.append((received, kwargs)),
+    )
+    monkeypatch.setattr(sys, "argv", ["weinsight-web"])
+
+    entrypoint.main()
+
+    assert uvicorn_calls == [
+        (
+            app,
+            {
+                "host": "10.20.30.40",
+                "port": 8848,
+                "ssl_certfile": "C:/certs/weinsight.crt",
+                "ssl_keyfile": "C:/certs/weinsight.key",
+            },
+        )
+    ]
+
+
+def test_web_entrypoint_rejects_secure_cookie_without_tls_before_app_build(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entrypoint = _fresh_entrypoint()
+    private_key_marker = "PRIVATE_KEY_CONTENT_MUST_NOT_LEAK"
+    config = SimpleNamespace(
+        web=SimpleNamespace(
+            host="10.20.30.40",
+            port=8848,
+            secure_cookie=True,
+            tls_certfile=None,
+            tls_keyfile=private_key_marker,
+        ),
+    )
+    actions: list[str] = []
+
+    monkeypatch.setattr(entrypoint, "load_config", lambda path: config)
+    monkeypatch.setattr(
+        entrypoint,
+        "create_app",
+        lambda received: actions.append("create_app"),
+    )
+    monkeypatch.setattr(
+        entrypoint.uvicorn,
+        "run",
+        lambda *args, **kwargs: actions.append("uvicorn.run"),
+    )
+    monkeypatch.setattr(sys, "argv", ["weinsight-web"])
+
+    with pytest.raises(RuntimeError) as exc_info:
+        entrypoint.main()
+
+    assert str(exc_info.value) == "secure_cookie requires TLS certificate and key"
+    assert private_key_marker not in str(exc_info.value)
+    assert actions == []

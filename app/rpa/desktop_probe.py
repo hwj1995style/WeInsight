@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import subprocess
 from dataclasses import dataclass
-from enum import Enum
 from typing import Callable
+
+from app.domain.wechat_health import WechatHealthStatus
 
 
 @dataclass(frozen=True)
@@ -13,16 +14,6 @@ class ProcessInfo:
     process_id: int
     path: str | None
     version: str | None
-
-
-class WechatHealthStatus(str, Enum):
-    OK = "ok"
-    NOT_RUNNING = "not_running"
-    NOT_FOUND = "not_running"
-    NOT_LOGGED_IN = "not_logged_in"
-    VERSION_MISMATCH = "version_mismatch"
-    WINDOW_UNAVAILABLE = "window_unavailable"
-    RPA_UNAVAILABLE = "rpa_unavailable"
 
 
 @dataclass(frozen=True)

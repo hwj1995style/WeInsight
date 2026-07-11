@@ -3,8 +3,10 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
+from ipaddress import ip_address, ip_network
 from pathlib import Path
 from typing import Any
+from unicodedata import category
 
 import yaml
 
@@ -17,6 +19,10 @@ class AppConfig:
     env: str
     timezone: str
     log_level: str
+
+    def __post_init__(self) -> None:
+        if self.env not in {"dev", "prod"}:
+            raise ValueError("app.env must be dev or prod")
 
 
 @dataclass(frozen=True)
@@ -106,6 +112,28 @@ class WebConfig:
     host: str
     port: int
     secure_cookie: bool
+    tls_certfile: str | None
+    tls_keyfile: str | None
+
+    def __post_init__(self) -> None:
+        for field in ("tls_certfile", "tls_keyfile"):
+            value = getattr(self, field)
+            if value is None:
+                continue
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+                or any(category(character).startswith("C") for character in value)
+            ):
+                raise ValueError(f"{field} must be a non-empty trimmed path")
+
+        has_cert = self.tls_certfile is not None
+        has_key = self.tls_keyfile is not None
+        if has_cert != has_key:
+            raise ValueError("tls_certfile and tls_keyfile must be configured together")
+        if self.secure_cookie and not (has_cert and has_key):
+            raise ValueError("secure_cookie requires TLS certificate and key")
 
 
 @dataclass(frozen=True)
@@ -159,6 +187,22 @@ class Config:
     web: WebConfig
     auth: AuthConfig
     workers: WorkersConfig
+
+    def __post_init__(self) -> None:
+        if self.app.env != "prod":
+            return
+        try:
+            host = ip_address(self.web.host)
+        except (TypeError, ValueError):
+            raise ValueError("prod web.host must be an explicit private IP") from None
+        private_networks = (
+            ip_network("10.0.0.0/8"),
+            ip_network("172.16.0.0/12"),
+            ip_network("192.168.0.0/16"),
+            ip_network("fc00::/7"),
+        )
+        if not any(host in network for network in private_networks):
+            raise ValueError("prod web.host must be an explicit private IP")
 
 
 def _expand_env(value: Any) -> Any:

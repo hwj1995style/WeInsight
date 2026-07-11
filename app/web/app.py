@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncIterator
+from typing import TYPE_CHECKING, AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -14,7 +14,6 @@ from app.services.auth_service import AuthService
 from app.services.dashboard_service import DashboardService
 from app.services.collection_job_service import CollectionJobService
 from app.services.result_query_service import ResultQueryService
-from app.services.runtime_monitor_service import RuntimeMonitorService
 from app.services.source_management_service import SourceManagementService
 from app.services.report_generation_service import ReportGenerationService
 from app.storage.admin_auth_repo import MysqlAdminAuthRepo
@@ -27,7 +26,6 @@ from app.storage.collection_event_repo import MysqlCollectionEventRepo
 from app.storage.group_repo import MysqlGroupConfigRepo
 from app.storage.group_daily_report_query_repo import MysqlGroupDailyReportQueryRepo
 from app.storage.safe_result_query_repo import MysqlSafeResultQueryRepo
-from app.storage.runtime_monitor_repo import MysqlRuntimeMonitorRepo
 from app.storage.source_reference_repo import MysqlSourceReferenceRepo
 from app.storage.summary_daily_report_query_repo import MysqlSummaryDailyReportQueryRepo
 from app.storage.report_request_repo import MysqlReportRequestRepo
@@ -53,6 +51,9 @@ from app.web.routes import (
 )
 from app.web.routes.auth import LoginAttemptLimiter, MAX_CONCURRENT_LOGIN_HASHES
 
+if TYPE_CHECKING:
+    from app.services.runtime_monitor_service import RuntimeMonitorService
+
 
 WEB_DIR = Path(__file__).resolve().parent
 
@@ -76,7 +77,7 @@ def create_app(
     summary_report_service: SummaryDailyReportQueryService | None = None,
     dashboard_service: DashboardService | None = None,
     job_service: CollectionJobService | None = None,
-    runtime_monitor_service: RuntimeMonitorService | None = None,
+    runtime_monitor_service: "RuntimeMonitorService | None" = None,
     event_repo: MysqlCollectionEventRepo | None = None,
     report_request_service: ReportGenerationService | None = None,
     report_request_repo: MysqlReportRequestRepo | None = None,
@@ -147,14 +148,16 @@ def create_app(
     app.state.job_service = job_service or CollectionJobService(
         MysqlCollectionJobRepo(engine)
     )
-    app.state.runtime_monitor_service = (
-        runtime_monitor_service
-        or RuntimeMonitorService(
+    if runtime_monitor_service is None:
+        from app.services.runtime_monitor_service import RuntimeMonitorService
+        from app.storage.runtime_monitor_repo import MysqlRuntimeMonitorRepo
+
+        runtime_monitor_service = RuntimeMonitorService(
             MysqlRuntimeMonitorRepo(engine),
             Path(config.runtime.screenshot_dir),
             heartbeat_ttl_seconds=config.workers.heartbeat_seconds * 3,
         )
-    )
+    app.state.runtime_monitor_service = runtime_monitor_service
     app.state.event_repo = event_repo or MysqlCollectionEventRepo(engine)
     app.state.login_attempt_limiter = LoginAttemptLimiter(
         config.auth.login_failure_limit,

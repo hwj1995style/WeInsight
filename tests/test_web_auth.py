@@ -244,7 +244,12 @@ def test_session_and_csrf_cookie_security_flags_follow_config(
 ) -> None:
     configured = replace(
         config,
-        web=replace(config.web, secure_cookie=secure_cookie),
+        web=replace(
+            config.web,
+            secure_cookie=secure_cookie,
+            tls_certfile="C:/certs/test.crt" if secure_cookie else None,
+            tls_keyfile="C:/certs/test.key" if secure_cookie else None,
+        ),
     )
     scheme = "https" if secure_cookie else "http"
     with TestClient(

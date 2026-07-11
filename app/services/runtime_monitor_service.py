@@ -15,7 +15,7 @@ from app.domain.collection_jobs import (
     RunStatus,
     ensure_schedule_datetime,
 )
-from app.rpa.desktop_probe import WechatHealthStatus
+from app.domain.wechat_health import WechatHealthStatus
 from app.storage.collection_event_repo import sanitize_output
 
 

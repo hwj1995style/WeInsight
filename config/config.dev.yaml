@@ -18,6 +18,8 @@ web:
   host: 127.0.0.1
   port: 8848
   secure_cookie: false
+  tls_certfile: null
+  tls_keyfile: null
 
 auth:
   default_username: admin
