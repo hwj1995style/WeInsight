@@ -13,6 +13,12 @@ class Logs:
     def __init__(self): self.rows=[]
     def insert_collect_log(self, row): self.rows.append(row)
 
+class FailingLogs(Logs):
+    def __init__(self, failures): super().__init__(); self.failures = iter(failures)
+    def insert_collect_log(self, row):
+        if next(self.failures, False): raise RuntimeError("log down")
+        super().insert_collect_log(row)
+
 def test_one_failed_feed_does_not_block_next_target():
     from app.pipelines.rss_article_polling_runner import RssArticlePollingRunner
     logs=Logs(); runner=RssArticlePollingRunner(collect_service=Service(), log_repo=logs, batch_id_factory=lambda n: n)
@@ -27,3 +33,15 @@ def test_stop_is_checked_only_after_completed_target():
     runner=RssArticlePollingRunner(collect_service=Service(), log_repo=Logs(), batch_id_factory=lambda n:n)
     result=runner.run([SimpleNamespace(account_name="good"), SimpleNamespace(account_name="next")], now=NOW, stop_requested_provider=lambda: calls.append(1) or True)
     assert result.attempted_count == 1 and result.stop_requested_count == 1
+
+def test_success_log_failure_counts_only_failure_and_does_not_block_next_target():
+    from app.pipelines.rss_article_polling_runner import RssArticlePollingRunner
+    runner=RssArticlePollingRunner(collect_service=Service(), log_repo=FailingLogs([True, False, False]), batch_id_factory=lambda n:n)
+    result=runner.run([SimpleNamespace(account_name="good"), SimpleNamespace(account_name="next")], now=NOW)
+    assert result.attempted_count == 2 and result.success_count == 1 and result.failed_count == 1
+
+def test_failure_log_failure_is_isolated_from_next_target():
+    from app.pipelines.rss_article_polling_runner import RssArticlePollingRunner
+    runner=RssArticlePollingRunner(collect_service=Service(), log_repo=FailingLogs([True, False]), batch_id_factory=lambda n:n)
+    result=runner.run([SimpleNamespace(account_name="bad"), SimpleNamespace(account_name="good")], now=NOW)
+    assert result.attempted_count == 2 and result.success_count == 1 and result.failed_count == 1

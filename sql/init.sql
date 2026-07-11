@@ -408,6 +408,11 @@ CREATE TABLE IF NOT EXISTS wechat_article_collect_log (
     error_code VARCHAR(100) NULL,
     error_msg TEXT NULL,
     screenshot_path VARCHAR(500) NULL,
+    feed_item_count INT NOT NULL DEFAULT 0 COMMENT 'Feed 返回条目数',
+    duplicate_count INT NOT NULL DEFAULT 0 COMMENT '重复文章数',
+    invalid_count INT NOT NULL DEFAULT 0 COMMENT '无效 Feed 条目数',
+    http_status INT NULL COMMENT 'Feed HTTP 响应状态码',
+    elapsed_ms INT NOT NULL DEFAULT 0 COMMENT 'Feed 请求耗时毫秒',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
     KEY idx_article_log_account_time (account_name, start_time),
     KEY idx_article_log_status (status)

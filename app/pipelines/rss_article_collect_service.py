@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Protocol
+from collections.abc import Callable
 
 from app.rss.article_mapper import FeedItemInvalid, map_feed_item
 from app.storage.article_config_repo import ArticleAccountConfigRecord
@@ -32,10 +32,13 @@ class RssArticleCollectService:
         self.state_repo = state_repo
 
     def collect_once(self, target: RssArticleTarget, *, batch_id: str,
-                     collect_time: datetime) -> RssArticleCollectResult:
+                     collect_time: datetime,
+                     after_fetch_checkpoint: Callable[[], None] | None = None) -> RssArticleCollectResult:
         fetched = self.feed_client.fetch(
             target.feed_url, timeout_seconds=target.request_timeout_seconds,
             etag=target.last_feed_etag, modified=target.last_feed_modified)
+        if after_fetch_checkpoint is not None:
+            after_fetch_checkpoint()
         etag = fetched.etag if fetched.etag is not None else target.last_feed_etag
         modified = fetched.modified if fetched.modified is not None else target.last_feed_modified
         records = []

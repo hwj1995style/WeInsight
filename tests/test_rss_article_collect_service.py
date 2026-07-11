@@ -62,3 +62,34 @@ def test_304_is_success_and_preserves_missing_cache_values():
     assert result.not_modified and result.insert_count == 0
     assert state.calls[-1][1]["etag"] == '"old"'
     assert state.calls[-1][1]["modified"] == "old-date"
+
+
+def test_stop_checkpoint_after_fetch_prevents_raw_writes():
+    from app.pipelines.rss_article_collect_service import RssArticleCollectService
+    raw = Raw()
+    try:
+        RssArticleCollectService(feed_client=Feed([item(1)]), raw_repo=raw, state_repo=State()).collect_once(
+            target(), batch_id="b", collect_time=NOW,
+            after_fetch_checkpoint=lambda: (_ for _ in ()).throw(RuntimeError("stop")))
+    except RuntimeError as exc:
+        assert str(exc) == "stop"
+    assert raw.saved == []
+
+
+def test_non_first_collection_is_not_capped_and_partial_cache_header_is_preserved():
+    from app.pipelines.rss_article_collect_service import RssArticleCollectService
+    raw, state = Raw(), State()
+    result = RssArticleCollectService(
+        feed_client=Feed([item(i, age_hours=48) for i in range(40)], etag='"new"'),
+        raw_repo=raw, state_repo=state).collect_once(
+            target(last_success_collect_time=NOW-timedelta(days=1)), batch_id="b", collect_time=NOW)
+    assert result.insert_count == 40
+    assert result.etag == '"new"' and result.modified == "old-date"
+
+
+def test_empty_200_is_success():
+    from app.pipelines.rss_article_collect_service import RssArticleCollectService
+    result = RssArticleCollectService(feed_client=Feed([]), raw_repo=Raw(), state_repo=State()).collect_once(
+        target(), batch_id="b", collect_time=NOW)
+    assert result.feed_item_count == result.insert_count == 0
+    assert not result.not_modified
