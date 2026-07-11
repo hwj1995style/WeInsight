@@ -554,3 +554,18 @@ HTMX 资产已本地保留以供后续局部交互使用；当前页面未实际
 
 - `docs/operations/微信采集管理后台受控POC验收清单.md`
 - `docs/operations/微信采集管理后台受控POC执行记录.md`
+
+## 公众号 RSS / WeRSS 部署
+
+WeRSS 在当前 Windows 采集机的 Docker Desktop 中运行，使用固定镜像标签或摘要、独立外部 MySQL 数据库，并仅监听 `127.0.0.1`。部署时复制环境模板为本机 `.env`，不得提交真实凭据：
+
+```powershell
+Copy-Item deploy\werss\.env.example deploy\werss\.env
+docker compose --env-file deploy\werss\.env -f deploy\werss\docker-compose.yml up -d
+```
+
+单公众号 24 小时 POC、扩容到 3 个公众号、日常巡检、备份和回滚步骤见：
+
+```text
+docs/operations/公众号RSS采集运行手册.md
+```

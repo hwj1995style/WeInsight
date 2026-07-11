@@ -13,6 +13,8 @@ venv/
 .env
 .env.*
 !.env.example
+deploy/werss/.env
+!deploy/werss/.env.example
 
 # Build artifacts
 build/

@@ -1,0 +1,27 @@
+services:
+  werss:
+    image: ${WERSS_IMAGE:?set a pinned image tag or digest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WERSS_PORT:-8001}:8001"
+    env_file:
+      - .env
+    environment:
+      MYSQL_HOST: ${MYSQL_HOST:?set the external MySQL host}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-werss}
+      MYSQL_USER: ${MYSQL_USER:?set the dedicated MySQL user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set the MySQL password}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/', timeout=5)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
