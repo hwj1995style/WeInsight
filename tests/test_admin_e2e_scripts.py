@@ -10,7 +10,7 @@ CONFTEST = ROOT / "tests" / "e2e" / "conftest.py"
 def test_test_stack_fails_closed_before_starting_processes() -> None:
     content = SCRIPT.read_text(encoding="utf-8")
     first_start = content.index("$process = Start-Process")
-    for gate in ("app.env=dev", "collector_mode=fake", "Web host must be loopback", "MySQL must be loopback", "Production-like database name rejected"):
+    for gate in ("app.env=dev", "collector_mode=fake", "Web host must be loopback", "MySQL must be loopback", "Production-like database name rejected", "disposable test/e2e database"):
         assert content.index(gate) < first_start
     assert "-WindowStyle Hidden" in content
     for module in ("app.web", "app.workers.collector_main", "app.workers.pipeline_main"):

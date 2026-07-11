@@ -2,5 +2,5 @@
 
 - 已交付 Fake-only 测试栈、静态安全契约和 opt-in Playwright 冒烟入口。
 - 普通回归默认跳过浏览器 E2E；外部 URL 会在访问前拒绝。
-- 真实浏览器 Fake 栈：Not Executed，需显式测试数据库与 `WEINSIGHT_ADMIN_E2E=1`。
+- 真实浏览器 Fake 栈：Not Executed，需提供 `config/config.e2e.yaml` 指向可整体销毁的 test/e2e 数据库，并显式设置 `WEINSIGHT_ADMIN_E2E=1`。
 - 未导入或启动真实 wxauto，未操作微信窗口、生产配置或生产数据库。

@@ -1,7 +1,6 @@
 param(
     [string]$ProjectRoot = (Join-Path $PSScriptRoot "..\.."),
-    [string]$ConfigPath = "config\config.dev.yaml",
-    [switch]$AllowExistingDevDatabase,
+    [string]$ConfigPath = "config\config.e2e.yaml",
     [switch]$Stop
 )
 
@@ -55,7 +54,7 @@ if (-not (Test-LoopbackHost $gate.web_host)) { throw "Web host must be loopback.
 if ($gate.secure) { throw "Test stack requires secure_cookie=false." }
 if (-not (Test-LoopbackHost $gate.mysql_host)) { throw "MySQL must be loopback." }
 if ($gate.mysql_db -match "(?i)prod|production") { throw "Production-like database name rejected." }
-if (-not $AllowExistingDevDatabase -and $gate.mysql_db -notmatch "(?i)test|e2e") { throw "Use a test/e2e database or pass the explicit development opt-in." }
+if ($gate.mysql_db -notmatch "(?i)test|e2e") { throw "Test stack requires a disposable test/e2e database." }
 
 [IO.Directory]::CreateDirectory($runtimeDir) | Out-Null
 Stop-OwnedProcesses $runtimeDir

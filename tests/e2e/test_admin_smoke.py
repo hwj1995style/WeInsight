@@ -1,4 +1,5 @@
 import uuid
+import re
 from datetime import datetime, timedelta
 
 import pytest
@@ -43,17 +44,22 @@ def test_fake_admin_login_to_report_smoke(admin_base_url, browser):
     page.get_by_label("采集频率（秒）").fill("30")
     page.get_by_role("button", name="创建任务").click()
     expect(page.get_by_text(prefix + "-job", exact=True)).to_be_visible()
+    job_detail_url = page.url
 
-    expect(page.get_by_role("button", name="停止任务")).to_be_visible(timeout=30_000)
+    page.goto(f"{admin_base_url}/runs")
+    expect(page.locator("body")).to_contain_text(prefix + "-job", timeout=60_000)
+    expect(page.locator("body")).not_to_contain_text("<img src=\"file:")
+    page.goto(job_detail_url)
     page.get_by_role("button", name="停止任务").click()
     expect(page.locator("body")).to_contain_text("停止", timeout=30_000)
-    page.goto(f"{admin_base_url}/runs")
-    expect(page.locator("body")).not_to_contain_text("<img src=\"file:")
     page.goto(f"{admin_base_url}/reports")
     page.get_by_label("生成类型").select_option("all")
     page.get_by_role("button", name="提交生成请求").click()
-    expect(page.locator("body")).to_contain_text("请求")
-    # Today's successful Fake report is the provisional lifecycle version (临时版).
+    expect(page.locator(".request-status")).to_contain_text(
+        re.compile("成功|部分成功"), timeout=60_000
+    )
+    page.goto(f"{admin_base_url}/reports")
+    expect(page.locator("body")).to_contain_text("临时版")
 
     page.set_viewport_size({"width": 390, "height": 844})
     for route in ("/dashboard", "/groups", "/jobs", "/runs", "/reports"):
