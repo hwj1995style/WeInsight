@@ -7,6 +7,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import feedparser
 import httpx
+from feedparser.exceptions import CharacterEncodingOverride, CharacterEncodingUnknown, UndeclaredNamespace
 
 from app.rss.models import FeedFetchResult, FeedItem
 from app.rss.url_safety import FeedUrlBlocked, resolve_host, validate_feed_url
@@ -64,7 +65,11 @@ class RssFeedClient:
                             if len(body) > MAX_BODY_BYTES:
                                 raise FeedFetchError("feed_too_large")
                         parsed = feedparser.parse(bytes(body))
-                        if parsed.bozo or not parsed.version:
+                        recoverable_bozo = isinstance(
+                            parsed.get("bozo_exception"),
+                            (CharacterEncodingOverride, CharacterEncodingUnknown, UndeclaredNamespace),
+                        )
+                        if not parsed.version or (parsed.bozo and not recoverable_bozo):
                             raise FeedFetchError("feed_invalid_format")
                         items = tuple(self._item(entry) for entry in parsed.entries)
                         return self._result(response, items, False, started)

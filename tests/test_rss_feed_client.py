@@ -10,6 +10,7 @@ from app.rss.feed_client import FeedFetchError, RssFeedClient
 
 RSS = """<?xml version='1.0'?><rss version='2.0'><channel><item><title>今日蛋价</title><link>https://example.com/a</link><pubDate>Sat, 11 Jul 2026 10:00:00 GMT</pubDate><author>Alice</author><description>Hello</description></item></channel></rss>""".encode()
 ATOM = b"""<?xml version='1.0'?><feed xmlns='http://www.w3.org/2005/Atom'><entry><title>Atom item</title><link href='https://example.com/b'/><updated>2026-07-11T10:00:00Z</updated><author><name>Bob</name></author><summary>World</summary></entry></feed>"""
+RECOVERABLE_BOZO_RSS = b'''<?xml version="1.0" encoding="ascii"?><rss version="2.0"><channel><item><title>\xe4\xbb\x8a</title><link>https://example.com/a</link></item></channel></rss>'''
 
 
 def make_client(handler, resolver=lambda _host: ["93.184.216.34"], allowed_endpoint=None):
@@ -50,6 +51,11 @@ def test_fetch_maps_atom():
     assert (result.items[0].title, result.items[0].author) == ("Atom item", "Bob")
 
 
+def test_fetch_accepts_recognized_feed_with_recoverable_encoding_bozo():
+    result = make_client(lambda request: httpx.Response(200, content=RECOVERABLE_BOZO_RSS)).fetch("https://feed.example/rss", timeout_seconds=3, etag=None, modified=None)
+    assert result.items[0].title == "今"
+
+
 @pytest.mark.parametrize("content", [b"not xml", b"<rss><broken>"])
 def test_fetch_rejects_invalid_format(content):
     client = make_client(lambda request: httpx.Response(200, content=content))
@@ -81,9 +87,10 @@ def test_transport_is_pinned_to_validated_dns_answer():
     seen = {}
     def handler(request):
         seen["url"] = str(request.url); seen["host"] = request.headers["host"]
+        seen["sni_hostname"] = request.extensions["sni_hostname"]
         return httpx.Response(304)
     make_client(handler, resolver=lambda host: ["93.184.216.34"]).fetch("https://feed.example/rss", timeout_seconds=3, etag=None, modified=None)
-    assert seen == {"url": "https://93.184.216.34/rss", "host": "feed.example"}
+    assert seen == {"url": "https://93.184.216.34/rss", "host": "feed.example", "sni_hostname": b"feed.example"}
 
 
 def test_trusted_hostname_is_resolved_once_and_pinned_even_when_private():
