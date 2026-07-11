@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterator
@@ -213,6 +214,22 @@ def test_dashboard_renders_live_runtime_kpis_and_24_hour_terminal_conservation(
     assert "运行中" not in response.text.split(
         'id="run-trend-chart-data"', 1
     )[-1].split("</script>", 1)[0]
+
+
+def test_dashboard_does_not_report_unavailable_ui_lock_as_free(
+    authenticated_client: TestClient,
+    runtime_service: FakeRuntimeDashboardService,
+) -> None:
+    runtime_service.snapshot = replace(
+        runtime_service.snapshot,
+        ui_lock_state="unavailable",
+    )
+
+    response = authenticated_client.get("/dashboard")
+
+    assert response.status_code == 200
+    assert "最小权限下不可用" in response.text
+    assert "不代表 UI 锁空闲" in response.text
 
 
 def test_dashboard_loads_only_local_echarts_and_other_pages_do_not(

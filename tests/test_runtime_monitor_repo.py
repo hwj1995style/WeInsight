@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from app.domain.collection_jobs import PipelineType, RunStatus
@@ -112,7 +113,7 @@ def test_dashboard_trend_sql_excludes_nonterminal_statuses() -> None:
     assert "end_time >= :trend_start" in sql
 
 
-def test_worker_and_ui_lock_expiry_boundary_is_fail_closed() -> None:
+def test_worker_expiry_boundary_is_fail_closed() -> None:
     worker = runtime_monitor_repo._worker_view(
         {
             "worker_id": "collector-1",
@@ -127,19 +128,53 @@ def test_worker_and_ui_lock_expiry_boundary_is_fail_closed() -> None:
             "within_ttl": 0,
         }
     )
-    lock = runtime_monitor_repo._ui_lock_view(
-        {
-            "owner_pipeline": "group",
-            "owner_task_id": "batch-1",
-            "acquire_time": datetime(2026, 7, 10, 11, 59),
-            "heartbeat_time": datetime(2026, 7, 10, 12, 0),
-            "expire_time": datetime(2026, 7, 10, 12, 30),
-        },
-        NOW,
-    )
-
     assert worker.is_live is False
-    assert lock.state == "expired"
+
+
+def test_web_runtime_monitor_has_no_direct_ui_lock_dependency() -> None:
+    source = Path("app/storage/runtime_monitor_repo.py").read_text(encoding="utf-8")
+
+    assert "wechat_ui_lock" not in source
+    assert "_UI_LOCK" not in source
+    assert "_ui_lock_view" not in source
+
+
+def test_worker_snapshot_uses_safe_unavailable_lock_state_without_query() -> None:
+    executed: list[str] = []
+
+    class Result:
+        def mappings(self):
+            return self
+
+        def all(self):
+            return []
+
+    class Connection:
+        def execute(self, statement, params=None):
+            sql = str(statement)
+            executed.append(sql)
+            assert "wechat_ui_lock" not in sql
+            return Result()
+
+    class BeginContext:
+        def __enter__(self):
+            return Connection()
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+    class Engine:
+        def begin(self):
+            return BeginContext()
+
+    repo = runtime_monitor_repo.MysqlRuntimeMonitorRepo(Engine())
+
+    snapshot = repo.get_worker_snapshot(NOW, heartbeat_ttl_seconds=30)
+
+    assert len(executed) == 2
+    assert snapshot.workers == ()
+    assert snapshot.health_checks == ()
+    assert snapshot.ui_lock.state == "unavailable"
 
 
 def test_latest_health_window_alias_avoids_mysql_reserved_function_name() -> None:

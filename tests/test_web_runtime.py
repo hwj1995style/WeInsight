@@ -356,6 +356,22 @@ def test_workers_page_renders_live_health_and_lock(
         assert value in response.text
 
 
+def test_workers_page_marks_ui_lock_unavailable_under_minimum_privilege(
+    authenticated_client: TestClient,
+    runtime_service: FakeRuntimeMonitorService,
+) -> None:
+    runtime_service.workers = replace(
+        runtime_service.workers,
+        ui_lock=UiLockView("unavailable"),
+    )
+
+    response = authenticated_client.get("/workers")
+
+    assert response.status_code == 200
+    assert "最小权限下不可用" in response.text
+    assert "UI 锁状态未知，不代表空闲" in response.text
+
+
 def test_runtime_pages_require_authentication(raw_client: TestClient) -> None:
     for path in ("/runs", "/runs/31", "/workers"):
         response = raw_client.get(path, follow_redirects=False)

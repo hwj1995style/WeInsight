@@ -232,7 +232,7 @@ class RuntimeDashboardSnapshot:
             total_worker_count=0,
             latest_wechat_status=None,
             latest_wechat_checked_at=None,
-            ui_lock_state="free",
+            ui_lock_state="unavailable",
             active_job_count=0,
             stop_requested_job_count=0,
             today_runs=TodayRunCounts(),

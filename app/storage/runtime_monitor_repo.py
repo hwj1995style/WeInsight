@@ -171,14 +171,10 @@ class MysqlRuntimeMonitorRepo:
                 {"cutoff": cutoff},
             ).mappings().all()
             health_rows = connection.execute(_LATEST_HEALTH).mappings().all()
-            lock_row = connection.execute(
-                _UI_LOCK,
-                {"lock_name": "wechat_ui"},
-            ).mappings().first()
         return WorkerMonitorSnapshot(
             workers=tuple(_worker_view(row) for row in worker_rows),
             health_checks=tuple(_health_view(row) for row in health_rows),
-            ui_lock=_ui_lock_view(lock_row, now),
+            ui_lock=UiLockView(state="unavailable"),
             checked_at=now,
         )
 
@@ -435,20 +431,6 @@ def _health_view(row) -> WechatHealthView:
     )
 
 
-def _ui_lock_view(row, now: datetime) -> UiLockView:
-    if row is None:
-        return UiLockView(state="free")
-    expire_time = _db_datetime(row["expire_time"])
-    return UiLockView(
-        state="live" if expire_time > now else "expired",
-        owner_pipeline=str(row["owner_pipeline"]),
-        owner_task_id=str(row["owner_task_id"]),
-        acquire_time=_db_datetime(row["acquire_time"]),
-        heartbeat_time=_db_datetime(row["heartbeat_time"]),
-        expire_time=expire_time,
-    )
-
-
 def _today_counts(rows) -> TodayRunCounts:
     counts = {status: 0 for status in _KNOWN_RUN_STATUSES}
     for row in rows:
@@ -620,16 +602,6 @@ _LATEST_HEALTH = text(
     ) ranked
     WHERE ranked.row_rank = 1
     ORDER BY ranked.hostname ASC
-    """
-)
-
-_UI_LOCK = text(
-    """
-    SELECT
-        owner_pipeline, owner_task_id, acquire_time,
-        heartbeat_time, expire_time
-    FROM wechat_ui_lock
-    WHERE lock_name = :lock_name
     """
 )
 

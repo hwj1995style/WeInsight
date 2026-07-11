@@ -11,6 +11,7 @@ from app.domain.collection_jobs import PipelineType, RunStatus
 from app.services.runtime_monitor_service import (
     EventListFilter,
     RunListFilter,
+    RuntimeDashboardSnapshot,
     RuntimeEvent,
     RuntimeMonitorService,
     TargetRunDetail,
@@ -24,6 +25,12 @@ from app.rpa.desktop_probe import WechatHealthStatus
 
 ZONE = ZoneInfo("Asia/Shanghai")
 NOW = datetime(2026, 7, 10, 12, 30, tzinfo=ZONE)
+
+
+def test_empty_dashboard_does_not_report_ui_lock_as_free() -> None:
+    snapshot = RuntimeDashboardSnapshot.empty(NOW)
+
+    assert snapshot.ui_lock_state == "unavailable"
 
 
 class Repo:

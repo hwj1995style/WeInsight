@@ -6,7 +6,7 @@
   <section class="kpi-grid runtime-kpi-grid" aria-label="实时运行指标">
     <article class="kpi-card"><span>Collector / 全部 Worker</span><strong>{{ runtime.live_collector_count }} / {{ runtime.total_worker_count }}</strong><small>在线 Collector / 心跳记录</small></article>
     <article class="kpi-card"><span>微信状态</span><strong>{{ runtime.latest_wechat_status.value if runtime.latest_wechat_status else "暂无" }}</strong><small>{{ runtime.latest_wechat_checked_at.strftime("%m-%d %H:%M:%S") if runtime.latest_wechat_checked_at else "暂无完整检查" }}</small></article>
-    <article class="kpi-card"><span>UI 锁</span><strong>{% if runtime.ui_lock_state == "live" %}占用中{% elif runtime.ui_lock_state == "expired" %}已过期{% else %}空闲{% endif %}</strong><small><a href="/workers">查看 Worker 与锁详情</a></small></article>
+    <article class="kpi-card"><span>UI 锁</span><strong>{% if runtime.ui_lock_state == "live" %}占用中{% elif runtime.ui_lock_state == "expired" %}已过期{% elif runtime.ui_lock_state == "free" %}空闲{% else %}最小权限下不可用{% endif %}</strong><small>{% if runtime.ui_lock_state == "unavailable" %}状态未知，不代表 UI 锁空闲 · {% endif %}<a href="/workers">查看 Worker 与健康详情</a></small></article>
     <article class="kpi-card"><span>采集任务</span><strong>{{ runtime.active_job_count }} / {{ runtime.stop_requested_job_count }}</strong><small>运行中 {{ runtime.active_job_count }} · 停止中 {{ runtime.stop_requested_job_count }}</small></article>
     <article class="kpi-card"><span>今日运行</span><strong>{{ runtime.today_runs.total }}</strong><small>运行中 {{ runtime.today_runs.running }} · 成功 {{ runtime.today_runs.success }} · 部分成功 {{ runtime.today_runs.partial_success }} · 失败 {{ runtime.today_runs.failed }} · 取消 {{ runtime.today_runs.cancelled }} · 异常 {{ runtime.today_runs.aborted }}</small></article>
   </section>
