@@ -550,9 +550,8 @@ class WxautoArticleRpaClient:
             previous_clipboard = ""
 
         try:
-            _focus_window(main_window)
-            _activate_control(search_edit, prefer_physical=True)
-            time.sleep(0.2)
+            if not _focus_main_search_edit(main_window, search_edit):
+                return False
             pyperclip.copy(account_name)
             keyboard.send_keys("^a{BACKSPACE}^v")
             result = _wait_for_main_search_result(main_window, account_name)
@@ -1066,6 +1065,20 @@ def _find_main_search_edit(main_window: Any) -> Any | None:
     return None
 
 
+def _focus_main_search_edit(main_window: Any, search_edit: Any) -> bool:
+    _focus_window(main_window)
+    set_focus = getattr(search_edit, "set_focus", None)
+    if not callable(set_focus):
+        return False
+    try:
+        set_focus()
+        time.sleep(0.2)
+        has_keyboard_focus = getattr(search_edit, "has_keyboard_focus", None)
+        return bool(has_keyboard_focus()) if callable(has_keyboard_focus) else False
+    except Exception:
+        return False
+
+
 def _wait_for_main_search_result(main_window: Any, account_name: str, timeout_seconds: float = 4.0) -> Any | None:
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
@@ -1085,7 +1098,7 @@ def _find_main_search_result(main_window: Any, account_name: str) -> Any | None:
         if class_name not in {"mmui::SearchContentCellView", "mmui::XTableCell"}:
             continue
         control_text = _normalize_match_text(_safe_text(control))
-        if expected_name not in control_text:
+        if control_text != expected_name:
             continue
         control_rect = _safe_rectangle(control)
         if control_rect is None:

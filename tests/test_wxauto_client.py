@@ -12,7 +12,9 @@ from app.rpa.wxauto_client import (
     WxautoGroupRpaClient,
     WxautoNotAvailableError,
     _find_exact_network_search_result,
+    _find_main_search_result,
     _find_network_search_entry,
+    _focus_main_search_edit,
     _history_row_click_coords,
 )
 
@@ -323,6 +325,86 @@ class FakeNetworkSearchContainer:
 
     def descendants(self):
         return self._controls
+
+
+class FakeDirectSearchRect:
+    def __init__(self, left: int, top: int, right: int, bottom: int) -> None:
+        self.left = left
+        self.top = top
+        self.right = right
+        self.bottom = bottom
+
+    def width(self) -> int:
+        return self.right - self.left
+
+    def height(self) -> int:
+        return self.bottom - self.top
+
+
+class FakeDirectSearchControl(FakeNetworkSearchControl):
+    def __init__(self, *, text: str, class_name: str, left: int, top: int) -> None:
+        super().__init__(text=text, class_name=class_name)
+        self._rect = FakeDirectSearchRect(left, top, left + 300, top + 60)
+
+    def rectangle(self) -> FakeDirectSearchRect:
+        return self._rect
+
+
+class FakeDirectSearchWindow(FakeNetworkSearchContainer):
+    def rectangle(self) -> FakeDirectSearchRect:
+        return FakeDirectSearchRect(0, 0, 800, 1000)
+
+
+class FakeSearchEdit:
+    def __init__(self, *, has_focus: bool) -> None:
+        self._has_focus = has_focus
+        self.focus_calls = 0
+
+    def set_focus(self) -> None:
+        self.focus_calls += 1
+
+    def has_keyboard_focus(self) -> bool:
+        return self._has_focus
+
+
+class FakeFocusWindow:
+    def set_focus(self) -> None:
+        return None
+
+
+def test_find_main_search_result_prefers_exact_public_account_candidate() -> None:
+    public_account = FakeDirectSearchControl(
+        text="一箱蛋",
+        class_name="mmui::SearchContentCellView",
+        left=90,
+        top=120,
+    )
+    chat_record = FakeDirectSearchControl(
+        text="一箱蛋",
+        class_name="mmui::XTableCell",
+        left=90,
+        top=260,
+    )
+
+    assert _find_main_search_result(FakeDirectSearchWindow([chat_record, public_account]), "一箱蛋") is public_account
+
+
+def test_find_main_search_result_rejects_partial_name() -> None:
+    partial = FakeDirectSearchControl(
+        text="一箱蛋每日行情",
+        class_name="mmui::SearchContentCellView",
+        left=90,
+        top=120,
+    )
+
+    assert _find_main_search_result(FakeDirectSearchWindow([partial]), "一箱蛋") is None
+
+
+def test_focus_main_search_edit_returns_false_without_keyboard_focus() -> None:
+    search_edit = FakeSearchEdit(has_focus=False)
+
+    assert _focus_main_search_edit(FakeFocusWindow(), search_edit) is False
+    assert search_edit.focus_calls == 1
 
 
 def test_find_network_search_entry_requires_exact_entry_text() -> None:
