@@ -60,8 +60,8 @@ def test_poc_record_separates_collection_scope_from_downstream_scope() -> None:
         "9 个公众号全部启用采集",
         "仅湖南三尖农牧公司进入 clean/analyze",
         "其余 8 个只采集",
-        "下游白名单能力缺失",
-        "不得启用 9 账号配置",
+        "只有湖南 `downstream_clean_enabled=1`",
+        "其余 8 个没有新增 clean/analyze 任务",
         "采集完整率",
         "去重",
         "采集延迟",
@@ -70,6 +70,13 @@ def test_poc_record_separates_collection_scope_from_downstream_scope() -> None:
         "分析",
     ):
         assert required in content
+
+
+def test_poc_record_blocks_werss_first_when_real_shadow_differs() -> None:
+    content = POC.read_text(encoding="utf-8")
+    assert "长度差 1、哈希差 1" in content
+    assert "保持 `content_mode: shadow`" in content
+    assert "24 小时窗口未启动" in content
 
 
 def test_werss_rollout_docs_use_confirmed_jiangxi_account_name() -> None:

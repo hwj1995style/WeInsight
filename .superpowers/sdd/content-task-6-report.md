@@ -71,3 +71,12 @@
 
 - 用户确认正确名称为“江西九江褐壳蛋”，与 WeRSS Feed 映射一致。
 - 设计、实施计划、运行手册和 POC 记录中的旧误写及待确认措辞已移除，并增加门禁防止旧名称回归。
+
+## Task 6 真实运行启动尝试
+
+- 配置核对：运行配置为 `content_mode: shadow`；数据库共 9 个目标来源启用采集，仅湖南三尖农牧公司 `downstream_clean_enabled=1`。
+- 九账号安全单轮：attempted 9、success 9、failed 0、首次 raw insert 81、duplicate 5、task 0；其余 8 个本轮未新增 clean/analyze 任务，article UI lock 为 0。
+- 湖南首次采集因首次接入只保留最近 24 小时且当前条目均早于窗口，HTTP 成功但 raw 0。首次成功建立游标后按正常路径执行湖南第二轮：success 1、insert 25、duplicate 0、clean task 25；未修改发布时间或伪造数据。
+- shadow 闭环：湖南 clean 25/25 success、analyze 25/25 success、analysis 25 行、最终任务积压 0、article UI lock 0。组合命令超时后先查数据库确认 analyze 18 success/7 pending，再只补跑一次，最终完成，未重复启动批次。
+- 显式真实样本双路径对账只输出安全计数：`shadow_length_difference_count=1`、`shadow_hash_difference_count=1`。差异尚未解释，故没有切换 `werss_first`，没有填写 24 小时开始/截止，POC 状态保持“未启动（阻断中）”，不得宣称通过。
+- 托管采集 worker 已恢复为单实例常驻；进程存在，数据库最近 1 分钟 heartbeat 为 collector/running。pipeline worker 未因未满足切换门槛而启动。
