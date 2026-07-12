@@ -23,6 +23,8 @@ def test_provider_backed_extractor_replaces_only_transient_body() -> None:
         digest=None,
         content_length=10,
         article_url="https://mp.weixin.qq.com/s/provider",
+        content_locator="locator-123",
+        content_locator_type="werss_article_view",
     )
     provider = FakeContentProvider("1.红蛋价格：4.90元/筐装(稳)")
 
@@ -33,6 +35,8 @@ def test_provider_backed_extractor_replaces_only_transient_body() -> None:
     assert result.transient_ocr_tables == []
     assert provider.seen_sources[0].article_hash == article.article_hash
     assert provider.seen_sources[0].article_url == article.article_url
+    assert provider.seen_sources[0].content_locator == "locator-123"
+    assert provider.seen_sources[0].content_locator_type == "werss_article_view"
 
 
 class FakeContentProvider:

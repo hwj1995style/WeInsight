@@ -42,6 +42,8 @@ class FakeConnection:
                         "author": "作者A",
                         "digest": "深圳企业关注报价和供需变化。",
                         "content_length": 1200,
+                        "content_locator": "locator-123",
+                        "content_locator_type": "werss_article_view",
                     }
                 ]
             )
@@ -92,6 +94,8 @@ def test_mysql_article_analysis_repo_lists_pending_clean_articles_without_group_
     assert articles[0].article_hash == "hash-1"
     assert articles[0].article_url == "https://mp.weixin.qq.com/s/abc"
     assert articles[0].collect_time == datetime(2026, 7, 6, 8, 5)
+    assert articles[0].content_locator == "locator-123"
+    assert articles[0].content_locator_type == "werss_article_view"
     sql, params = engine.connection.executions[0]
     assert "FROM wechat_article_process_task" in sql
     assert "JOIN wechat_article_clean" in sql
@@ -158,6 +162,20 @@ def test_mysql_article_analysis_repo_upserts_analysis_and_updates_article_tasks_
     task_params = engine.params_by_sql_fragment("INSERT INTO wechat_article_process_task")[0]
     assert task_params["task_type"] == "article_daily_report"
     assert task_params["ref_id"] == "2026-07-06"
+
+
+def test_mysql_article_analysis_repo_failure_retains_existing_retry_policy() -> None:
+    engine = FakeEngine()
+    repo = MysqlArticleAnalysisRepo(engine)
+
+    repo.mark_analyze_task_failed("hash-retry", "werss_timeout")
+
+    sql, params = engine.connection.executions[0]
+    assert "retry_count + 1 >= 3" in sql
+    assert "THEN 'failed' ELSE 'pending'" in sql
+    assert "retry_count = retry_count + 1" in sql
+    assert "INTERVAL 60 SECOND" in sql
+    assert params == {"ref_id": "hash-retry", "error_msg": "werss_timeout"}
 
 
 def test_mysql_article_analysis_repo_replaces_egg_price_items(fake_engine) -> None:

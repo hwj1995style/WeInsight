@@ -26,6 +26,8 @@ class CleanArticleForAnalysis:
     digest: str | None
     content_length: int
     article_url: str = ""
+    content_locator: str | None = None
+    content_locator_type: str | None = None
     collect_time: datetime | None = None
     transient_body_text: str | None = None
     transient_html_tables: list[dict[str, Any]] | None = None

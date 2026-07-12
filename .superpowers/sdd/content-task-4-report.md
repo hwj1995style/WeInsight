@@ -22,4 +22,12 @@ Completed.
 
 ## Concerns
 
-- `CleanArticleForAnalysis` does not yet carry the WeRSS locator, so production wiring must pair this extractor with a provider that can resolve from the currently available source metadata, or a later migration must add locator propagation.
+- None.
+
+## Review Fix
+
+- RED: the four requested suites reported 3 failures because `CleanArticleForAnalysis` had no locator fields and the repository could not return them.
+- Added `content_locator` and `content_locator_type` to the analysis DTO, selected them from `wechat_article_raw`, and passed them into `ArticleParseSource`.
+- Added a provider → transient extractor → analysis service → egg quotation integration test; it also asserts the body is absent from persisted analysis JSON.
+- Added a repository-level retry-policy regression test covering pending-before-third-attempt behavior, retry increment, 60-second delay, and structured error persistence.
+- GREEN: the four requested suites pass with 32 tests.

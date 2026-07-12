@@ -9,6 +9,8 @@ from app.pipelines.article_analysis_service import (
     ArticleAnalysisService,
     ArticleTransientExtraction,
 )
+from app.content.article_content import ArticleContent
+from app.pipelines.article_transient_extractor import ProviderBackedArticleTransientExtractor
 
 
 def test_analyze_clean_article_builds_summary_and_tags_from_transient_body() -> None:
@@ -190,6 +192,36 @@ def test_article_analysis_service_consumes_article_tasks_and_creates_daily_repor
     assert not hasattr(repo.analyses[0], "transient_body_text")
 
 
+def test_article_analysis_service_extracts_quote_from_provider_body_without_persisting_body() -> None:
+    body = "1.红蛋价格：4.90元/筐装(稳)"
+    source = CleanArticleForAnalysis(
+        article_hash="hash-provider-quote",
+        account_name="福建闽融鸡蛋报价平台",
+        title="2026年07月09日｜福建闽融平台",
+        publish_time=datetime(2026, 7, 9, 8, 30),
+        author=None,
+        digest=None,
+        content_length=len(body),
+        article_url="https://mp.weixin.qq.com/s/provider-quote",
+        content_locator="provider-quote-locator",
+        content_locator_type="werss_article_view",
+    )
+    repo = FakeArticleAnalysisRepo([source])
+    provider = QuoteContentProvider(body)
+    service = ArticleAnalysisService(
+        repo=repo,
+        extractor=ProviderBackedArticleTransientExtractor(provider),
+    )
+
+    result = service.analyze_once(limit=1, analyze_time=datetime(2026, 7, 9, 10, 0))
+
+    assert result.success_count == 1
+    assert provider.seen_sources[0].content_locator == "provider-quote-locator"
+    assert repo.analyses[0].egg_price_items[0].price_text == "4.90元"
+    assert not hasattr(repo.analyses[0], "transient_body_text")
+    assert body not in repo.analyses[0].price_items_json()
+
+
 def test_article_analysis_service_marks_article_task_failed_without_group_side_effects() -> None:
     source = CleanArticleForAnalysis(
         article_hash="hash-err",
@@ -346,3 +378,13 @@ class SensitiveFailingExtractor:
 
     def extract(self, article: CleanArticleForAnalysis) -> CleanArticleForAnalysis:
         raise RuntimeError(self.secret_body)
+
+
+class QuoteContentProvider:
+    def __init__(self, body: str) -> None:
+        self.body = body
+        self.seen_sources = []
+
+    def parse(self, source):
+        self.seen_sources.append(source)
+        return ArticleContent(self.body, source.title, source.publish_time, source.author, source.digest, "werss")

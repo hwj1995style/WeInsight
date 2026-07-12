@@ -23,6 +23,8 @@ class MysqlArticleAnalysisRepo:
                 clean.article_url,
                 clean.publish_time,
                 raw.collect_time,
+                raw.content_locator,
+                raw.content_locator_type,
                 clean.author,
                 clean.digest,
                 clean.content_length
@@ -53,6 +55,8 @@ class MysqlArticleAnalysisRepo:
                 digest=row["digest"],
                 content_length=int(row["content_length"] or 0),
                 article_url=str(row["article_url"] or ""),
+                content_locator=row["content_locator"],
+                content_locator_type=row["content_locator_type"],
             )
             for row in rows
         ]

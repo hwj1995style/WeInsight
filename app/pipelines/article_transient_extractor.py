@@ -39,6 +39,8 @@ class ProviderBackedArticleTransientExtractor:
                 publish_time=article.publish_time,
                 author=article.author,
                 digest=article.digest,
+                content_locator=article.content_locator,
+                content_locator_type=article.content_locator_type,
             )
         )
         return replace(
