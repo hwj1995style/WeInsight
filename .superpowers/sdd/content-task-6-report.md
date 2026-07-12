@@ -4,7 +4,7 @@
 
 - 文档门禁：完成 RED/GREEN。
 - 本机迁移：`20260712_001` 连续执行两次，完成。
-- 本机 shadow：现有“一箱蛋”待处理批次 clean/analyze 完成；其 raw 记录无 locator，最终来源为 web。
+- 历史探索阶段：曾以“一箱蛋”验证 web 路径；该结果不代表当前 POC 范围。当前 POC 为 9 账号采集、仅湖南下游。
 - WeRSS 停止与恢复：回退自动化矩阵通过，容器最终恢复 `healthy`。
 - 固定 POC：已于 2026-07-12 13:08:14 +08:00 启动，当前进行中；截止时间为 2026-07-13 13:08:14 +08:00，不宣称通过。
 
@@ -39,32 +39,22 @@
 12. WeRSS 固定 Feed 核对。
     - 通过容器现有 DB 连接只读查询 `feeds.id`，目标 Feed ID 计数为 1；未输出 Feed 内容或连接凭据。
 
-## POC 状态
+## 当前 POC 状态与关注点
 
-- 固定目标：湖南三尖农牧公司，Feed ID `MP_WXS_3545051769`，最终目标总数 9。
-- WeRSS `feeds` 中存在该固定目标；WeInsight `wechat_public_account_config` 中不存在该目标，当前唯一启用的 WeInsight 账号为“一箱蛋”。
-- shadow 批次成功，但由于现有 raw 记录 locator 均为空，只观察到 web 来源，未获得同一真实文章的 WeRSS/网页长度、哈希和报价差异。
-- 未满足切换 `werss_first` 的前提，未填写 24 小时开始/截止时间，不宣称通过。
-
-## 未完成观察项与关注点
-
-1. WeRSS 已有固定目标 Feed；需在 WeInsight 配置该目标，并取得含合法 locator 的新文章，完成正文接口真实契约和双路径差异对账。
-2. 用真实待处理任务观察 WeRSS 停止时网页回退，以及恢复后的下一任务重新使用 WeRSS。本次未篡改既有数据制造任务。
-3. 影子无不可解释差异后才能切单公众号 `werss_first`，记录基线并开始连续 24 小时观察。
-4. 24 小时未结束前保持范围 1；后续只按 1 → 3 → 9 扩容。
-5. 现有 24 小时采集指标仍有历史失败记录，最新错误摘要为结构化 RSS 采集错误；需在正式 POC 前另行处置，报告不包含响应体、正文或凭据。
-6. 固定 WeRSS 镜像会输出正文相关 SQL 参数；用户已接受仅本机 Docker 日志的剩余风险，并采用 2 × 2 MB 轮转、最小本机访问、不外传/不备份控制。
-7. 最小后续选择：由镜像上游提供关闭 SQL 语句及参数输出的受支持开关，或修复并发布新的固定镜像摘要；之后更新固定摘要、重跑正文接口契约、触发不含真实正文的受控数据库操作验证新日志窗口，再开始真实 shadow。禁止以 Docker `none` 日志驱动或丢弃 stdout 作为修复。
+- 9 个目标账号均已启用采集，仅湖南三尖农牧公司 `downstream_clean_enabled=1`；其余 8 个不进入 clean/analyze。
+- dev 当前为 `content_mode: werss_first`；locator 25/25，真实 `/article/{locator}` 契约已验证。
+- 故障回退与恢复闭环已完成。24 小时窗口已填写且仍在进行中，不宣称通过。
+- 固定 WeRSS 镜像会输出正文相关 SQL 参数；用户已接受仅本机 Docker 日志的剩余风险，并采用 2 × 2 MB 轮转、最小本机访问、不外传/不备份控制，同时持续关注上游开关。
 
 ## 用户接受日志风险后的范围调整
 
 - 保留官方固定摘要，不构建内部镜像。官方 SQL 参数/正文日志风险由用户明确接受，控制为仅本机 Docker Desktop 最小访问、不接外部日志、不进工单、不纳入备份，轮转改为 2 × 2 MB，并持续关注上游开关。
 - 目标拆成两层：9 个公众号全部启用采集；下游仅湖南三尖农牧公司进入 clean/analyze，其余 8 个只采集。两层分别验收采集完整率/去重/延迟与湖南正文/回退/分析。
-- 安全配置未执行：当前 `MysqlArticleRawRepo` 对所有新 raw 无条件创建 `clean_article`，没有下游白名单。启用 9 账号会误消费其余 8 个；已在设计和计划新增实现任务，未用手工删任务规避。
+- 下游白名单已实现并复审通过；9 账号采集启用后仅湖南创建 clean/analyze 任务。
 - WeRSS 数据库已有 9 个 Feed；“江西九江褐壳蛋”已由用户确认，与实际 Feed 名一致。
 - 湖南真实 Feed 核验：HTTP 200、25 条；locator 兼容整改后 25/25 可提取，真实 `/article/{locator}` 路由已接入。
 - Compose 已将官方容器日志轮转从 5 × 10 MB 缩短为 2 × 2 MB，并以同一官方固定摘要强制重建。重建后实际 LogConfig 为 `json-file`、`max-file=2`、`max-size=2m`，容器恢复 `healthy`；数据卷和镜像摘要未改变。
-- WeInsight 九账号来源未配置：下游白名单与湖南 locator 两项实现缺口仍在，执行配置会造成误消费或只能网页回退，不满足新范围设计。
+- WeInsight 九账号来源已配置并启用；湖南 locator 与下游隔离均已实机验证。
 - 调整后验证：文档/采集覆盖测试 60 passed；全量 1669 passed、2 skipped、1 个第三方弃用警告；Compose config、diff check、UTF-8 检查均通过，最终 WeRSS `healthy`。
 
 ## 江西账号名称确认
@@ -72,9 +62,9 @@
 - 用户确认正确名称为“江西九江褐壳蛋”，与 WeRSS Feed 映射一致。
 - 设计、实施计划、运行手册和 POC 记录中的旧误写及待确认措辞已移除，并增加门禁防止旧名称回归。
 
-## Task 6 真实运行启动尝试
+## Task 6 历史 shadow 启动阶段（已关闭）
 
-- 配置核对：运行配置为 `content_mode: shadow`；数据库共 9 个目标来源启用采集，仅湖南三尖农牧公司 `downstream_clean_enabled=1`。
+- 当时配置为 `content_mode: shadow`；数据库已是 9 个目标来源启用采集，仅湖南三尖农牧公司 `downstream_clean_enabled=1`。该阶段随后完成复审并切换。
 - 九账号安全单轮：attempted 9、success 9、failed 0、首次 raw insert 81、duplicate 5、task 0；其余 8 个本轮未新增 clean/analyze 任务，article UI lock 为 0。
 - 湖南首次采集因首次接入只保留最近 24 小时且当前条目均早于窗口，HTTP 成功但 raw 0。首次成功建立游标后按正常路径执行湖南第二轮：success 1、insert 25、duplicate 0、clean task 25；未修改发布时间或伪造数据。
 - shadow 闭环：湖南 clean 25/25 success、analyze 25/25 success、analysis 25 行、最终任务积压 0、article UI lock 0。组合命令超时后先查数据库确认 analyze 18 success/7 pending，再只补跑一次，最终完成，未重复启动批次。
