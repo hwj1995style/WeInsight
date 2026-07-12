@@ -18,7 +18,12 @@ from app.pipelines.article_parse_service import (
 
 def test_body_extraction_prefers_wechat_article_selector_and_canonicalizes_digit_spans() -> None:
     html = "<body>navigation<div id='js_content'><span>12</span> <span>34</span></div>footer</body>"
-    assert extract_body_text_from_html(html) == "1234"
+    assert extract_body_text_from_html(html) == "12 34"
+
+
+def test_body_selector_stops_after_void_elements_and_container_end() -> None:
+    html = "<body><div id='js_content'>正文<br><img src='x'><hr></div>页脚</body>"
+    assert extract_body_text_from_html(html) == "正文"
 
 
 class FakeArticleParseRepo:

@@ -74,7 +74,11 @@ def test_poc_record_separates_collection_scope_from_downstream_scope() -> None:
 
 def test_poc_record_blocks_werss_first_when_real_shadow_differs() -> None:
     content = POC.read_text(encoding="utf-8")
-    assert "长度差 1、哈希差 1" in content
+    assert "WeRSS 正文 1278 字符" in content
+    assert "65 字符受限降级响应" in content
+    assert "| 1278 | 65 | 否 |" in content
+    assert "受限降级响应" in content
+    assert "不伪造等值" in content
     assert "保持 `content_mode: shadow`" in content
     assert "24 小时窗口未启动" in content
 

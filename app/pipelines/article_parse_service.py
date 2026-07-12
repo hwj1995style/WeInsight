@@ -12,6 +12,8 @@ from typing import Protocol
 from app.content.article_content import ArticleContent, ArticleContentProvider, ContentFetchError, normalize_article_text
 from app.domain.article_parsing import ArticleParseSource, CleanArticleRecord, ParsedArticleContent
 
+_HTML_VOID_ELEMENTS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
+
 
 @dataclass(frozen=True)
 class ArticleParseResult:
@@ -279,7 +281,7 @@ class _ArticleHtmlMetadataParser(HTMLParser):
     def handle_starttag(self, tag: str, attrs) -> None:
         attrs_map = {str(name).lower(): value for name, value in attrs}
         tag = tag.lower()
-        if self._article_depth:
+        if self._article_depth and tag not in _HTML_VOID_ELEMENTS:
             self._article_depth += 1
         elif attrs_map.get("id") == "js_content":
             self._article_depth = 1

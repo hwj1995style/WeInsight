@@ -3,6 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 import gzip
+import feedparser
 from urllib.parse import urlsplit
 
 from app.rss.feed_client import FeedFetchError, RssFeedClient
@@ -72,6 +73,24 @@ def test_fetch_prefers_raw_standard_rss_item_id_over_guid_rewritten_by_feedparse
     body = b"""<rss version='2.0'><channel><item><id>internal_A-123</id><title>x</title><guid>https://mp.weixin.qq.com/s/external-token</guid><link>https://mp.weixin.qq.com/s/external-token</link></item></channel></rss>"""
     result = make_client(lambda request: httpx.Response(200, content=body)).fetch("https://feed.example/rss", timeout_seconds=3, etag=None, modified=None)
     assert result.items[0].content_locator == "internal_A-123"
+
+
+def test_raw_ids_are_matched_by_stable_link_not_entry_position(monkeypatch):
+    body = b"""<rss version='2.0'><channel><item><id>id-a</id><guid>https://mp.weixin.qq.com/s/a</guid><link>https://mp.weixin.qq.com/s/a</link></item><item><id>id-b</id><guid>https://mp.weixin.qq.com/s/b</guid><link>https://mp.weixin.qq.com/s/b</link></item></channel></rss>"""
+    original = feedparser.parse
+    def reordered(payload):
+        parsed = original(payload)
+        parsed.entries.reverse()
+        return parsed
+    monkeypatch.setattr(feedparser, "parse", reordered)
+    result = make_client(lambda request: httpx.Response(200, content=body)).fetch("https://feed.example/rss", timeout_seconds=3, etag=None, modified=None)
+    assert [item.content_locator for item in result.items] == ["id-b", "id-a"]
+
+
+def test_ambiguous_raw_link_mapping_fails_closed():
+    body = b"""<rss version='2.0'><channel><item><id>id-a</id><guid>https://mp.weixin.qq.com/s/same</guid><link>https://mp.weixin.qq.com/s/same</link></item><item><id>id-b</id><guid>https://mp.weixin.qq.com/s/same</guid><link>https://mp.weixin.qq.com/s/same</link></item></channel></rss>"""
+    result = make_client(lambda request: httpx.Response(200, content=body)).fetch("https://feed.example/rss", timeout_seconds=3, etag=None, modified=None)
+    assert all(item.content_locator is None for item in result.items)
 
 
 def test_official_wechat_link_is_not_mistaken_for_internal_werss_article_id():

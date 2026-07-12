@@ -31,7 +31,13 @@ def test_returns_normalized_visible_text_and_metadata():
 def test_extracts_only_article_content_and_canonicalizes_digit_span_whitespace():
     html = b"<body>navigation<div class='article-content'><span>12</span> <span>34</span></div>footer</body>"
     result = provider(lambda request: httpx.Response(200, headers={"content-type": "text/html"}, content=html)).parse(source())
-    assert result.body_text == "1234"
+    assert result.body_text == "12 34"
+
+
+def test_article_content_selector_stops_after_void_elements_and_container_end():
+    html = b"<body><div class='article-content'>safe<br><img src='x'><hr></div>footer</body>"
+    result = provider(lambda request: httpx.Response(200, headers={"content-type": "text/html"}, content=html)).parse(source())
+    assert result.body_text == "safe"
 
 
 def test_requests_verified_werss_views_article_contract():

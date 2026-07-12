@@ -46,3 +46,12 @@
 - TDD RED：原始 RSS 内部 ID 优先、真实 view 路由、正文 selector 与数字 span 规范化测试均先失败。
 - GREEN：provider/parse/shadow/瞬时分析/分析服务/运行时工厂定向回归 `88 passed`。
 - 未切换 `werss_first`，未启动 24 小时 POC，等待复审。
+
+### Shadow 修复复审整改
+
+- 撤销全局数字间空白删除，报价、年份和表格单元之间的空格保持原义。
+- 两个 selector parser 显式识别 HTML void 元素，正文容器关闭后立即停止，不采集 footer。
+- 原始 RSS 内部 ID 改为按唯一、受控 link/guid 稳定键关联；重排不串篇，歧义映射 locator 为空。
+- 真实安全探针为 WeRSS 1278、web 65、hash 不同。web 是受限降级响应，因此差异已解释但不伪造等值；shadow 继续记录 length/hash 差异，并增加 `shadow_web_limited_response_count`。WeRSS 正文和结构化分析成功作为主验证，web 只验证回退可用性。
+- 复审整改定向回归 `100 passed`；仍保持 shadow，等待复审。
+- 最终定向命令覆盖 POC 文档、feed/provider/parser、shadow、瞬时分析、分析服务与运行时工厂，结果 `100 passed in 1.17s`。按主任务中断后的明确指令，本轮未再次运行真实 Playwright 或全量回归。

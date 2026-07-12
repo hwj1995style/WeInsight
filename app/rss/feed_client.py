@@ -77,10 +77,10 @@ class RssFeedClient:
                         )
                         if not parsed.version or (parsed.bozo and not recoverable_bozo):
                             raise FeedFetchError("feed_invalid_format")
-                        raw_ids = self._rss_item_ids(bytes(body))
+                        raw_ids = self._rss_item_ids_by_link(bytes(body))
                         items = tuple(
-                            self._item(dict(entry, werss_standard_article_id=raw_ids[index] if index < len(raw_ids) else None))
-                            for index, entry in enumerate(parsed.entries)
+                            self._item(dict(entry, werss_standard_article_id=raw_ids.get(entry.get("link", ""))))
+                            for entry in parsed.entries
                         )
                         return self._result(response, items, False, started)
         except FeedFetchError:
@@ -161,16 +161,18 @@ class RssFeedClient:
         )
 
     @staticmethod
-    def _rss_item_ids(body: bytes) -> tuple[str | None, ...]:
+    def _rss_item_ids_by_link(body: bytes) -> dict[str, str]:
         try:
             root = ET.fromstring(body)
         except ET.ParseError:
-            return ()
-        values = []
+            return {}
+        candidates: dict[str, list[str]] = {}
         for item in root.findall("./channel/item"):
             value = item.findtext("id") or ""
-            values.append(value if re.fullmatch(r"[A-Za-z0-9_-]{1,200}", value) else None)
-        return tuple(values)
+            link = item.findtext("link") or item.findtext("guid") or ""
+            if link and re.fullmatch(r"[A-Za-z0-9_-]{1,200}", value):
+                candidates.setdefault(link, []).append(value)
+        return {link: values[0] for link, values in candidates.items() if len(values) == 1}
 
     @staticmethod
     def _origin(url: str) -> tuple[str, str, int]:

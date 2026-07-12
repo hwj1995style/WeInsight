@@ -67,6 +67,8 @@ class ShadowArticleContentProvider:
             self._increment("shadow_length_difference_count")
         if _body_hash(web_content.body_text) != _body_hash(werss_content.body_text):
             self._increment("shadow_hash_difference_count")
+        if len(web_content.body_text) <= 100 and len(werss_content.body_text) >= len(web_content.body_text) * 5:
+            self._increment("shadow_web_limited_response_count")
         return web_content
 
     def _increment(self, key: str) -> None:
@@ -81,5 +83,4 @@ def _body_hash(body: str) -> str:
 
 
 def normalize_article_text(value: str) -> str:
-    normalized = re.sub(r"\s+", " ", value).strip()
-    return re.sub(r"(?<=\d)\s+(?=\d)", "", normalized)
+    return re.sub(r"\s+", " ", value).strip()

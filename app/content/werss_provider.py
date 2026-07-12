@@ -13,6 +13,7 @@ from app.domain.article_parsing import ArticleParseSource
 _MAX_BYTES = 5 * 1024 * 1024
 _ALLOWED_ORIGIN = ("http", "127.0.0.1", 8001)
 _LOCATOR = re.compile(r"^[A-Za-z0-9_-]+$")
+_VOID_ELEMENTS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
 
 
 class _VisibleTextParser(HTMLParser):
@@ -25,7 +26,7 @@ class _VisibleTextParser(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs) -> None:
         attrs_map = dict(attrs)
-        if self.article_depth:
+        if self.article_depth and tag.lower() not in _VOID_ELEMENTS:
             self.article_depth += 1
         elif "article-content" in (attrs_map.get("class") or "").split():
             self.article_depth = 1
