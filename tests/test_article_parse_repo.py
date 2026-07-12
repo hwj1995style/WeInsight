@@ -56,6 +56,8 @@ def test_mysql_article_parse_repo_lists_pending_article_tasks_without_group_tabl
                 "publish_time": datetime(2026, 7, 6, 8, 0),
                 "author": None,
                 "digest": None,
+                "content_locator": "safe-id",
+                "content_locator_type": "werss_article_id",
             }
         ]
     )
@@ -64,6 +66,7 @@ def test_mysql_article_parse_repo_lists_pending_article_tasks_without_group_tabl
     articles = repo.list_pending_parse_articles(limit=5)
 
     assert articles[0].article_hash == "article-hash-1"
+    assert articles[0].content_locator == "safe-id"
     sql, params = engine.connection.executions[0]
     assert "FROM wechat_article_process_task" in sql
     assert "JOIN wechat_article_raw" in sql
@@ -87,6 +90,8 @@ def test_mysql_article_parse_repo_writes_clean_article_and_updates_article_tasks
         content_length=88,
         parse_time=datetime(2026, 7, 6, 9, 0),
         parse_version="v1",
+        content_source="werss",
+        content_hash="a" * 64,
     )
 
     repo.upsert_clean_article(article)
@@ -100,5 +105,8 @@ def test_mysql_article_parse_repo_writes_clean_article_and_updates_article_tasks
     assert "task_type = 'clean_article'" in executed_sql
     assert "wechat_group_" not in executed_sql
     assert engine.connection.executions[0][1]["content_length"] == 88
+    assert engine.connection.executions[0][1]["content_hash"] == "a" * 64
+    assert "content_source" in engine.connection.executions[0][0]
+    assert "content_fetch_status" in engine.connection.executions[0][0]
     assert engine.connection.executions[1][1]["task_type"] == "analyze_article"
     assert engine.connection.executions[1][1]["ref_id"] == "article-hash-1"

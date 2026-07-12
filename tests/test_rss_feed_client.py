@@ -51,6 +51,19 @@ def test_fetch_maps_atom():
     assert (result.items[0].title, result.items[0].author) == ("Atom item", "Bob")
 
 
+def test_item_extracts_only_stable_id_from_werss_article_view_path():
+    item = RssFeedClient._item({"title": "x", "link": "https://mp.weixin.qq.com/s/a", "article_view": "/views/article/Abc_123-x"})
+    assert item.content_locator == "Abc_123-x"
+    assert item.content_locator_type == "werss_article_id"
+
+
+@pytest.mark.parametrize("value", ["/views/article/", "/views/article/a/b", "/views/article/../secret", "/views/article/" + "a" * 201])
+def test_item_rejects_unsafe_werss_article_view_path(value):
+    item = RssFeedClient._item({"title": "x", "link": "https://mp.weixin.qq.com/s/a", "article_view": value})
+    assert item.content_locator is None
+    assert item.content_locator_type is None
+
+
 def test_fetch_accepts_recognized_feed_with_recoverable_encoding_bozo():
     result = make_client(lambda request: httpx.Response(200, content=RECOVERABLE_BOZO_RSS)).fetch("https://feed.example/rss", timeout_seconds=3, etag=None, modified=None)
     assert result.items[0].title == "今"

@@ -14,6 +14,8 @@ ITEM = FeedItem(
     updated=None,
     author="作者",
     digest="摘要",
+    content_locator="safe-id",
+    content_locator_type="werss_article_id",
 )
 NOW = datetime(2026, 7, 11, 18, 5, tzinfo=timezone.utc)
 
@@ -25,6 +27,7 @@ def test_map_item_uses_configured_account_and_shanghai_publish_time():
     assert raw.publish_time.tzinfo is None
     assert raw.article_url == "https://mp.weixin.qq.com/s/test?a=1&b=2"
     assert raw.collect_time == NOW
+    assert (raw.content_locator, raw.content_locator_type) == ("safe-id", "werss_article_id")
 
 
 @pytest.mark.parametrize("field", ["title", "link"])

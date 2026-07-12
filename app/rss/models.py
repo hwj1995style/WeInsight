@@ -11,6 +11,8 @@ class FeedItem:
     updated: str | None
     author: str | None
     digest: str | None
+    content_locator: str | None = None
+    content_locator_type: str | None = None
 
 
 @dataclass(frozen=True)

@@ -13,6 +13,8 @@ class ArticleParseSource:
     publish_time: datetime | None
     author: str | None
     digest: str | None
+    content_locator: str | None = None
+    content_locator_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -36,3 +38,6 @@ class CleanArticleRecord:
     content_length: int
     parse_time: datetime
     parse_version: str = "v1"
+    content_source: str = "web"
+    content_hash: str = ""
+    content_fetch_status: str = "success"

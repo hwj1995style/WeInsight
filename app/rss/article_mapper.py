@@ -36,6 +36,8 @@ def map_feed_item(
         author=item.author,
         digest=item.digest,
         collect_batch_id=batch_id,
+        content_locator=item.content_locator,
+        content_locator_type=item.content_locator_type,
     )
 
 

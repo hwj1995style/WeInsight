@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import re
 from collections.abc import Callable, Sequence
 from ipaddress import ip_address
 from urllib.parse import urljoin, urlsplit, urlunsplit
@@ -133,7 +134,13 @@ class RssFeedClient:
     @staticmethod
     def _item(entry) -> FeedItem:
         link = entry.get("link", "")
-        return FeedItem(entry.get("title", ""), link, entry.get("published"), entry.get("updated"), entry.get("author"), entry.get("summary") or entry.get("description"))
+        locator = None
+        for key in ("article_view", "content_locator", "werss_article_view"):
+            match = re.fullmatch(r"/views/article/([A-Za-z0-9_-]{1,200})", entry.get(key, "") or "")
+            if match:
+                locator = match.group(1)
+                break
+        return FeedItem(entry.get("title", ""), link, entry.get("published"), entry.get("updated"), entry.get("author"), entry.get("summary") or entry.get("description"), locator, "werss_article_id" if locator else None)
 
     @staticmethod
     def _origin(url: str) -> tuple[str, str, int]:
