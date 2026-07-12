@@ -29,9 +29,10 @@ from app.domain.ai_analysis import AiAnalysisServiceInput
 from app.pipelines.ai_analysis_service import AiAnalysisService, load_ai_analysis_config
 from app.pipelines.group_pipeline_service import GroupPipelineService
 from app.pipelines.group_polling_runner import GroupPollingRunner, GroupPollingTarget
-from app.pipelines.article_parse_service import ArticleParseService, PlaywrightArticleParser
+from app.pipelines.article_parse_service import ArticleParseService
 from app.pipelines.article_analysis_service import ArticleAnalysisService
-from app.pipelines.article_transient_extractor import PlaywrightArticleTransientExtractor
+from app.pipelines.article_transient_extractor import ProviderBackedArticleTransientExtractor
+from app.workers.pipeline_runtime_factory import build_article_content_provider
 from app.rpa.desktop_probe import WechatDesktopProbe, WechatHealthStatus
 from app.rpa.screenshots import DesktopScreenshotClient
 from app.rpa.wxauto_client import WxautoGroupRpaClient, WxautoNotAvailableError
@@ -1091,10 +1092,7 @@ def build_real_article_parse_service(config) -> ArticleParseService:
     engine = create_mysql_engine(config.mysql)
     return ArticleParseService(
         repo=MysqlArticleParseRepo(engine),
-        parser=PlaywrightArticleParser(
-            timeout_ms=config.pipelines.article.rpa_timeout_seconds * 1000,
-            browser_executable_path=config.pipelines.article.browser_executable_path,
-        ),
+        provider=build_article_content_provider(config.pipelines.article),
     )
 
 
@@ -1102,10 +1100,8 @@ def build_real_article_analysis_service(config) -> ArticleAnalysisService:
     engine = create_mysql_engine(config.mysql)
     return ArticleAnalysisService(
         repo=MysqlArticleAnalysisRepo(engine),
-        extractor=PlaywrightArticleTransientExtractor(
-            timeout_ms=config.pipelines.article.rpa_timeout_seconds * 1000,
-            browser_executable_path=config.pipelines.article.browser_executable_path,
-            image_quote_note_enabled=config.pipelines.article.image_quote_note_enabled,
+        extractor=ProviderBackedArticleTransientExtractor(
+            build_article_content_provider(config.pipelines.article)
         ),
         price_items_preview_limit=config.pipelines.article.price_items_json_preview_limit,
         egg_price_extraction_enabled=config.pipelines.article.egg_price_extraction_enabled,

@@ -6,14 +6,17 @@ from datetime import datetime
 from sqlalchemy.engine import Engine
 
 from app.core.config import Config
+from app.content.article_content import ShadowArticleContentProvider
+from app.content.fallback_provider import FallbackArticleContentProvider
+from app.content.werss_provider import WeRSSContentProvider
 from app.pipelines.article_analysis_service import ArticleAnalysisService
 from app.pipelines.article_daily_report_service import ArticleDailyReportService
 from app.pipelines.article_parse_service import (
     ArticleParseService,
-    PlaywrightArticleParser,
+    PlaywrightArticleContentProvider,
 )
 from app.pipelines.article_transient_extractor import (
-    PlaywrightArticleTransientExtractor,
+    ProviderBackedArticleTransientExtractor,
 )
 from app.pipelines.group_analysis_service import (
     GroupAnalysisService,
@@ -71,23 +74,12 @@ def build_pipeline_worker(
     group_analysis_service = GroupAnalysisService(repo=group_analysis_repo)
     article_parse_service = ArticleParseService(
         repo=article_parse_repo,
-        parser=PlaywrightArticleParser(
-            timeout_ms=config.pipelines.article.rpa_timeout_seconds * 1000,
-            browser_executable_path=(
-                config.pipelines.article.browser_executable_path
-            ),
-        ),
+        provider=build_article_content_provider(config.pipelines.article),
     )
     article_analysis_service = ArticleAnalysisService(
         repo=article_analysis_repo,
-        extractor=PlaywrightArticleTransientExtractor(
-            timeout_ms=config.pipelines.article.rpa_timeout_seconds * 1000,
-            browser_executable_path=(
-                config.pipelines.article.browser_executable_path
-            ),
-            image_quote_note_enabled=(
-                config.pipelines.article.image_quote_note_enabled
-            ),
+        extractor=ProviderBackedArticleTransientExtractor(
+            build_article_content_provider(config.pipelines.article)
         ),
         price_items_preview_limit=(
             config.pipelines.article.price_items_json_preview_limit
@@ -138,3 +130,20 @@ def _shanghai_now() -> datetime:
     from zoneinfo import ZoneInfo
 
     return datetime.now(ZoneInfo("Asia/Shanghai"))
+
+
+def build_article_content_provider(article_config):
+    web = PlaywrightArticleContentProvider(
+        timeout_ms=article_config.content_timeout_seconds * 1000,
+        browser_executable_path=article_config.browser_executable_path,
+    )
+    if article_config.content_mode == "web":
+        return web
+    werss = WeRSSContentProvider(
+        endpoint=article_config.content_base_url,
+        timeout_seconds=article_config.content_timeout_seconds,
+        max_response_bytes=article_config.content_max_response_bytes,
+    )
+    if article_config.content_mode == "shadow":
+        return ShadowArticleContentProvider(web, werss)
+    return FallbackArticleContentProvider(werss, web)

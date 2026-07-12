@@ -68,6 +68,10 @@ pipelines:
     rss_max_response_bytes: 5242880
     rss_allowed_private_hosts:
       - 127.0.0.1:8001
+    content_base_url: http://127.0.0.1:8001
+    content_timeout_seconds: 30
+    content_max_response_bytes: 5242880
+    content_mode: web
   ui_resource:
     mode: exclusive
     group_priority: true

@@ -1,0 +1,23 @@
+from datetime import datetime
+
+from app.content.article_content import ArticleContent, ShadowArticleContentProvider
+from app.domain.article_parsing import ArticleParseSource
+
+
+class Provider:
+    def __init__(self, body, source):
+        self.body, self.source, self.calls = body, source, 0
+
+    def parse(self, request):
+        self.calls += 1
+        return ArticleContent(self.body, "title", None, None, None, self.source)
+
+
+def test_shadow_returns_web_and_records_only_safe_difference_counts():
+    web, werss, metrics = Provider("web body", "web"), Provider("secret body", "werss"), {}
+    source = ArticleParseSource("h", "a", "t", "https://mp.weixin.qq.com/s/x", datetime(2026, 1, 1), None, None, "x", "werss_article_view")
+    result = ShadowArticleContentProvider(web, werss, metrics).parse(source)
+    assert result.body_text == "web body" and result.source == "web"
+    assert web.calls == werss.calls == 1
+    assert metrics == {"shadow_length_difference_count": 1, "shadow_hash_difference_count": 1}
+    assert "web body" not in repr(metrics) and "secret body" not in repr(metrics)

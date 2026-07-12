@@ -31,6 +31,10 @@ def test_pipeline_capacity_defaults_match_design() -> None:
     assert config.pipelines.article.rss_max_concurrency == 4
     assert config.pipelines.article.rss_max_response_bytes == 5_242_880
     assert config.pipelines.article.rss_allowed_private_hosts == ("127.0.0.1:8001",)
+    assert config.pipelines.article.content_base_url == "http://127.0.0.1:8001"
+    assert config.pipelines.article.content_timeout_seconds == 30
+    assert config.pipelines.article.content_max_response_bytes == 5_242_880
+    assert config.pipelines.article.content_mode == "shadow"
     assert config.pipelines.article.collect_today_only is True
     assert config.pipelines.article.dedup_enabled is True
     assert config.pipelines.article.dedup_key == "article_hash"
@@ -40,6 +44,16 @@ def test_pipeline_capacity_defaults_match_design() -> None:
     assert config.pipelines.article.browser_executable_path == "auto"
     assert config.pipelines.ui_resource.max_core_group_block_seconds == 10
     assert config.pipelines.ui_resource.lock_lease_seconds == 120
+
+
+@pytest.mark.parametrize("field,value", [("content_mode", "bad"), ("content_base_url", "http://localhost:8001"), ("content_timeout_seconds", 4), ("content_timeout_seconds", 121), ("content_max_response_bytes", 0)])
+def test_article_content_config_rejects_unsafe_values(tmp_path, field, value):
+    raw = yaml.safe_load(Path("config/config.dev.yaml").read_text(encoding="utf-8"))
+    raw["pipelines"]["article"][field] = value
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw, allow_unicode=True), encoding="utf-8")
+    with pytest.raises(ValueError, match="content_"):
+        load_config(path)
 
 
 @pytest.mark.parametrize("field", ["rss_max_concurrency", "rss_max_response_bytes"])

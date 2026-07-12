@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from ipaddress import ip_address, ip_network
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 from unicodedata import category
 
 import yaml
@@ -77,8 +78,25 @@ class ArticlePipelineConfig:
     rss_max_concurrency: int = 4
     rss_max_response_bytes: int = 5_242_880
     rss_allowed_private_hosts: tuple[str, ...] = ("127.0.0.1:8001",)
+    content_base_url: str = "http://127.0.0.1:8001"
+    content_timeout_seconds: int = 30
+    content_max_response_bytes: int = 5_242_880
+    content_mode: str = "web"
 
     def __post_init__(self) -> None:
+        if self.content_mode not in {"web", "shadow", "werss_first"}:
+            raise ValueError("content_mode must be web, shadow or werss_first")
+        parsed = urlsplit(self.content_base_url)
+        endpoint = (
+            parsed.scheme, parsed.hostname, parsed.port, parsed.path,
+            parsed.query, parsed.fragment, parsed.username, parsed.password,
+        )
+        if endpoint != ("http", "127.0.0.1", 8001, "", "", "", None, None):
+            raise ValueError("content_base_url must be http://127.0.0.1:8001")
+        if isinstance(self.content_timeout_seconds, bool) or not isinstance(self.content_timeout_seconds, int) or not 5 <= self.content_timeout_seconds <= 120:
+            raise ValueError("content_timeout_seconds must be an integer from 5 to 120")
+        if isinstance(self.content_max_response_bytes, bool) or not isinstance(self.content_max_response_bytes, int) or self.content_max_response_bytes < 1:
+            raise ValueError("content_max_response_bytes must be a positive integer")
         for field in ("rss_max_concurrency", "rss_max_response_bytes"):
             value = getattr(self, field)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -244,6 +262,10 @@ def load_config(path: Path) -> Config:
         "rss_max_concurrency": 4,
         "rss_max_response_bytes": 5_242_880,
         "rss_allowed_private_hosts": ["127.0.0.1:8001"],
+        "content_base_url": "http://127.0.0.1:8001",
+        "content_timeout_seconds": 30,
+        "content_max_response_bytes": 5_242_880,
+        "content_mode": "web",
         "egg_price_extraction_enabled": True,
         "price_items_json_preview_limit": 20,
         "image_quote_note_enabled": True,

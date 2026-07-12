@@ -35,10 +35,11 @@ class _VisibleTextParser(HTMLParser):
 
 
 class WeRSSContentProvider:
-    def __init__(self, endpoint: str = "http://127.0.0.1:8001", transport: httpx.BaseTransport | None = None, timeout_seconds: float = 10) -> None:
+    def __init__(self, endpoint: str = "http://127.0.0.1:8001", transport: httpx.BaseTransport | None = None, timeout_seconds: float = 10, max_response_bytes: int = _MAX_BYTES) -> None:
         self._endpoint = endpoint.rstrip("/")
         self._transport = transport
         self._timeout = timeout_seconds
+        self._max_response_bytes = max_response_bytes
 
     def parse(self, source: ArticleParseSource) -> ArticleContent:
         locator = source.content_locator
@@ -76,7 +77,7 @@ class WeRSSContentProvider:
                         chunks, size = [], 0
                         for chunk in response.iter_bytes():
                             size += len(chunk)
-                            if size > _MAX_BYTES:
+                            if size > self._max_response_bytes:
                                 raise ContentFetchError("werss_too_large", False)
                             chunks.append(chunk)
                         return b"".join(chunks)
