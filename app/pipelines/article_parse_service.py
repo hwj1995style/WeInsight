@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import os
 import re
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Protocol
 
+from app.content.article_content import ArticleContent, ArticleContentProvider, ContentFetchError
 from app.domain.article_parsing import ArticleParseSource, CleanArticleRecord, ParsedArticleContent
 
 
@@ -41,8 +43,11 @@ class ArticleBrowserParser(Protocol):
 
 
 class ArticleParseService:
-    def __init__(self, *, repo: ArticleParseRepo, parser: ArticleBrowserParser) -> None:
+    def __init__(self, *, repo: ArticleParseRepo, provider: ArticleContentProvider | None = None, parser: ArticleBrowserParser | None = None) -> None:
         self.repo = repo
+        if provider is None and parser is None:
+            raise TypeError("provider is required")
+        self.provider = provider
         self.parser = parser
 
     def parse_once(self, limit: int, parse_time: datetime) -> ArticleParseResult:
@@ -52,24 +57,46 @@ class ArticleParseService:
 
         for source in sources:
             try:
-                parsed = self.parser.parse(source.article_url)
+                if self.provider is not None:
+                    content = self.provider.parse(source)
+                    body_text = _normalize_text(content.body_text)
+                    content_length = len(body_text)
+                    content_hash = hashlib.sha256(body_text.encode("utf-8")).hexdigest()
+                    title = content.title
+                    publish_time = content.publish_time
+                    author = content.author
+                    digest = content.digest
+                    content_source = content.source
+                else:
+                    parsed = self.parser.parse(source.article_url)  # type: ignore[union-attr]
+                    content_length = parsed.content_length
+                    content_hash = ""
+                    title, publish_time = parsed.title, parsed.publish_time
+                    author, digest = parsed.author, parsed.digest
+                    content_source = "web"
                 clean = CleanArticleRecord(
                     article_hash=source.article_hash,
                     account_name=source.account_name,
-                    title=parsed.title or source.title,
+                    title=title or source.title,
                     article_url=source.article_url,
-                    publish_time=parsed.publish_time or source.publish_time,
-                    author=parsed.author or source.author,
-                    digest=parsed.digest or source.digest,
-                    content_length=parsed.content_length,
+                    publish_time=publish_time or source.publish_time,
+                    author=author or source.author,
+                    digest=digest or source.digest,
+                    content_length=content_length,
                     parse_time=parse_time,
+                    content_source=content_source,
+                    content_hash=content_hash,
                 )
                 self.repo.upsert_clean_article(clean)
                 self.repo.create_analyze_task(source.article_hash)
                 self.repo.mark_clean_task_success(source.article_hash)
                 success_count += 1
             except Exception as exc:
-                self.repo.mark_clean_task_failed(source.article_hash, str(exc))
+                error_msg = exc.code if isinstance(exc, ContentFetchError) else type(exc).__name__
+                # Preserve the legacy parser contract without allowing provider payloads into errors.
+                if self.provider is None:
+                    error_msg = str(exc)
+                self.repo.mark_clean_task_failed(source.article_hash, error_msg)
                 failed_count += 1
 
         return ArticleParseResult(
@@ -107,6 +134,32 @@ class PlaywrightArticleParser:
             finally:
                 browser.close()
         return extract_article_metadata_from_html(html)
+
+
+class PlaywrightArticleContentProvider(PlaywrightArticleParser):
+    def parse(self, source: ArticleParseSource) -> ArticleContent:
+        html = self._fetch_html(source.article_url)
+        parsed = extract_article_metadata_from_html(html)
+        body_text = extract_body_text_from_html(html)
+        if not body_text:
+            raise ContentFetchError("web_content_empty", False)
+        return ArticleContent(body_text, parsed.title, parsed.publish_time, parsed.author, parsed.digest, "web")
+
+    def _fetch_html(self, article_url: str) -> str:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as playwright:
+            launch_options = {"headless": self.headless}
+            executable_path = resolve_playwright_browser_executable_path(self.browser_executable_path)
+            if executable_path is not None:
+                launch_options["executable_path"] = executable_path
+            browser = playwright.chromium.launch(**launch_options)
+            try:
+                page = browser.new_page()
+                page.goto(article_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
+                return page.content()
+            finally:
+                browser.close()
 
 
 def resolve_playwright_browser_executable_path(configured_path: str | None) -> str | None:
@@ -204,6 +257,12 @@ def extract_article_metadata_from_html(html: str) -> ParsedArticleContent:
         ),
         content_length=len(_normalize_text(" ".join(parser.body_text_parts))),
     )
+
+
+def extract_body_text_from_html(html: str) -> str:
+    parser = _ArticleHtmlMetadataParser()
+    parser.feed(html)
+    return _normalize_text(" ".join(parser.body_text_parts))
 
 
 class _ArticleHtmlMetadataParser(HTMLParser):

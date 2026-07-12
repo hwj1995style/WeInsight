@@ -6,6 +6,7 @@ from pathlib import Path
 from datetime import datetime
 from types import SimpleNamespace
 
+from app.content.article_content import ArticleContent, ContentFetchError
 from app.domain.article_parsing import ArticleParseSource, ParsedArticleContent
 from app.pipelines.article_parse_service import (
     ArticleParseService,
@@ -116,6 +117,39 @@ def test_article_parse_service_marks_only_article_task_failed_on_parse_error() -
     assert repo.analyze_tasks == []
     assert repo.successes == []
     assert repo.failures == [("article-hash-2", "parse failed")]
+
+
+def test_provider_content_is_hashed_but_never_persisted() -> None:
+    source = ArticleParseSource("h", "account", "raw", "https://example.test/a", None, None, None)
+    repo = FakeArticleParseRepo([source])
+
+    class Provider:
+        def parse(self, value):
+            assert value is source
+            return ArticleContent("  第一段\n 第二段  ", "title", None, None, None, "werss")
+
+    service = ArticleParseService(repo=repo, provider=Provider())
+    service.parse_once(1, datetime(2026, 7, 6, 9))
+
+    clean = repo.clean_articles[0]
+    assert clean.content_length == len("第一段 第二段")
+    assert clean.content_hash == "568cbfa03f03d65971ee141436c39f855c455918730824343eeb506af9dbb7de"
+    assert clean.content_source == "werss"
+    assert "正文" not in repr(clean)
+    assert not hasattr(clean, "body_text")
+
+
+def test_provider_failure_records_only_safe_code() -> None:
+    source = ArticleParseSource("h", "account", "raw", "https://example.test/secret", None, None, None)
+    repo = FakeArticleParseRepo([source])
+
+    class Provider:
+        def parse(self, value):
+            raise ContentFetchError("werss_http_error", True)
+
+    ArticleParseService(repo=repo, provider=Provider()).parse_once(1, datetime(2026, 7, 6, 9))
+
+    assert repo.failures == [("h", "werss_http_error")]
 
 
 def test_extract_article_metadata_from_html_keeps_only_metadata_and_body_length() -> None:
