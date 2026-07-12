@@ -25,3 +25,10 @@ Completed.
 ## Concerns
 
 - Shadow counters are process-local mappings; durable metrics export is outside this task's scope.
+
+## Review Fix
+
+- RED: focused tests failed collection because `ProcessShadowMetrics` and its reader did not exist.
+- Added one thread-safe process-level metrics object shared by independently constructed parse and analysis shadow providers.
+- Shadow comparison now isolates every ordinary secondary exception and records only aggregate failure/error-type counters; process-control `BaseException` values still propagate.
+- Added coverage for readable aggregate metrics, unexpected-exception isolation, WeRSS-first recoverable-only fallback order, and actual pipeline worker parse/analysis assembly.

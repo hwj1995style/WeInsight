@@ -6,7 +6,7 @@ from datetime import datetime
 from sqlalchemy.engine import Engine
 
 from app.core.config import Config
-from app.content.article_content import ShadowArticleContentProvider
+from app.content.article_content import ProcessShadowMetrics, ShadowArticleContentProvider
 from app.content.fallback_provider import FallbackArticleContentProvider
 from app.content.werss_provider import WeRSSContentProvider
 from app.pipelines.article_analysis_service import ArticleAnalysisService
@@ -44,6 +44,9 @@ from app.workers.pipeline_worker import (
     PipelineWorker,
     default_pipeline_worker_identity,
 )
+
+
+_ARTICLE_CONTENT_SHADOW_METRICS = ProcessShadowMetrics()
 
 
 def build_pipeline_worker(
@@ -145,5 +148,11 @@ def build_article_content_provider(article_config):
         max_response_bytes=article_config.content_max_response_bytes,
     )
     if article_config.content_mode == "shadow":
-        return ShadowArticleContentProvider(web, werss)
+        return ShadowArticleContentProvider(
+            web, werss, _ARTICLE_CONTENT_SHADOW_METRICS
+        )
     return FallbackArticleContentProvider(werss, web)
+
+
+def get_article_content_shadow_metrics() -> dict[str, int]:
+    return _ARTICLE_CONTENT_SHADOW_METRICS.snapshot()
