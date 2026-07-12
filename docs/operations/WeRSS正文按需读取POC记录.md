@@ -25,7 +25,7 @@
 
 | 项目 | 记录 |
 | --- | --- |
-| 代码提交 | 待填写 |
+| 代码提交 | `8ff2627`、`3ca70a6`（白名单/locator）；`a8f59bf`（WeRSS-first/真实路由）；本次故障闭环记录提交 |
 | 固定镜像摘要 | `sha256:53912fcb3d523d1e640adcb7066cc18123f00e9510882a7982d0991f3113845f` |
 | 正文接口契约验证 | 2026-07-12：湖南 Feed/正文/article 路由可用，25/25 locator |
 | shadow 开始时间 | 2026-07-12 12:32 +08:00（对账发现差异，未进入观察窗口） |
@@ -45,11 +45,11 @@
 
 | 检查 | 结果 |
 | --- | --- |
-| 停止 WeRSS 后网页回退 | 待验证 |
-| 恢复后容器状态 healthy | 待验证 |
-| 下一任务来源回到 WeRSS | 待验证 |
-| article UI lock 计数为 0 | 待验证 |
-| 数据库与日志无正文 | 待验证 |
+| 停止 WeRSS 后网页回退 | 真实湖南任务 clean/analyze 均 success，`content_source=web` |
+| 恢复后容器状态 healthy | 已恢复并轮询到 `healthy` |
+| 下一任务来源回到 WeRSS | 另一条湖南任务 clean/analyze 均 success，`content_source=werss` |
+| article UI lock 计数为 0 | 停机、恢复后均为 0 |
+| 数据库与日志无正文 | WeInsight 数据库/应用输出保持无正文；官方 Docker 日志按已接受风险仅本机 2 × 2 MB |
 
 ## 观察计数
 
