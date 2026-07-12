@@ -27,7 +27,6 @@ def test_runbook_documents_werss_content_rollout_and_rollback() -> None:
 def test_poc_record_freezes_scope_and_has_auditable_observation_fields() -> None:
     content = POC.read_text(encoding="utf-8")
     for required in (
-        "进行中",
         "湖南三尖农牧公司",
         "MP_WXS_3545051769",
         "目标总数：9",
@@ -47,3 +46,9 @@ def test_poc_record_freezes_scope_and_has_auditable_observation_fields() -> None
 def test_poc_record_does_not_claim_unfinished_24_hour_observation_passed() -> None:
     content = POC.read_text(encoding="utf-8")
     assert "24 小时观察：通过" not in content
+
+
+def test_poc_record_marks_observation_as_not_started_while_blocked() -> None:
+    content = POC.read_text(encoding="utf-8")
+    assert "24 小时观察状态：未启动（阻断中）" in content
+    assert "24 小时观察状态：进行中" not in content
