@@ -70,3 +70,16 @@ def test_poc_record_separates_collection_scope_from_downstream_scope() -> None:
         "分析",
     ):
         assert required in content
+
+
+def test_werss_rollout_docs_use_confirmed_jiangxi_account_name() -> None:
+    paths = (
+        Path("docs/superpowers/specs/2026-07-12-WeRSS正文按需读取设计.md"),
+        Path("docs/superpowers/plans/2026-07-12-WeRSS正文按需读取实施计划.md"),
+        RUNBOOK,
+        POC,
+    )
+    for path in paths:
+        content = path.read_text(encoding="utf-8")
+        assert "江西九江褐壳蛋" in content
+        assert "江西九江祺壳蛋" not in content
