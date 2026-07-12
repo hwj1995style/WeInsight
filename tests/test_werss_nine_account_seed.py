@@ -12,4 +12,5 @@ def test_nine_account_seed_is_explicit_and_only_hunan_enters_downstream():
     assert "江西九江祺壳蛋" not in sql
     assert len(re.findall(r"'rss',\s*1,\s*1,", sql)) == 1
     assert len(re.findall(r"'rss',\s*1,\s*0,", sql)) == 8
+    assert sql.count(".rss?limit=10") == 9
     assert "ON DUPLICATE KEY UPDATE" in sql

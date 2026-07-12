@@ -36,7 +36,7 @@ def test_public_account_rpa_types_are_removed_but_group_rpa_remains() -> None:
     assert "WxautoGroupRpaClient" in wxauto_client
 
 
-def test_drop_migration_aborts_on_missing_feed_url_before_not_null() -> None:
+def test_drop_migration_aborts_when_enabled_source_has_no_real_feed_url() -> None:
     migration = Path("sql/migrations/20260711_003_drop_article_rpa_state.sql")
     sql = migration.read_text(encoding="utf-8")
     normalized = sql.upper()
@@ -48,6 +48,7 @@ def test_drop_migration_aborts_on_missing_feed_url_before_not_null() -> None:
     assert "SIGNAL SQLSTATE '45000'" in normalized
     assert "BACKFILL REAL FEED_URL" in normalized
     assert normalized.index("SIGNAL SQLSTATE") < normalized.index("MODIFY COLUMN FEED_URL")
-    assert "FEED_URL VARCHAR(2048) NOT NULL" in normalized
+    assert "ENABLED = 1" in normalized
+    assert "FEED_URL VARCHAR(2048) NULL" in normalized
     assert "WECHAT_ARTICLE_ACCOUNT_CONFIG" not in normalized
     assert normalized.count("WECHAT_PUBLIC_ACCOUNT_CONFIG") >= 2

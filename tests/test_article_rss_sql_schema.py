@@ -40,6 +40,20 @@ def test_drop_rpa_migration_helper_can_recover_after_failed_call() -> None:
     assert migration.index(f"CALL {helper}()") < migration.rindex(f"DROP PROCEDURE {helper}")
 
 
+def test_drop_rpa_migration_uses_compatible_feed_url_gate_procedure() -> None:
+    migration = Path("sql/migrations/20260711_003_drop_article_rpa_state.sql").read_text("utf-8")
+    helper = "migrate_20260711_003_feed_url_gate"
+
+    assert "PREPARE feed_url_gate" not in migration
+    assert f"DROP PROCEDURE IF EXISTS {helper}" in migration
+    assert f"CREATE PROCEDURE {helper}" in migration
+    assert "SIGNAL SQLSTATE '45000'" in migration
+    assert "enabled = 1" in migration
+    assert "MODIFY COLUMN feed_url VARCHAR(2048) NULL" in migration
+    assert f"CALL {helper}()" in migration
+    assert f"DROP PROCEDURE {helper}" in migration
+
+
 def test_article_rss_init_schema_matches_migration() -> None:
     sql = Path("sql/init.sql").read_text("utf-8")
     for fragment in ("feed_url TEXT NULL", "source_type VARCHAR(20) NOT NULL DEFAULT 'rss'", "request_timeout_seconds INT NOT NULL DEFAULT 30", "UNIQUE KEY uk_public_account_feed_url"):
