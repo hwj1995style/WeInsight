@@ -59,7 +59,7 @@ class WeRSSContentProvider:
             raise ContentFetchError("werss_locator_missing", True)
         if not _LOCATOR.fullmatch(locator) or not self._allowed(self._endpoint):
             raise ContentFetchError("werss_endpoint_blocked", False)
-        url = f"{self._endpoint}/views/article/{quote(locator, safe='')}"
+        url = f"{self._endpoint}/article/{quote(locator, safe='')}"
         body = self._fetch(url)
         parser = _VisibleTextParser()
         parser.feed(body.decode("utf-8", errors="replace"))

@@ -1,4 +1,5 @@
 from pathlib import Path
+from dataclasses import replace
 
 from sqlalchemy import create_engine
 
@@ -62,8 +63,16 @@ def test_werss_first_falls_back_only_for_recoverable_content_error():
 
 
 def test_pipeline_worker_wires_distinct_parse_and_analysis_providers_with_shared_metrics():
+    config = load_config(Path("config/config.dev.yaml"))
+    config = replace(
+        config,
+        pipelines=replace(
+            config.pipelines,
+            article=replace(config.pipelines.article, content_mode="shadow"),
+        ),
+    )
     worker = build_pipeline_worker(
-        load_config(Path("config/config.dev.yaml")), engine=create_engine("sqlite://"),
+        config, engine=create_engine("sqlite://"),
         worker_id="w", hostname="h", process_id=1,
     )
     parse_provider = worker.article_parse_service.provider

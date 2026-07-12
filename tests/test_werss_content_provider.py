@@ -46,7 +46,7 @@ def test_requests_verified_werss_views_article_contract():
         seen["path"] = request.url.path
         return httpx.Response(200, headers={"content-type": "text/html"}, content=b"safe")
     provider(handler).parse(source("MP_WXS_3545051769_abc-123"))
-    assert seen["path"] == "/views/article/MP_WXS_3545051769_abc-123"
+    assert seen["path"] == "/article/MP_WXS_3545051769_abc-123"
 
 
 @pytest.mark.parametrize("response,code", [

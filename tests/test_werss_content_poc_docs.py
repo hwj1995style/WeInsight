@@ -48,10 +48,11 @@ def test_poc_record_does_not_claim_unfinished_24_hour_observation_passed() -> No
     assert "24 小时观察：通过" not in content
 
 
-def test_poc_record_marks_observation_as_not_started_while_blocked() -> None:
+def test_poc_record_marks_observation_as_in_progress_with_explicit_window() -> None:
     content = POC.read_text(encoding="utf-8")
-    assert "24 小时观察状态：未启动（阻断中）" in content
-    assert "24 小时观察状态：进行中" not in content
+    assert "24 小时观察状态：进行中" in content
+    assert "2026-07-12 13:08:14 +08:00" in content
+    assert "2026-07-13 13:08:14 +08:00" in content
 
 
 def test_poc_record_separates_collection_scope_from_downstream_scope() -> None:
@@ -72,15 +73,12 @@ def test_poc_record_separates_collection_scope_from_downstream_scope() -> None:
         assert required in content
 
 
-def test_poc_record_blocks_werss_first_when_real_shadow_differs() -> None:
+def test_poc_record_records_first_werss_success_without_claiming_pass() -> None:
     content = POC.read_text(encoding="utf-8")
-    assert "WeRSS 正文 1278 字符" in content
-    assert "65 字符受限降级响应" in content
-    assert "| 1278 | 65 | 否 |" in content
-    assert "受限降级响应" in content
-    assert "不伪造等值" in content
-    assert "保持 `content_mode: shadow`" in content
-    assert "24 小时窗口未启动" in content
+    assert "content_mode: werss_first" in content
+    assert "clean/analyze 均 success" in content
+    assert "content_source=werss" in content
+    assert "观察期尚未结束" in content
 
 
 def test_werss_rollout_docs_use_confirmed_jiangxi_account_name() -> None:

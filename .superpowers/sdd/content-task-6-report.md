@@ -80,3 +80,12 @@
 - shadow 闭环：湖南 clean 25/25 success、analyze 25/25 success、analysis 25 行、最终任务积压 0、article UI lock 0。组合命令超时后先查数据库确认 analyze 18 success/7 pending，再只补跑一次，最终完成，未重复启动批次。
 - 显式真实样本双路径对账只输出安全计数：`shadow_length_difference_count=1`、`shadow_hash_difference_count=1`。差异尚未解释，故没有切换 `werss_first`，没有填写 24 小时开始/截止，POC 状态保持“未启动（阻断中）”，不得宣称通过。
 - 托管采集 worker 已恢复为单实例常驻；进程存在，数据库最近 1 分钟 heartbeat 为 collector/running。pipeline worker 未因未满足切换门槛而启动。
+
+## Task 6 POC 正式启动
+
+- Fresh 全量门禁：1702 passed、2 skipped；启动前 `git diff --check` 通过。
+- dev 配置已从 `shadow` 切换为 `werss_first`。真实契约调试发现 provider 仍请求旧 `/views/article/{locator}` 并得到结构化 `werss_not_found`；以失败契约测试复现后，最小修复为官方实际 `/article/{locator}`。相关测试 80 passed。
+- collector 与 pipeline worker 均以隐藏窗口、正确环境变量单实例常驻；WeRSS 为 `healthy`。
+- 受控重处理一条湖南记录后，clean/analyze 均 success、`content_source=werss`、analysis 记录存在；9 个采集账号 pending/processing 均为 0，其余 8 个没有下游消费，article UI lock 为 0。
+- 24 小时观察开始：2026-07-12 13:08:14 +08:00；截止：2026-07-13 13:08:14 +08:00。当前状态仅为“进行中”，观察期尚未结束，不宣称通过。
+- 官方固定镜像日志风险继续按用户接受边界控制：日志只在本机 Docker Desktop，轮转 2 × 2 MB，不接外部日志、不进工单或备份。

@@ -34,7 +34,7 @@ def test_pipeline_capacity_defaults_match_design() -> None:
     assert config.pipelines.article.content_base_url == "http://127.0.0.1:8001"
     assert config.pipelines.article.content_timeout_seconds == 30
     assert config.pipelines.article.content_max_response_bytes == 5_242_880
-    assert config.pipelines.article.content_mode == "shadow"
+    assert config.pipelines.article.content_mode == "werss_first"
     assert config.pipelines.article.collect_today_only is True
     assert config.pipelines.article.dedup_enabled is True
     assert config.pipelines.article.dedup_key == "article_hash"
