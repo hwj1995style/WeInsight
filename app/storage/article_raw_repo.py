@@ -79,8 +79,6 @@ class MysqlArticleRawRepo:
                     {
                         "account_name": article.account_name,
                         "publish_date": crawl_date,
-                        "content_locator": article.content_locator,
-                        "content_locator_type": article.content_locator_type,
                         "article_url": article.article_url,
                     },
                 ).first()
@@ -97,6 +95,8 @@ class MysqlArticleRawRepo:
                         "article_url": article.article_url,
                         "publish_time": article.publish_time,
                         "publish_date": crawl_date,
+                        "content_locator": article.content_locator,
+                        "content_locator_type": article.content_locator_type,
                         "author": article.author,
                         "digest": article.digest,
                         "collect_batch_id": article.collect_batch_id,
@@ -213,7 +213,9 @@ _INSERT_ARTICLE_RAW_SQL = text(
         author,
         digest,
         collect_batch_id,
-        collect_time, content_locator, content_locator_type
+        collect_time,
+        content_locator,
+        content_locator_type
     ) VALUES (
         :article_hash,
         :account_name,
@@ -224,7 +226,9 @@ _INSERT_ARTICLE_RAW_SQL = text(
         :author,
         :digest,
         :collect_batch_id,
-        :collect_time, :content_locator, :content_locator_type
+        :collect_time,
+        :content_locator,
+        :content_locator_type
     )
     """
 )

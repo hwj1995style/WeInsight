@@ -20,7 +20,9 @@ class MysqlArticleParseRepo:
                 raw.article_url,
                 raw.publish_time,
                 raw.author,
-                raw.digest, raw.content_locator, raw.content_locator_type
+                raw.digest,
+                raw.content_locator,
+                raw.content_locator_type
             FROM wechat_article_process_task task
             JOIN wechat_article_raw raw
               ON raw.article_hash = task.ref_id
@@ -43,7 +45,9 @@ class MysqlArticleParseRepo:
                 article_url=str(row["article_url"]),
                 publish_time=row["publish_time"],
                 author=row["author"],
-                digest=row["digest"], content_locator=row["content_locator"], content_locator_type=row["content_locator_type"],
+                digest=row["digest"],
+                content_locator=row["content_locator"],
+                content_locator_type=row["content_locator_type"],
             )
             for row in rows
         ]
@@ -61,7 +65,10 @@ class MysqlArticleParseRepo:
                 digest,
                 content_length,
                 parse_time,
-                parse_version, content_source, content_hash, content_fetch_status
+                parse_version,
+                content_source,
+                content_hash,
+                content_fetch_status
             ) VALUES (
                 :article_hash,
                 :account_name,
@@ -72,7 +79,10 @@ class MysqlArticleParseRepo:
                 :digest,
                 :content_length,
                 :parse_time,
-                :parse_version, :content_source, :content_hash, :content_fetch_status
+                :parse_version,
+                :content_source,
+                :content_hash,
+                :content_fetch_status
             )
             ON DUPLICATE KEY UPDATE
                 account_name = VALUES(account_name),
@@ -83,7 +93,10 @@ class MysqlArticleParseRepo:
                 digest = VALUES(digest),
                 content_length = VALUES(content_length),
                 parse_time = VALUES(parse_time),
-                parse_version = VALUES(parse_version), content_source = VALUES(content_source), content_hash = VALUES(content_hash), content_fetch_status = VALUES(content_fetch_status)
+                parse_version = VALUES(parse_version),
+                content_source = VALUES(content_source),
+                content_hash = VALUES(content_hash),
+                content_fetch_status = VALUES(content_fetch_status)
             """
         )
         with self.engine.begin() as connection:

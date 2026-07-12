@@ -75,6 +75,8 @@ def test_mysql_article_raw_repo_inserts_today_articles_and_creates_clean_task() 
         digest="摘要",
         collect_batch_id="batch-1",
         collect_time=collect_time,
+        content_locator="safe-id",
+        content_locator_type="werss_article_id",
     )
     yesterday = RawArticleRecord(
         article_hash=article_hash(
@@ -127,6 +129,8 @@ def test_mysql_article_raw_repo_inserts_today_articles_and_creates_clean_task() 
     assert raw_params["article_hash"] == today.article_hash
     assert raw_params["publish_date"] == crawl_date
     assert raw_params["collect_batch_id"] == "batch-1"
+    assert raw_params["content_locator"] == "safe-id"
+    assert raw_params["content_locator_type"] == "werss_article_id"
 
     assert "INSERT IGNORE INTO wechat_article_process_task" in task_sql
     assert "wechat_group_" not in task_sql
