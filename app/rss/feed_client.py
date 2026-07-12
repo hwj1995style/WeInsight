@@ -135,7 +135,10 @@ class RssFeedClient:
     def _item(entry) -> FeedItem:
         link = entry.get("link", "")
         locator = None
-        for key in ("article_view", "content_locator", "werss_article_view"):
+        # WeRSS' standard RSS shape exposes the internal article view as guid.
+        # Accept only the exact relative route; never derive it from article links,
+        # absolute URLs, fragments, or query parameters.
+        for key in ("article_view", "content_locator", "werss_article_view", "guid", "id"):
             match = re.fullmatch(r"/views/article/([A-Za-z0-9_-]{1,200})", entry.get(key, "") or "")
             if match:
                 locator = match.group(1)

@@ -145,6 +145,7 @@ CREATE TABLE IF NOT EXISTS wechat_public_account_config (
     feed_url_hash BINARY(32) GENERATED ALWAYS AS (UNHEX(SHA2(feed_url, 256))) STORED COMMENT 'Feed URL 完整 SHA-256',
     source_type VARCHAR(20) NOT NULL DEFAULT 'rss' COMMENT '文章来源类型，首期固定 rss',
     enabled TINYINT DEFAULT 1 COMMENT '是否启用',
+    downstream_clean_enabled TINYINT NOT NULL DEFAULT 0 COMMENT '是否允许进入文章清洗分析下游，默认拒绝',
     priority INT DEFAULT 5 COMMENT '优先级，数字越小优先级越高',
     poll_interval_minutes INT DEFAULT 60 COMMENT '账号级轮询间隔，默认每小时一次',
     request_timeout_seconds INT NOT NULL DEFAULT 30 COMMENT 'Feed 单次请求超时秒数',

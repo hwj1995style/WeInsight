@@ -84,6 +84,7 @@ class MysqlArticleRawRepo:
                 ).first()
                 if duplicate_url is not None:
                     duplicate_count += 1
+                    task_created_count += self._create_clean_task_if_allowed(connection, article)
                     continue
 
                 raw_result = connection.execute(
@@ -109,16 +110,7 @@ class MysqlArticleRawRepo:
                     continue
 
                 inserted_count += 1
-                task_result = connection.execute(
-                    _INSERT_CLEAN_ARTICLE_TASK_SQL,
-                    {
-                        "task_type": "clean_article",
-                        "ref_type": "article",
-                        "ref_id": article.article_hash,
-                    },
-                )
-                if task_result.rowcount > 0:
-                    task_created_count += task_result.rowcount
+                task_created_count += self._create_clean_task_if_allowed(connection, article)
 
         return ArticleRawInsertResult(
             read_count=read_count,
@@ -147,6 +139,7 @@ class MysqlArticleRawRepo:
                 ).first()
                 if duplicate is not None:
                     duplicate_count += 1
+                    task_created_count += self._create_clean_task_if_allowed(connection, article)
                     continue
                 publish_date = article.publish_time.date() if article.publish_time else None
                 raw_result = connection.execute(
@@ -170,13 +163,22 @@ class MysqlArticleRawRepo:
                     duplicate_count += 1
                     continue
                 inserted_count += 1
-                task_result = connection.execute(
-                    _INSERT_CLEAN_ARTICLE_TASK_SQL,
-                    {"task_type": "clean_article", "ref_type": "article", "ref_id": article.article_hash},
-                )
-                if task_result.rowcount > 0:
-                    task_created_count += task_result.rowcount
+                task_created_count += self._create_clean_task_if_allowed(connection, article)
         return ArticleRawInsertResult(read_count, inserted_count, duplicate_count, 0, task_created_count)
+
+    @staticmethod
+    def _create_clean_task_if_allowed(connection, article: RawArticleRecord) -> int:
+        allowed = connection.execute(
+            _SELECT_DOWNSTREAM_CLEAN_ENABLED_SQL,
+            {"account_name": article.account_name},
+        ).first()
+        if allowed is None:
+            return 0
+        result = connection.execute(
+            _INSERT_CLEAN_ARTICLE_TASK_SQL,
+            {"task_type": "clean_article", "ref_type": "article", "ref_id": article.article_hash},
+        )
+        return max(0, result.rowcount)
 
 
 _SELECT_DUPLICATE_ARTICLE_URL_SQL = text(
@@ -246,5 +248,15 @@ _INSERT_CLEAN_ARTICLE_TASK_SQL = text(
         :ref_id,
         'pending'
     )
+    """
+)
+
+_SELECT_DOWNSTREAM_CLEAN_ENABLED_SQL = text(
+    """
+    SELECT 1
+    FROM wechat_public_account_config
+    WHERE account_name = :account_name
+      AND downstream_clean_enabled = 1
+    LIMIT 1
     """
 )

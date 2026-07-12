@@ -28,6 +28,15 @@ def test_returns_normalized_visible_text_and_metadata():
     assert (result.title, result.author, result.digest, result.source) == ("Fallback", "Alice", "digest", "werss")
 
 
+def test_requests_verified_werss_views_article_contract():
+    seen = {}
+    def handler(request):
+        seen["path"] = request.url.path
+        return httpx.Response(200, headers={"content-type": "text/html"}, content=b"safe")
+    provider(handler).parse(source("MP_WXS_3545051769_abc-123"))
+    assert seen["path"] == "/views/article/MP_WXS_3545051769_abc-123"
+
+
 @pytest.mark.parametrize("response,code", [
     (httpx.Response(200, headers={"content-type": "text/html"}, content=b"<script>x</script>"), "werss_content_empty"),
     (httpx.Response(404), "werss_not_found"),

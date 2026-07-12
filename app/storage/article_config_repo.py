@@ -34,6 +34,25 @@ class MysqlArticleAccountConfigRepo:
     def __init__(self, engine: Engine) -> None:
         self.engine = engine
 
+    def set_downstream_clean_enabled(self, account_name: str, enabled: bool) -> None:
+        if type(enabled) is not bool:
+            raise ValueError("downstream clean enabled must be boolean")
+        if not account_name.strip():
+            raise ValueError("account_name must not be blank")
+        statement = text(
+            """
+            UPDATE wechat_public_account_config
+            SET downstream_clean_enabled = :enabled,
+                update_time = CURRENT_TIMESTAMP
+            WHERE account_name = :account_name
+            """
+        )
+        with self.engine.begin() as connection:
+            connection.execute(
+                statement,
+                {"account_name": account_name, "enabled": 1 if enabled else 0},
+            )
+
     def upsert_account_config(
         self,
         *,

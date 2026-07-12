@@ -57,6 +57,22 @@ def test_item_extracts_only_stable_id_from_werss_article_view_path():
     assert item.content_locator_type == "werss_article_id"
 
 
+def test_desensitized_real_werss_contract_maps_standard_guid_article_path():
+    item = RssFeedClient._item({"title": "脱敏标题", "link": "https://mp.weixin.qq.com/s/redacted", "guid": "/views/article/MP_WXS_3545051769_abc-123"})
+    assert item.content_locator == "MP_WXS_3545051769_abc-123"
+
+
+def test_fetch_parses_desensitized_standard_rss_guid_contract():
+    body = b"""<rss version='2.0'><channel><item><title>redacted</title><link>https://mp.weixin.qq.com/s/redacted</link><guid>/views/article/MP_WXS_3545051769_abc-123</guid></item></channel></rss>"""
+    result = make_client(lambda request: httpx.Response(200, content=body)).fetch("https://feed.example/rss", timeout_seconds=3, etag=None, modified=None)
+    assert result.items[0].content_locator == "MP_WXS_3545051769_abc-123"
+
+
+@pytest.mark.parametrize("guid", ["https://evil.example/views/article/id", "https://mp.weixin.qq.com/s/x?id=stolen", "/views/article/id?token=secret", "arbitrary-id"])
+def test_standard_guid_never_derives_locator_from_external_url_or_query(guid):
+    assert RssFeedClient._item({"title": "x", "link": "https://mp.weixin.qq.com/s/a", "guid": guid}).content_locator is None
+
+
 @pytest.mark.parametrize("value", ["/views/article/", "/views/article/a/b", "/views/article/../secret", "/views/article/" + "a" * 201])
 def test_item_rejects_unsafe_werss_article_view_path(value):
     item = RssFeedClient._item({"title": "x", "link": "https://mp.weixin.qq.com/s/a", "article_view": value})

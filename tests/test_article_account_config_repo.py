@@ -86,6 +86,20 @@ def test_mysql_article_account_config_repo_upserts_account_config() -> None:
     assert [part.strip() for part in values.split(",")] == [f":{name}" for name in expected]
 
 
+def test_repo_persists_validated_downstream_clean_allowlist_flag() -> None:
+    engine = FakeEngine()
+    MysqlArticleAccountConfigRepo(engine).set_downstream_clean_enabled("湖南三尖农牧公司", True)
+    sql, params = engine.connection.executions[0]
+    assert "downstream_clean_enabled = :enabled" in sql
+    assert params == {"account_name": "湖南三尖农牧公司", "enabled": 1}
+
+
+@pytest.mark.parametrize("value", [1, 0, "true", None])
+def test_repo_rejects_non_boolean_downstream_flag(value) -> None:
+    with pytest.raises(ValueError, match="boolean"):
+        MysqlArticleAccountConfigRepo(FakeEngine()).set_downstream_clean_enabled("湖南三尖农牧公司", value)
+
+
 def test_mysql_article_account_config_repo_creates_without_name_upsert() -> None:
     engine = FakeEngine()
 

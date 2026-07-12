@@ -30,6 +30,9 @@ class FakeConnection:
     def execute(self, statement, params=None):
         sql = str(statement)
         self.executions.append((sql, params))
+        if "downstream_clean_enabled" in sql:
+            enabled = params.get("account_name") in {"湖南三尖农牧公司", "行业观察", "账号"}
+            return FakeResult(rowcount=1 if enabled else 0, rows=[(1,)] if enabled else [])
         if "FOR SHARE" in sql:
             return FakeResult(
                 rowcount=1,
@@ -114,11 +117,12 @@ def test_mysql_article_raw_repo_inserts_today_articles_and_creates_clean_task() 
     assert result.duplicate_count == 0
     assert result.skipped_count == 2
     assert result.task_created_count == 1
-    assert len(engine.connection.executions) == 4
+    assert len(engine.connection.executions) == 5
 
     duplicate_sql, duplicate_params = engine.connection.executions[1]
     raw_sql, raw_params = engine.connection.executions[2]
-    task_sql, task_params = engine.connection.executions[3]
+    allow_sql, allow_params = engine.connection.executions[3]
+    task_sql, task_params = engine.connection.executions[4]
     assert "SELECT 1" in duplicate_sql
     assert duplicate_params["account_name"] == "行业观察"
     assert duplicate_params["publish_date"] == crawl_date
@@ -132,6 +136,8 @@ def test_mysql_article_raw_repo_inserts_today_articles_and_creates_clean_task() 
     assert raw_params["content_locator"] == "safe-id"
     assert raw_params["content_locator_type"] == "werss_article_id"
 
+    assert "downstream_clean_enabled = 1" in allow_sql
+    assert allow_params["account_name"] == "行业观察"
     assert "INSERT IGNORE INTO wechat_article_process_task" in task_sql
     assert "wechat_group_" not in task_sql
     assert task_params["task_type"] == "clean_article"
@@ -186,8 +192,8 @@ def test_mysql_article_raw_repo_treats_existing_account_day_url_as_duplicate() -
     assert result.inserted_count == 0
     assert result.duplicate_count == 1
     assert result.skipped_count == 0
-    assert result.task_created_count == 0
-    assert len(engine.connection.executions) == 2
+    assert result.task_created_count == 1
+    assert len(engine.connection.executions) == 4
     duplicate_sql, duplicate_params = engine.connection.executions[1]
     assert "SELECT 1" in duplicate_sql
     assert duplicate_params["account_name"] == "行业观察"
@@ -260,7 +266,7 @@ def test_insert_raw_skips_same_account_normalized_url_with_changed_title() -> No
     assert result.inserted_count == 0
     assert result.duplicate_count == 1
     assert result.task_created_count == 0
-    assert len(engine.connection.executions) == 2
+    assert len(engine.connection.executions) == 4
 
 
 def test_insert_raw_counts_mixed_insert_and_duplicate_and_creates_one_task() -> None:
@@ -273,4 +279,21 @@ def test_insert_raw_counts_mixed_insert_and_duplicate_and_creates_one_task() -> 
     result = MysqlArticleRawRepo(engine).insert_raw_ignore_duplicates(articles)
 
     assert (result.read_count, result.inserted_count, result.duplicate_count) == (2, 1, 1)
+    assert result.task_created_count == 1
+
+
+def test_raw_is_always_inserted_but_clean_task_defaults_to_persisted_deny() -> None:
+    article = RawArticleRecord("h", "非白名单账号", "标题", "https://example.com/x", datetime(2026, 7, 12), datetime(2026, 7, 12))
+    engine = FakeEngine(rowcounts=[1])
+    result = MysqlArticleRawRepo(engine).insert_raw_ignore_duplicates([article])
+    assert result.inserted_count == 1
+    assert result.task_created_count == 0
+    assert not any("INSERT IGNORE INTO wechat_article_process_task" in sql for sql, _ in engine.connection.executions)
+
+
+def test_hunan_whitelist_creates_task_for_existing_raw_backfill() -> None:
+    article = RawArticleRecord("historic", "湖南三尖农牧公司", "历史", "https://example.com/old", datetime(2020, 1, 1), datetime(2026, 7, 12))
+    engine = FakeEngine(rowcounts=[1], existing_url_results=[[(1,)]])
+    result = MysqlArticleRawRepo(engine).insert_raw_ignore_duplicates([article])
+    assert result.duplicate_count == 1
     assert result.task_created_count == 1
