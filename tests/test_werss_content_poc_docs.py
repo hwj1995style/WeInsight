@@ -52,3 +52,21 @@ def test_poc_record_marks_observation_as_not_started_while_blocked() -> None:
     content = POC.read_text(encoding="utf-8")
     assert "24 小时观察状态：未启动（阻断中）" in content
     assert "24 小时观察状态：进行中" not in content
+
+
+def test_poc_record_separates_collection_scope_from_downstream_scope() -> None:
+    content = POC.read_text(encoding="utf-8")
+    for required in (
+        "9 个公众号全部启用采集",
+        "仅湖南三尖农牧公司进入 clean/analyze",
+        "其余 8 个只采集",
+        "下游白名单能力缺失",
+        "不得启用 9 账号配置",
+        "采集完整率",
+        "去重",
+        "采集延迟",
+        "正文成功率",
+        "回退",
+        "分析",
+    ):
+        assert required in content

@@ -10,8 +10,8 @@ def test_werss_compose_is_pinned_and_not_public():
     assert "healthcheck:" in compose
     assert '"python3"' in compose
     assert '127.0.0.1:${WERSS_PORT:-8001}:8001' in compose
-    assert 'max-size: "10m"' in compose
-    assert 'max-file: "5"' in compose
+    assert 'max-size: "2m"' in compose
+    assert 'max-file: "2"' in compose
 
 
 def test_werss_environment_template_uses_external_mysql_without_secrets():
@@ -91,3 +91,38 @@ def test_readme_links_to_werss_operations_guide():
     readme = Path("README.md").read_text("utf-8")
     assert "公众号 RSS / WeRSS 部署" in readme
     assert "docs/operations/公众号RSS采集运行手册.md" in readme
+
+
+def test_werss_docs_accept_local_log_risk_without_building_an_internal_image():
+    guide = Path("docs/operations/公众号RSS采集运行手册.md").read_text("utf-8")
+    design = Path("docs/superpowers/specs/2026-07-12-WeRSS正文按需读取设计.md").read_text("utf-8")
+    plan = Path("docs/superpowers/plans/2026-07-12-WeRSS正文按需读取实施计划.md").read_text("utf-8")
+    for text in (guide, design, plan):
+        for phrase in (
+            "官方固定摘要",
+            "不构建内部镜像",
+            "仅保留在本机 Docker 日志",
+            "不接入外部日志",
+            "不复制到工单",
+            "不纳入备份",
+            "持续关注上游",
+        ):
+            assert phrase in text
+
+
+def test_werss_docs_separate_nine_account_collection_from_single_account_downstream():
+    guide = Path("docs/operations/公众号RSS采集运行手册.md").read_text("utf-8")
+    design = Path("docs/superpowers/specs/2026-07-12-WeRSS正文按需读取设计.md").read_text("utf-8")
+    plan = Path("docs/superpowers/plans/2026-07-12-WeRSS正文按需读取实施计划.md").read_text("utf-8")
+    for text in (guide, design, plan):
+        for phrase in (
+            "9 个公众号全部启用采集",
+            "仅湖南三尖农牧公司进入 clean/analyze",
+            "其余 8 个只采集",
+            "下游白名单",
+            "采集完整率",
+            "去重",
+            "采集延迟",
+            "分开验收",
+        ):
+            assert phrase in text

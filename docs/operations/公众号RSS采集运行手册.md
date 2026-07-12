@@ -43,7 +43,7 @@ docker compose --env-file deploy\werss\.env -f deploy\werss\docker-compose.yml l
 docker inspect --format '{{.State.Health.Status}}' $(docker compose --env-file deploy\werss\.env -f deploy\werss\docker-compose.yml ps -q werss)
 ```
 
-日志由 Docker 轮转为最多 5 个、每个 10 MB；日志或巡检记录不得包含密码、Cookie、文章正文或完整异常响应体。
+继续使用官方固定摘要，不构建内部镜像。已知官方版本的 SQL 参数可能包含正文，用户接受其仅保留在本机 Docker 日志的剩余风险。Docker Desktop 仅允许最小范围本机管理员访问；日志不接入外部日志，不复制到工单，不纳入备份，也不得截图或导出。Docker 轮转为最多 2 个、每个 2 MB，并持续关注上游关闭参数日志的受支持开关。WeInsight 自身日志或巡检记录仍不得包含密码、Cookie、文章正文或完整异常响应体。
 
 ## 添加公众号与 Feed URL 录入
 
@@ -78,7 +78,15 @@ mysql -h 127.0.0.1 -P 3307 -u weinsight_monitor -p weinsight_prod -e "SELECT acc
 
 WeRSS 重启恢复演练按以下顺序进行：先记录基线并停止 WeRSS，触发一个受控任务确认网页回退成功；随后立即恢复容器并等待 `healthy`，再触发下一任务确认来源回到 WeRSS。停机窗口不得扩大公众号范围，演练结束必须确认 WeRSS 为 `healthy`。
 
-若出现接口契约变化、不可解释报价差异、永久任务失败、日志或数据库正文泄漏，立即把单公众号配置回滚到 `content_mode: web`，停止观察扩容，并保留不含正文与凭据的结构化证据。扩容只允许按 1 → 3 → 9 进行。
+若出现接口契约变化、不可解释报价差异、永久任务失败、WeInsight 日志或数据库正文泄漏，或官方 Docker 日志超出已接受的本机短轮转边界，立即把单公众号配置回滚到 `content_mode: web`，停止观察扩容，并保留不含正文与凭据的结构化证据。
+
+### 九账号采集与湖南下游分开验收
+
+目标态为 9 个公众号全部启用采集，但仅湖南三尖农牧公司进入 clean/analyze，其余 8 个只采集。隔离必须由可测试的下游白名单控制任务创建，不能手工删除任务或靠停止通用 worker 实现。当前版本 raw 入库会无条件创建 clean 任务，下游白名单尚未实现；因此在能力补齐并验证前，不得在 WeInsight 启用 9 账号配置。
+
+能力补齐后分开验收：采集层对 9 个账号检查采集完整率、去重和采集延迟；下游仅对湖南三尖农牧公司检查正文成功率、网页回退、失败恢复、结构化报价和分析。湖南 POC 通过后才扩展下游白名单。此处的 9 账号采集扩展不等于正文下游扩展。
+
+当前还有 locator 契约阻断：湖南真实 Feed 可读取 25 条，但现有适配器 locator 提取数为 0；必须先完成受控 locator 映射及正文接口验证。WeRSS 的九个 Feed 均存在，但需求名称“江西九江祺壳蛋”与实际 Feed 名“江西九江褐壳蛋”不一致，须由负责人确认后再配置。
 
 ## 扩容到 3 个公众号
 
