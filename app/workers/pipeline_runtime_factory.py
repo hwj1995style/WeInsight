@@ -136,18 +136,20 @@ def _shanghai_now() -> datetime:
 
 
 def build_article_content_provider(article_config):
+    timeout_seconds = getattr(article_config, "content_timeout_seconds", 30)
+    content_mode = getattr(article_config, "content_mode", "web")
     web = PlaywrightArticleContentProvider(
-        timeout_ms=article_config.content_timeout_seconds * 1000,
+        timeout_ms=timeout_seconds * 1000,
         browser_executable_path=article_config.browser_executable_path,
     )
-    if article_config.content_mode == "web":
+    if content_mode == "web":
         return web
     werss = WeRSSContentProvider(
-        endpoint=article_config.content_base_url,
-        timeout_seconds=article_config.content_timeout_seconds,
-        max_response_bytes=article_config.content_max_response_bytes,
+        endpoint=getattr(article_config, "content_base_url", "http://127.0.0.1:8001"),
+        timeout_seconds=timeout_seconds,
+        max_response_bytes=getattr(article_config, "content_max_response_bytes", 5_242_880),
     )
-    if article_config.content_mode == "shadow":
+    if content_mode == "shadow":
         return ShadowArticleContentProvider(
             web, werss, _ARTICLE_CONTENT_SHADOW_METRICS
         )

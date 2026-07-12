@@ -35,6 +35,7 @@ USER_FACING_DOC_PATHS = (
     "docs/operations/三账号小规模交错POC运行记录.md",
     "docs/operations/三账号验收与二十账号扩容判断.md",
     "docs/design/公众号订阅号最多20账号扩容设计.md",
+    "docs/operations/WeRSS正文按需读取POC记录.md",
 )
 
 EXPORTED_GROUP_REPORT_GLOB = "runtime/reports/group/**/*.md"

@@ -101,3 +101,7 @@ def test_readme_documents_sensitive_output_guard_command() -> None:
     readme = Path("README.md").read_text(encoding="utf-8")
 
     assert "pytest tests/test_sensitive_output_guard.py -q" in readme
+
+
+def test_werss_content_poc_doc_is_covered_by_sensitive_output_guard() -> None:
+    assert "docs/operations/WeRSS正文按需读取POC记录.md" in USER_FACING_DOC_PATHS
