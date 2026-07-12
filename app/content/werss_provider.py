@@ -43,7 +43,7 @@ class WeRSSContentProvider:
     def parse(self, source: ArticleParseSource) -> ArticleContent:
         locator = source.content_locator
         if not locator:
-            raise ContentFetchError("werss_locator_missing", False)
+            raise ContentFetchError("werss_locator_missing", True)
         if not _LOCATOR.fullmatch(locator) or not self._allowed(self._endpoint):
             raise ContentFetchError("werss_endpoint_blocked", False)
         url = f"{self._endpoint}/article/{quote(locator, safe='')}"

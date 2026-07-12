@@ -26,3 +26,27 @@
 ## Concerns
 
 - The legacy `parser=` compatibility path necessarily retains its historical free-form error string; only the new provider boundary enforces safe error types. Existing callers should migrate to `provider=`.
+
+## Review Fix
+
+### RED
+
+- Command: `python -m pytest tests/test_article_content_fallback.py tests/test_article_parse_service.py -q`
+- Result: `3 failed, 16 passed`; failures proved the real WeRSS missing-locator classification and legacy parser free-form error persistence defects.
+
+### GREEN
+
+- Changed real `WeRSSContentProvider` missing locator errors to recoverable and added a real-primary fallback integration test.
+- Unified both provider and legacy parser failures to persist only `ContentFetchError.code` or the exception type.
+- Command: `python -m pytest tests/test_article_content_fallback.py tests/test_article_parse_service.py tests/test_werss_content_provider.py -q`
+- Result: `32 passed in 0.25s`.
+- Command: `git diff --check`
+- Result: exit 0.
+
+### Review Commit
+
+- `fix: enforce safe content fallback boundaries`
+
+### Updated Concerns
+
+- None. The previous legacy parser free-form error concern is resolved; runtime callers are safe before Task 5 migration.

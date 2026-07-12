@@ -116,7 +116,18 @@ def test_article_parse_service_marks_only_article_task_failed_on_parse_error() -
     assert repo.clean_articles == []
     assert repo.analyze_tasks == []
     assert repo.successes == []
-    assert repo.failures == [("article-hash-2", "parse failed")]
+    assert repo.failures == [("article-hash-2", "RuntimeError")]
+
+
+def test_legacy_parser_failure_never_persists_sensitive_exception_message() -> None:
+    source = ArticleParseSource("h", "account", "raw", "https://example.test/private", None, None, None)
+    repo = FakeArticleParseRepo([source])
+    parser = FakeArticleBrowserParser({})
+    parser.fail_with = RuntimeError("https://example.test/private 正文 secret")
+
+    ArticleParseService(repo=repo, parser=parser).parse_once(1, datetime(2026, 7, 6, 9))
+
+    assert repo.failures == [("h", "RuntimeError")]
 
 
 def test_provider_content_is_hashed_but_never_persisted() -> None:

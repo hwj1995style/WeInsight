@@ -93,9 +93,6 @@ class ArticleParseService:
                 success_count += 1
             except Exception as exc:
                 error_msg = exc.code if isinstance(exc, ContentFetchError) else type(exc).__name__
-                # Preserve the legacy parser contract without allowing provider payloads into errors.
-                if self.provider is None:
-                    error_msg = str(exc)
                 self.repo.mark_clean_task_failed(source.article_hash, error_msg)
                 failed_count += 1
 

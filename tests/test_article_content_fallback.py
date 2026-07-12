@@ -4,6 +4,7 @@ import pytest
 
 from app.content.article_content import ArticleContent, ContentFetchError
 from app.content.fallback_provider import FallbackArticleContentProvider
+from app.content.werss_provider import WeRSSContentProvider
 from app.domain.article_parsing import ArticleParseSource
 
 
@@ -30,6 +31,16 @@ def test_recoverable_content_errors_use_web_fallback(code):
     fallback = Provider(expected)
 
     assert FallbackArticleContentProvider(primary, fallback).parse(source()) == expected
+    assert fallback.calls == 1
+
+
+def test_real_werss_provider_missing_locator_uses_web_fallback():
+    expected = ArticleContent("网页正文", "网页标题", None, None, None, "web")
+    fallback = Provider(expected)
+
+    result = FallbackArticleContentProvider(WeRSSContentProvider(), fallback).parse(source())
+
+    assert result == expected
     assert fallback.calls == 1
 
 
