@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from app.rss.models import FeedFetchResult, FeedItem
 from app.storage.article_config_repo import ArticleAccountConfigRecord
@@ -45,6 +46,17 @@ def test_first_collection_keeps_last_24_hours_and_at_most_30():
     result = RssArticleCollectService(feed_client=Feed([item(i) for i in range(40)]), raw_repo=raw, state_repo=State()).collect_once(target(), batch_id="b1", collect_time=NOW)
     assert result.feed_item_count == 40
     assert result.insert_count == 30
+
+
+def test_first_collection_accepts_timezone_aware_worker_collect_time():
+    from app.pipelines.rss_article_collect_service import RssArticleCollectService
+
+    worker_now = NOW.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+    result = RssArticleCollectService(
+        feed_client=Feed([item(1)]), raw_repo=Raw(), state_repo=State()
+    ).collect_once(target(), batch_id="b-aware", collect_time=worker_now)
+
+    assert result.insert_count == 1
 
 
 def test_invalid_item_does_not_abort_valid_items():

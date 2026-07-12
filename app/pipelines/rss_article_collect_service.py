@@ -50,7 +50,7 @@ class RssArticleCollectService:
             except FeedItemInvalid:
                 invalid_count += 1
         if target.last_success_collect_time is None:
-            cutoff = collect_time - timedelta(hours=24)
+            cutoff = collect_time.replace(tzinfo=None) - timedelta(hours=24)
             records = sorted((r for r in records if r.publish_time and r.publish_time >= cutoff),
                              key=lambda r: r.publish_time, reverse=True)[:30]
         inserted = self.raw_repo.insert_raw_ignore_duplicates(records)

@@ -52,4 +52,10 @@ def test_rss_collect_log_metrics_exist_in_init_and_idempotent_migration() -> Non
     migration = Path("sql/migrations/20260711_002_add_rss_collect_log_metrics.sql").read_text("utf-8")
     for column in ("feed_item_count", "duplicate_count", "invalid_count", "http_status", "elapsed_ms"):
         assert column in article_log
-        assert f"ADD COLUMN IF NOT EXISTS {column}" in migration
+        assert f"COLUMN_NAME='{column}'" in migration
+        assert f"ADD COLUMN {column}" in migration
+    assert "ADD COLUMN IF NOT EXISTS" not in migration
+    assert "DROP PROCEDURE IF EXISTS migrate_20260711_002" in migration
+    assert "CREATE PROCEDURE migrate_20260711_002" in migration
+    assert "CALL migrate_20260711_002()" in migration
+    assert "DROP PROCEDURE migrate_20260711_002" in migration
