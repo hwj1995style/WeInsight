@@ -68,6 +68,20 @@ def test_fetch_parses_desensitized_standard_rss_guid_contract():
     assert result.items[0].content_locator == "MP_WXS_3545051769_abc-123"
 
 
+def test_real_standard_fields_map_only_matching_official_wechat_stable_path():
+    item = RssFeedClient._item({"title": "x", "id": "https://mp.weixin.qq.com/s/ax0VuNSRpq7RqIS220NV4w", "link": "https://mp.weixin.qq.com/s/ax0VuNSRpq7RqIS220NV4w"})
+    assert item.content_locator == "ax0VuNSRpq7RqIS220NV4w"
+
+
+@pytest.mark.parametrize("entry", [
+    {"id": "https://evil.example/s/safe", "link": "https://evil.example/s/safe"},
+    {"id": "https://mp.weixin.qq.com/s/safe", "link": "https://mp.weixin.qq.com/s/other"},
+    {"id": "https://mp.weixin.qq.com/s/safe?token=x", "link": "https://mp.weixin.qq.com/s/safe?token=x"},
+])
+def test_real_standard_locator_requires_same_exact_official_url_without_query(entry):
+    assert RssFeedClient._item(entry).content_locator is None
+
+
 @pytest.mark.parametrize("guid", ["https://evil.example/views/article/id", "https://mp.weixin.qq.com/s/x?id=stolen", "/views/article/id?token=secret", "arbitrary-id"])
 def test_standard_guid_never_derives_locator_from_external_url_or_query(guid):
     assert RssFeedClient._item({"title": "x", "link": "https://mp.weixin.qq.com/s/a", "guid": guid}).content_locator is None

@@ -22,10 +22,11 @@ class FakeResult:
 
 
 class FakeConnection:
-    def __init__(self, rowcounts: list[int], existing_url_results=None) -> None:
+    def __init__(self, rowcounts: list[int], existing_url_results=None, canonical_hashes=None) -> None:
         self.rowcounts = list(rowcounts)
         self.existing_url_results = list(existing_url_results or [])
         self.executions: list[tuple[str, object]] = []
+        self.canonical_hashes = list(canonical_hashes or [])
 
     def execute(self, statement, params=None):
         sql = str(statement)
@@ -41,6 +42,12 @@ class FakeConnection:
         if "SELECT 1" in sql and "wechat_article_raw" in sql:
             rows = self.existing_url_results.pop(0) if self.existing_url_results else []
             return FakeResult(rowcount=len(rows), rows=rows)
+        if "SELECT article_hash" in sql and "wechat_article_raw" in sql:
+            if self.existing_url_results:
+                rows = self.existing_url_results.pop(0)
+                return FakeResult(rowcount=len(rows), rows=rows)
+            value = self.canonical_hashes.pop(0) if self.canonical_hashes else None
+            return FakeResult(rowcount=1 if value else 0, rows=[(value,)] if value else [])
         rowcount = self.rowcounts.pop(0) if self.rowcounts else 0
         return FakeResult(rowcount)
 
@@ -52,8 +59,8 @@ class FakeConnection:
 
 
 class FakeEngine:
-    def __init__(self, rowcounts: list[int], existing_url_results=None) -> None:
-        self.connection = FakeConnection(rowcounts, existing_url_results=existing_url_results)
+    def __init__(self, rowcounts: list[int], existing_url_results=None, canonical_hashes=None) -> None:
+        self.connection = FakeConnection(rowcounts, existing_url_results=existing_url_results, canonical_hashes=canonical_hashes)
 
     def begin(self):
         return self.connection
@@ -123,7 +130,7 @@ def test_mysql_article_raw_repo_inserts_today_articles_and_creates_clean_task() 
     raw_sql, raw_params = engine.connection.executions[2]
     allow_sql, allow_params = engine.connection.executions[3]
     task_sql, task_params = engine.connection.executions[4]
-    assert "SELECT 1" in duplicate_sql
+    assert "SELECT article_hash" in duplicate_sql
     assert duplicate_params["account_name"] == "行业观察"
     assert duplicate_params["publish_date"] == crawl_date
     assert duplicate_params["article_url"] == "https://example.com/a"
@@ -170,7 +177,7 @@ def test_mysql_article_raw_repo_does_not_create_task_for_duplicate_article() -> 
     assert result.duplicate_count == 1
     assert result.skipped_count == 0
     assert result.task_created_count == 0
-    assert len(engine.connection.executions) == 3
+    assert len(engine.connection.executions) == 4
 
 
 def test_mysql_article_raw_repo_treats_existing_account_day_url_as_duplicate() -> None:
@@ -195,7 +202,7 @@ def test_mysql_article_raw_repo_treats_existing_account_day_url_as_duplicate() -
     assert result.task_created_count == 1
     assert len(engine.connection.executions) == 4
     duplicate_sql, duplicate_params = engine.connection.executions[1]
-    assert "SELECT 1" in duplicate_sql
+    assert "SELECT article_hash" in duplicate_sql
     assert duplicate_params["account_name"] == "行业观察"
     assert duplicate_params["publish_date"] == date(2026, 7, 6)
     assert duplicate_params["article_url"] == "https://example.com/duplicate-url"
@@ -293,7 +300,29 @@ def test_raw_is_always_inserted_but_clean_task_defaults_to_persisted_deny() -> N
 
 def test_hunan_whitelist_creates_task_for_existing_raw_backfill() -> None:
     article = RawArticleRecord("historic", "湖南三尖农牧公司", "历史", "https://example.com/old", datetime(2020, 1, 1), datetime(2026, 7, 12))
-    engine = FakeEngine(rowcounts=[1], existing_url_results=[[(1,)]])
+    engine = FakeEngine(rowcounts=[1], existing_url_results=[[('canonical-hash',)]])
     result = MysqlArticleRawRepo(engine).insert_raw_ignore_duplicates([article])
     assert result.duplicate_count == 1
     assert result.task_created_count == 1
+    task_params = next(params for sql, params in engine.connection.executions if "INSERT IGNORE INTO wechat_article_process_task" in sql)
+    assert task_params["ref_id"] == "canonical-hash"
+
+
+def test_today_url_duplicate_uses_database_canonical_hash() -> None:
+    article = RawArticleRecord("changed-hash", "湖南三尖农牧公司", "新标题", "https://example.com/today", datetime(2026, 7, 12), datetime(2026, 7, 12))
+    engine = FakeEngine(rowcounts=[1], existing_url_results=[[('canonical-today-hash',)]])
+    result = MysqlArticleRawRepo(engine).insert_today_raw_ignore_duplicates([article], crawl_date=date(2026, 7, 12))
+    assert result.task_created_count == 1
+    assert "SELECT article_hash" in engine.connection.executions[1][0]
+    task_params = next(params for sql, params in engine.connection.executions if "INSERT IGNORE INTO wechat_article_process_task" in sql)
+    assert task_params["ref_id"] == "canonical-today-hash"
+
+
+def test_insert_ignore_race_reloads_canonical_hash_and_backfills_task() -> None:
+    article = RawArticleRecord("racing-new-hash", "湖南三尖农牧公司", "标题", "https://example.com/race", datetime(2026, 7, 12), datetime(2026, 7, 12))
+    engine = FakeEngine(rowcounts=[0, 1], existing_url_results=[[]], canonical_hashes=["canonical-race-hash"])
+    result = MysqlArticleRawRepo(engine).insert_raw_ignore_duplicates([article])
+    assert result.duplicate_count == 1
+    assert result.task_created_count == 1
+    task_params = next(params for sql, params in engine.connection.executions if "INSERT IGNORE INTO wechat_article_process_task" in sql)
+    assert task_params["ref_id"] == "canonical-race-hash"

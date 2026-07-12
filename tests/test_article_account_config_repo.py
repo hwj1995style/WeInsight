@@ -94,6 +94,15 @@ def test_repo_persists_validated_downstream_clean_allowlist_flag() -> None:
     assert params == {"account_name": "湖南三尖农牧公司", "enabled": 1}
 
 
+def test_repo_fails_when_downstream_account_does_not_exist() -> None:
+    engine = FakeEngine()
+    missing = FakeResult([])
+    missing.rowcount = 0
+    engine.connection.execute = lambda statement, params=None: missing
+    with pytest.raises(LookupError, match="account not found"):
+        MysqlArticleAccountConfigRepo(engine).set_downstream_clean_enabled("不存在", True)
+
+
 @pytest.mark.parametrize("value", [1, 0, "true", None])
 def test_repo_rejects_non_boolean_downstream_flag(value) -> None:
     with pytest.raises(ValueError, match="boolean"):

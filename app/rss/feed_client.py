@@ -143,6 +143,12 @@ class RssFeedClient:
             if match:
                 locator = match.group(1)
                 break
+        if locator is None and entry.get("id") == link:
+            parsed = urlsplit(link)
+            if parsed.scheme == "https" and parsed.hostname == "mp.weixin.qq.com" and not parsed.query and not parsed.fragment:
+                match = re.fullmatch(r"/s/([A-Za-z0-9_-]{1,200})", parsed.path)
+                if match:
+                    locator = match.group(1)
         return FeedItem(
             entry.get("title", ""),
             link,

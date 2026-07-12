@@ -48,10 +48,12 @@ class MysqlArticleAccountConfigRepo:
             """
         )
         with self.engine.begin() as connection:
-            connection.execute(
+            result = connection.execute(
                 statement,
                 {"account_name": account_name, "enabled": 1 if enabled else 0},
             )
+            if result.rowcount != 1:
+                raise LookupError("article account not found")
 
     def upsert_account_config(
         self,
