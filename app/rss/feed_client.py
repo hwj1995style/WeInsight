@@ -75,7 +75,9 @@ class RssFeedClient:
                             parsed.get("bozo_exception"),
                             (CharacterEncodingOverride, CharacterEncodingUnknown, UndeclaredNamespace),
                         )
-                        if not parsed.version or (parsed.bozo and not recoverable_bozo):
+                        if not parsed.get("version") or (
+                            parsed.get("bozo", False) and not recoverable_bozo
+                        ):
                             raise FeedFetchError("feed_invalid_format")
                         raw_ids = self._rss_item_ids_by_link(bytes(body))
                         items = tuple(

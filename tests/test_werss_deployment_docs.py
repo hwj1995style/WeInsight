@@ -126,3 +126,12 @@ def test_werss_docs_separate_nine_account_collection_from_single_account_downstr
             "分开验收",
         ):
             assert phrase in text
+
+
+def test_werss_operations_guide_reflects_completed_downstream_and_locator_gates():
+    guide = Path("docs/operations/公众号RSS采集运行手册.md").read_text("utf-8")
+
+    assert "当前版本 raw 入库会无条件创建 clean 任务" not in guide
+    assert "现有适配器 locator 提取数为 0" not in guide
+    assert "下游白名单已实现" in guide
+    assert "25/25 locator" in guide

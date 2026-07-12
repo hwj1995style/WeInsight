@@ -131,6 +131,21 @@ def test_fetch_rejects_invalid_format(content):
         client.fetch("https://feed.example/rss", timeout_seconds=3, etag=None, modified=None)
 
 
+def test_fetch_maps_parser_result_without_version_to_invalid_format(monkeypatch):
+    monkeypatch.setattr(
+        feedparser,
+        "parse",
+        lambda _body: feedparser.FeedParserDict(
+            bozo=False,
+            entries=(),
+        ),
+    )
+    client = make_client(lambda request: httpx.Response(200, content=b"not-a-feed"))
+
+    with pytest.raises(FeedFetchError, match="feed_invalid_format"):
+        client.fetch("https://feed.example/rss", timeout_seconds=3, etag=None, modified=None)
+
+
 def test_fetch_maps_timeout():
     def handler(request): raise httpx.ReadTimeout("late", request=request)
     with pytest.raises(FeedFetchError, match="feed_timeout"):
