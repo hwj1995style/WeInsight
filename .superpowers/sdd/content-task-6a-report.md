@@ -37,3 +37,12 @@
 
 - 九账号名称已按用户确认使用“江西九江褐壳蛋”；`sql/deploy/20260712_seed_werss_nine_accounts.sql` 可重入部署，采集全部启用，仅湖南下游启用。
 - 湖南 24 小时 POC 尚未执行，不能标记 POC 通过。
+
+## Shadow 语义一致性调试追加
+
+- 初始安全指标：同一真实湖南样本 web `length=1825`，WeRSS `length=14`，SHA-256 不同；标题一致，发布时间因 web 未提取而不一致。全程未输出或保存正文。
+- 根因一：真实 RSS `<item>` 同时有内部固定格式 `<id>` 与公众号外链 `<guid>/<link>`；feedparser 将 guid 覆盖为 entry.id。错误 locator 请求到 SPA 壳。现在从原始 RSS 结构受控提取内部 ID，并请求真实 `/views/article/<id>`。
+- 根因二：web parser 取整个 `body`，WeRSS 取整个响应。改为 web `#js_content`、WeRSS `.article-content`；两侧剩余差异仅为 HTML 数字 span 产生的 8 个布局空格，按同一规则规范化数字间空白，不忽略 hash 差异。
+- TDD RED：原始 RSS 内部 ID 优先、真实 view 路由、正文 selector 与数字 span 规范化测试均先失败。
+- GREEN：provider/parse/shadow/瞬时分析/分析服务/运行时工厂定向回归 `88 passed`。
+- 未切换 `werss_first`，未启动 24 小时 POC，等待复审。

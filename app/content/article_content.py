@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from threading import Lock
@@ -77,3 +78,8 @@ class ShadowArticleContentProvider:
 
 def _body_hash(body: str) -> str:
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def normalize_article_text(value: str) -> str:
+    normalized = re.sub(r"\s+", " ", value).strip()
+    return re.sub(r"(?<=\d)\s+(?=\d)", "", normalized)

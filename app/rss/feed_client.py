@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import time
+import xml.etree.ElementTree as ET
 from collections.abc import Callable, Sequence
 from ipaddress import ip_address
 from urllib.parse import urljoin, urlsplit, urlunsplit
@@ -76,7 +77,11 @@ class RssFeedClient:
                         )
                         if not parsed.version or (parsed.bozo and not recoverable_bozo):
                             raise FeedFetchError("feed_invalid_format")
-                        items = tuple(self._item(entry) for entry in parsed.entries)
+                        raw_ids = self._rss_item_ids(bytes(body))
+                        items = tuple(
+                            self._item(dict(entry, werss_standard_article_id=raw_ids[index] if index < len(raw_ids) else None))
+                            for index, entry in enumerate(parsed.entries)
+                        )
                         return self._result(response, items, False, started)
         except FeedFetchError:
             raise
@@ -134,21 +139,16 @@ class RssFeedClient:
     @staticmethod
     def _item(entry) -> FeedItem:
         link = entry.get("link", "")
-        locator = None
+        raw_standard_id = entry.get("werss_standard_article_id") or ""
+        locator = raw_standard_id if re.fullmatch(r"[A-Za-z0-9_-]{1,200}", raw_standard_id) else None
         # WeRSS' standard RSS shape exposes the internal article view as guid.
         # Accept only the exact relative route; never derive it from article links,
         # absolute URLs, fragments, or query parameters.
-        for key in ("article_view", "content_locator", "werss_article_view", "guid", "id"):
+        for key in ("werss_standard_article_id", "article_view", "content_locator", "werss_article_view", "guid", "id"):
             match = re.fullmatch(r"/views/article/([A-Za-z0-9_-]{1,200})", entry.get(key, "") or "")
             if match:
                 locator = match.group(1)
                 break
-        if locator is None and entry.get("id") == link:
-            parsed = urlsplit(link)
-            if parsed.scheme == "https" and parsed.hostname == "mp.weixin.qq.com" and not parsed.query and not parsed.fragment:
-                match = re.fullmatch(r"/s/([A-Za-z0-9_-]{1,200})", parsed.path)
-                if match:
-                    locator = match.group(1)
         return FeedItem(
             entry.get("title", ""),
             link,
@@ -159,6 +159,18 @@ class RssFeedClient:
             locator,
             "werss_article_id" if locator else None,
         )
+
+    @staticmethod
+    def _rss_item_ids(body: bytes) -> tuple[str | None, ...]:
+        try:
+            root = ET.fromstring(body)
+        except ET.ParseError:
+            return ()
+        values = []
+        for item in root.findall("./channel/item"):
+            value = item.findtext("id") or ""
+            values.append(value if re.fullmatch(r"[A-Za-z0-9_-]{1,200}", value) else None)
+        return tuple(values)
 
     @staticmethod
     def _origin(url: str) -> tuple[str, str, int]:

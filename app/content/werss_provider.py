@@ -6,7 +6,7 @@ from urllib.parse import quote, urljoin, urlsplit
 
 import httpx
 
-from app.content.article_content import ArticleContent, ContentFetchError
+from app.content.article_content import ArticleContent, ContentFetchError, normalize_article_text
 from app.domain.article_parsing import ArticleParseSource
 
 
@@ -20,18 +20,29 @@ class _VisibleTextParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.hidden_depth = 0
         self.parts: list[str] = []
+        self.article_parts: list[str] = []
+        self.article_depth = 0
 
     def handle_starttag(self, tag: str, attrs) -> None:
+        attrs_map = dict(attrs)
+        if self.article_depth:
+            self.article_depth += 1
+        elif "article-content" in (attrs_map.get("class") or "").split():
+            self.article_depth = 1
         if tag.lower() in {"script", "style", "iframe"}:
             self.hidden_depth += 1
 
     def handle_endtag(self, tag: str) -> None:
         if tag.lower() in {"script", "style", "iframe"} and self.hidden_depth:
             self.hidden_depth -= 1
+        if self.article_depth:
+            self.article_depth -= 1
 
     def handle_data(self, data: str) -> None:
         if not self.hidden_depth:
             self.parts.append(data)
+            if self.article_depth:
+                self.article_parts.append(data)
 
 
 class WeRSSContentProvider:
@@ -47,11 +58,11 @@ class WeRSSContentProvider:
             raise ContentFetchError("werss_locator_missing", True)
         if not _LOCATOR.fullmatch(locator) or not self._allowed(self._endpoint):
             raise ContentFetchError("werss_endpoint_blocked", False)
-        url = f"{self._endpoint}/article/{quote(locator, safe='')}"
+        url = f"{self._endpoint}/views/article/{quote(locator, safe='')}"
         body = self._fetch(url)
         parser = _VisibleTextParser()
         parser.feed(body.decode("utf-8", errors="replace"))
-        text = " ".join(" ".join(parser.parts).split())
+        text = normalize_article_text(" ".join(parser.article_parts or parser.parts))
         if not text:
             raise ContentFetchError("werss_content_empty", True)
         return ArticleContent(text, source.title, source.publish_time, source.author, source.digest, "werss")

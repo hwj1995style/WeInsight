@@ -11,8 +11,14 @@ from app.domain.article_parsing import ArticleParseSource, ParsedArticleContent
 from app.pipelines.article_parse_service import (
     ArticleParseService,
     PlaywrightArticleParser,
+    extract_body_text_from_html,
     extract_article_metadata_from_html,
 )
+
+
+def test_body_extraction_prefers_wechat_article_selector_and_canonicalizes_digit_spans() -> None:
+    html = "<body>navigation<div id='js_content'><span>12</span> <span>34</span></div>footer</body>"
+    assert extract_body_text_from_html(html) == "1234"
 
 
 class FakeArticleParseRepo:

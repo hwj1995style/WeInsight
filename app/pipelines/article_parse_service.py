@@ -9,7 +9,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Protocol
 
-from app.content.article_content import ArticleContent, ArticleContentProvider, ContentFetchError
+from app.content.article_content import ArticleContent, ArticleContentProvider, ContentFetchError, normalize_article_text
 from app.domain.article_parsing import ArticleParseSource, CleanArticleRecord, ParsedArticleContent
 
 
@@ -259,7 +259,7 @@ def extract_article_metadata_from_html(html: str) -> ParsedArticleContent:
 def extract_body_text_from_html(html: str) -> str:
     parser = _ArticleHtmlMetadataParser()
     parser.feed(html)
-    return _normalize_text(" ".join(parser.body_text_parts))
+    return normalize_article_text(" ".join(parser.article_text_parts or parser.body_text_parts))
 
 
 class _ArticleHtmlMetadataParser(HTMLParser):
@@ -269,14 +269,20 @@ class _ArticleHtmlMetadataParser(HTMLParser):
         self.title_parts: list[str] = []
         self.body_text_parts: list[str] = []
         self.visible_publish_time_parts: list[str] = []
+        self.article_text_parts: list[str] = []
         self._in_title = False
         self._in_body = False
         self._skip_depth = 0
         self._visible_publish_time_depth = 0
+        self._article_depth = 0
 
     def handle_starttag(self, tag: str, attrs) -> None:
         attrs_map = {str(name).lower(): value for name, value in attrs}
         tag = tag.lower()
+        if self._article_depth:
+            self._article_depth += 1
+        elif attrs_map.get("id") == "js_content":
+            self._article_depth = 1
         if tag == "title":
             self._in_title = True
         elif tag == "body":
@@ -303,12 +309,16 @@ class _ArticleHtmlMetadataParser(HTMLParser):
             self._skip_depth -= 1
         if self._visible_publish_time_depth > 0:
             self._visible_publish_time_depth -= 1
+        if self._article_depth > 0:
+            self._article_depth -= 1
 
     def handle_data(self, data: str) -> None:
         if self._in_title:
             self.title_parts.append(data)
         if self._in_body and self._skip_depth == 0:
             self.body_text_parts.append(data)
+        if self._article_depth and self._skip_depth == 0:
+            self.article_text_parts.append(data)
         if self._visible_publish_time_depth > 0 and self._skip_depth == 0:
             self.visible_publish_time_parts.append(data)
 

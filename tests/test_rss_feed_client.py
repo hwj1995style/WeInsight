@@ -68,9 +68,15 @@ def test_fetch_parses_desensitized_standard_rss_guid_contract():
     assert result.items[0].content_locator == "MP_WXS_3545051769_abc-123"
 
 
-def test_real_standard_fields_map_only_matching_official_wechat_stable_path():
+def test_fetch_prefers_raw_standard_rss_item_id_over_guid_rewritten_by_feedparser():
+    body = b"""<rss version='2.0'><channel><item><id>internal_A-123</id><title>x</title><guid>https://mp.weixin.qq.com/s/external-token</guid><link>https://mp.weixin.qq.com/s/external-token</link></item></channel></rss>"""
+    result = make_client(lambda request: httpx.Response(200, content=body)).fetch("https://feed.example/rss", timeout_seconds=3, etag=None, modified=None)
+    assert result.items[0].content_locator == "internal_A-123"
+
+
+def test_official_wechat_link_is_not_mistaken_for_internal_werss_article_id():
     item = RssFeedClient._item({"title": "x", "id": "https://mp.weixin.qq.com/s/ax0VuNSRpq7RqIS220NV4w", "link": "https://mp.weixin.qq.com/s/ax0VuNSRpq7RqIS220NV4w"})
-    assert item.content_locator == "ax0VuNSRpq7RqIS220NV4w"
+    assert item.content_locator is None
 
 
 @pytest.mark.parametrize("entry", [
