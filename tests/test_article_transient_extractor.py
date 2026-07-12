@@ -8,8 +8,50 @@ from typing import Any
 from app.domain.article_analysis import CleanArticleForAnalysis
 from app.pipelines.article_transient_extractor import (
     PlaywrightArticleTransientExtractor,
+    ProviderBackedArticleTransientExtractor,
     extract_transient_article_data,
 )
+
+
+def test_provider_backed_extractor_replaces_only_transient_body() -> None:
+    article = CleanArticleForAnalysis(
+        article_hash="hash-provider",
+        account_name="福建闽融鸡蛋报价平台",
+        title="报价",
+        publish_time=datetime(2026, 7, 9, 8, 30),
+        author=None,
+        digest=None,
+        content_length=10,
+        article_url="https://mp.weixin.qq.com/s/provider",
+    )
+    provider = FakeContentProvider("1.红蛋价格：4.90元/筐装(稳)")
+
+    result = ProviderBackedArticleTransientExtractor(provider).extract(article)
+
+    assert result.transient_body_text == "1.红蛋价格：4.90元/筐装(稳)"
+    assert result.transient_html_tables == []
+    assert result.transient_ocr_tables == []
+    assert provider.seen_sources[0].article_hash == article.article_hash
+    assert provider.seen_sources[0].article_url == article.article_url
+
+
+class FakeContentProvider:
+    def __init__(self, body_text: str) -> None:
+        self.body_text = body_text
+        self.seen_sources = []
+
+    def parse(self, source):
+        from app.content.article_content import ArticleContent
+
+        self.seen_sources.append(source)
+        return ArticleContent(
+            body_text=self.body_text,
+            title=source.title,
+            publish_time=source.publish_time,
+            author=source.author,
+            digest=source.digest,
+            source="werss",
+        )
 
 
 def test_extract_transient_article_data_reads_js_content_tables_and_context() -> None:

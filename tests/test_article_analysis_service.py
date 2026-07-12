@@ -212,7 +212,31 @@ def test_article_analysis_service_marks_article_task_failed_without_group_side_e
     assert repo.analyses == []
     assert repo.daily_report_dates == []
     assert repo.successes == []
-    assert repo.failures == [("hash-err", "extract failed")]
+    assert repo.failures == [("hash-err", "RuntimeError")]
+
+
+def test_article_analysis_service_redacts_provider_failure_and_leaves_task_retryable() -> None:
+    secret_body = "内部正文报价 999 元"
+    source = CleanArticleForAnalysis(
+        article_hash="hash-provider-error",
+        account_name="行业观察",
+        title="解析失败文章",
+        publish_time=datetime(2026, 7, 6, 8, 30),
+        author=None,
+        digest=None,
+        content_length=0,
+        article_url="https://mp.weixin.qq.com/s/error",
+    )
+    repo = FakeArticleAnalysisRepo([source])
+    service = ArticleAnalysisService(repo=repo, extractor=SensitiveFailingExtractor(secret_body))
+
+    result = service.analyze_once(limit=1, analyze_time=datetime(2026, 7, 6, 9, 0))
+
+    assert result.failed_count == 1
+    assert repo.analyses == []
+    assert repo.successes == []
+    assert repo.failures == [("hash-provider-error", "RuntimeError")]
+    assert secret_body not in repo.failures[0][1]
 
 
 def test_article_analysis_service_can_disable_egg_price_extraction() -> None:
@@ -314,3 +338,11 @@ class FakeTransientExtractor:
 class FailingTransientExtractor:
     def extract(self, article: CleanArticleForAnalysis) -> CleanArticleForAnalysis:
         raise RuntimeError("extract failed")
+
+
+class SensitiveFailingExtractor:
+    def __init__(self, secret_body: str) -> None:
+        self.secret_body = secret_body
+
+    def extract(self, article: CleanArticleForAnalysis) -> CleanArticleForAnalysis:
+        raise RuntimeError(self.secret_body)

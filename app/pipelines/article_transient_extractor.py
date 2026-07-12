@@ -4,7 +4,9 @@ import re
 from dataclasses import dataclass, replace
 from typing import Any
 
+from app.content.article_content import ArticleContentProvider
 from app.domain.article_analysis import CleanArticleForAnalysis
+from app.domain.article_parsing import ArticleParseSource
 from app.pipelines.article_parse_service import resolve_playwright_browser_executable_path
 
 
@@ -21,6 +23,30 @@ class ArticleTransientData:
     body_text: str
     html_tables: list[dict[str, Any]]
     ocr_tables: list[dict[str, Any]]
+
+
+class ProviderBackedArticleTransientExtractor:
+    def __init__(self, provider: ArticleContentProvider) -> None:
+        self.provider = provider
+
+    def extract(self, article: CleanArticleForAnalysis) -> CleanArticleForAnalysis:
+        content = self.provider.parse(
+            ArticleParseSource(
+                article_hash=article.article_hash,
+                account_name=article.account_name,
+                title=article.title,
+                article_url=article.article_url,
+                publish_time=article.publish_time,
+                author=article.author,
+                digest=article.digest,
+            )
+        )
+        return replace(
+            article,
+            transient_body_text=content.body_text,
+            transient_html_tables=[],
+            transient_ocr_tables=[],
+        )
 
 
 class PlaywrightArticleTransientExtractor:

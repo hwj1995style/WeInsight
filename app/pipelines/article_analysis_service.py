@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Protocol
 
+from app.content.article_content import ContentFetchError
 from app.domain.article_analysis import AnalyzedArticle, CleanArticleForAnalysis, analyze_clean_article
 
 
@@ -87,7 +88,8 @@ class ArticleAnalysisService:
                 self.repo.mark_analyze_task_success(article.article_hash)
                 success_count += 1
             except Exception as exc:
-                self.repo.mark_analyze_task_failed(article.article_hash, str(exc))
+                error_summary = exc.code if isinstance(exc, ContentFetchError) else type(exc).__name__
+                self.repo.mark_analyze_task_failed(article.article_hash, error_summary)
                 failed_count += 1
 
         return ArticleAnalysisResult(
