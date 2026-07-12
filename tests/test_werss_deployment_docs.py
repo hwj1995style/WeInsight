@@ -135,3 +135,14 @@ def test_werss_operations_guide_reflects_completed_downstream_and_locator_gates(
     assert "现有适配器 locator 提取数为 0" not in guide
     assert "下游白名单已实现" in guide
     assert "25/25 locator" in guide
+
+
+def test_active_rss_docs_forbid_restoring_retired_article_rpa():
+    guide = Path("docs/operations/公众号RSS采集运行手册.md").read_text("utf-8")
+    poc = Path("docs/operations/公众号RSS受控POC验收记录.md").read_text("utf-8")
+
+    for text in (guide, poc):
+        assert "公众号 RPA 已删除" in text
+        assert "不得恢复或重新运行公众号 RPA" in text
+    assert "可停止 RSS 调度并恢复旧链路" not in poc
+    assert "公众号 RPA 仍保留且可作为回退" not in poc

@@ -2,6 +2,8 @@
 
 本手册用于在 Windows 采集机的 Docker Desktop 中运行 WeRSS，并通过标准 RSS/Atom 向 WeInsight 提供公众号文章。WeRSS 只监听 `127.0.0.1`，连接现有外部 MySQL；禁止将管理端口开放到公网。WeInsight 不读取 WeRSS 私有表或管理 API。
 
+公众号 RPA 已删除。现行回滚只能停止 RSS、恢复已批准的 RSS 代码版本和对应数据库备份；不得恢复或重新运行公众号 RPA。
+
 ## 上线前准备
 
 1. 安装并启动 Docker Desktop，确认 `docker compose version` 可用。
@@ -54,7 +56,7 @@ docker inspect --format '{{.State.Health.Status}}' $(docker compose --env-file d
 
 ## 单公众号 24 小时 POC
 
-POC 期间仅运行单公众号 RSS，不同时运行该公众号的旧 RPA。连续观察至少 24 小时并逐篇对账：公众号实际发布记录、WeRSS Feed 条目和 WeInsight 原始文章三方的标题、链接与发布时间应一致；不得有重复业务文章。
+POC 期间仅运行单公众号 RSS。连续观察至少 24 小时并逐篇对账：公众号实际发布记录、WeRSS Feed 条目和 WeInsight 原始文章三方的标题、链接与发布时间应一致；不得有重复业务文章。
 
 验收记录至少包含每次 Feed 可见时间、入库时间、最近成功拉取时间、连续失败次数、连续空 Feed 次数和后处理积压。公众号新文章在 Feed 可见后须在 15 分钟内进入 `wechat_article_raw`。RSS 运行不得获取 `wechat_ui_lock`；退出微信客户端后 RSS 仍应正常。
 
@@ -143,13 +145,13 @@ docker inspect --format '{{.State.Health.Status}}' $(docker compose --env-file d
 python -m app.main article-account-list --config config/config.prod.yaml
 ```
 
-## 最终删除公众号 RPA 的准入条件
+## 最终删除公众号 RPA（已完成退役审计）
 
-最终删除公众号 RPA 代码、配置、专属测试和数据库对象前，必须同时满足：
+公众号 RPA 已删除，以下条目仅保留为切换决策的历史审计条件，不再是可执行的删除步骤：
 
 1. 单公众号 RSS 连续 24 小时验收通过，3 个公众号扩容观察也无阻断问题。
 2. Feed 可见后 15 分钟内入库、无重复业务文章、既有后处理和日报无退化。
 3. 已验证微信退出不阻塞 RSS，WeRSS 停止不阻塞微信群及已有文章后处理，RSS 不获取 `wechat_ui_lock`。
 4. 已完成并验证 WeInsight 与 WeRSS 的独立备份，保留切换前代码提交和恢复记录，并获得人工变更批准。
 
-最终删除后不再提供公众号旧 RPA 的运行时应急入口。此后的回滚只能停止 RSS 新链路，并恢复切换前代码与相应数据库备份。
+当前不提供公众号旧 RPA 的运行时应急入口。此后的回滚只能停止 RSS 新链路，并恢复已批准的 RSS 代码版本与相应数据库备份；不得恢复或重新运行公众号 RPA。
