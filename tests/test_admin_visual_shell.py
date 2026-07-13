@@ -1,6 +1,59 @@
 from pathlib import Path
 import subprocess
 
+import pytest
+from fastapi import FastAPI
+
+from test_web_dashboard import (
+    authenticated_client,
+    config,
+    dashboard_service,
+    raw_client,
+    FakeAuthService,
+)
+from test_web_runtime import FakeRuntimeMonitorService
+from app.web.app import create_app
+
+
+@pytest.fixture
+def runtime_service():
+    return FakeRuntimeMonitorService()
+
+
+@pytest.fixture
+def app(config, dashboard_service, runtime_service) -> FastAPI:
+    return create_app(
+        config,
+        auth_service=FakeAuthService(),
+        dashboard_service=dashboard_service,
+        runtime_monitor_service=runtime_service,
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/dashboard", "/sources/groups", "/sources/articles", "/jobs",
+        "/runs", "/events", "/workers", "/results/groups", "/reports",
+    ),
+)
+def test_admin_pages_use_shared_direction_a_shell(authenticated_client, path):
+    response = authenticated_client.get(path)
+
+    assert response.status_code == 200
+    for fragment in ('class="app-shell"', 'class="sidebar"', 'class="top-toolbar"'):
+        assert fragment in response.text
+    for unsafe_copy in ("security-warning", "默认密码", "admin123456"):
+        assert unsafe_copy not in response.text
+
+
+def test_login_does_not_advertise_default_credentials(raw_client):
+    response = raw_client.get("/login")
+
+    assert response.status_code == 200
+    for unsafe_copy in ("默认账号", "默认密码", "修改默认密码", "admin123456"):
+        assert unsafe_copy not in response.text
+
 
 def test_account_and_editor_pages_use_shared_heading_and_actions():
     paths = (

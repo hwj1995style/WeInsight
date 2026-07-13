@@ -24,3 +24,10 @@
 - 变更仅涉及语义容器和 CSS 类复用，无请求契约变化。
 - 表格结构及 `.table-scroll`、`tabindex="0"`、ARIA 标签均未改动。
 - 简报示例中的 `authenticated_client` 并非本仓库全局 fixture，因此未引入会导致测试收集错误的动态测试；现有各 Web 模块测试已覆盖实际鉴权页面渲染。
+
+## 评审修复
+
+- 补充真实 `authenticated_client` 参数化响应测试，覆盖 Dashboard、来源、任务、运行、日志、Worker、结果和日报九个入口。
+- 每个入口均验证 HTTP 200、共享 `app-shell` / `sidebar` / `top-toolbar`，并禁止 `security-warning`、默认密码文案与 `admin123456`。
+- 补充 `/login` 响应验收，禁止默认账号、默认密码、修改默认密码建议和示例默认密码，同时不影响登录表单字段。
+- 测试 app 复用既有 Dashboard 与 Runtime 假服务，仅完善测试基础设施，未修改生产行为。
