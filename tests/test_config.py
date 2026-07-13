@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -14,7 +15,7 @@ def test_load_config_expands_mysql_password() -> None:
     assert config.mysql.host == "127.0.0.1"
     assert config.mysql.port == 3307
     assert config.mysql.database == "weinsight_dev"
-    assert config.mysql.password == "weinsight_dev"
+    assert config.mysql.password == os.environ["WEINSIGHT_MYSQL_PASSWORD"]
 
 
 def test_pipeline_capacity_defaults_match_design() -> None:
