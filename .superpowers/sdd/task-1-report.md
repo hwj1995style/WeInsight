@@ -85,3 +85,35 @@ python -m pytest tests/test_config.py -q
 - 修改：`tests/test_config.py`、`app/core/config.py`、`.superpowers/sdd/task-1-report.md`。
 - 未修改 YAML、旧 RPA 或其他运行逻辑。
 - 无遗留 concerns。
+
+## Review fix 2：凭据字符域精确对齐
+
+复审指出首尾普通空格不属于 Unicode `C*` 控制类字符，上一轮的 `value != value.strip()` 超出了批准契约。本轮将契约精确调整为：值必须为 `str`、去除普通空白后不得为空、不得包含 Unicode 控制类字符；非空凭据中的普通首尾空格原样保留。
+
+新增覆盖：
+
+- AK/SK 的 `None`、整数、布尔值、列表值均稳定抛出包含对应字段名的 `ValueError`。
+- 全空格字符串作为无意义凭据被拒绝。
+- `" surrounded "` 作为非空且无控制字符的凭据被接受并原样保留。
+
+### Review fix 2 RED
+
+```text
+python -m pytest tests/test_config.py -q
+................FF...................................................... [ 92%]
+......                                                                   [100%]
+2 failed, 76 passed in 1.20s
+```
+
+两个失败分别为 access key 与 secret key 的首尾普通空格正向用例被旧的 `value != value.strip()` 校验拒绝，符合预期 RED 原因。
+
+### Review fix 2 GREEN
+
+```text
+python -m pytest tests/test_config.py -q
+........................................................................ [ 92%]
+......                                                                   [100%]
+78 passed in 1.03s
+```
+
+最小生产修改仅将首尾空格禁令替换为全空白拒绝；无 YAML、旧 RPA 或其他运行逻辑变更。无遗留 concerns。

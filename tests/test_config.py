@@ -56,8 +56,22 @@ def test_article_catalog_rejects_nonexact_base_url(base_url):
 
 
 @pytest.mark.parametrize("field", ["werss_access_key", "werss_secret_key"])
-@pytest.mark.parametrize("value", ["", " surrounded ", "unsafe\nvalue", "unsafe\u200bvalue"])
+@pytest.mark.parametrize("value", ["", "   ", "unsafe\nvalue", "unsafe\u200bvalue"])
 def test_article_catalog_rejects_unsafe_credentials(field, value):
+    with pytest.raises(ValueError, match=field):
+        replace(valid_article_config(), **{field: value})
+
+
+@pytest.mark.parametrize("field", ["werss_access_key", "werss_secret_key"])
+def test_article_catalog_preserves_credentials_surrounded_by_spaces(field):
+    config = replace(valid_article_config(), **{field: " surrounded "})
+
+    assert getattr(config, field) == " surrounded "
+
+
+@pytest.mark.parametrize("field", ["werss_access_key", "werss_secret_key"])
+@pytest.mark.parametrize("value", [None, 1, True, ["secret"]])
+def test_article_catalog_rejects_nonstring_credentials(field, value):
     with pytest.raises(ValueError, match=field):
         replace(valid_article_config(), **{field: value})
 

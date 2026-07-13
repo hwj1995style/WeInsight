@@ -101,7 +101,7 @@ class ArticlePipelineConfig:
             if (
                 not isinstance(value, str)
                 or not value
-                or value != value.strip()
+                or not value.strip()
                 or any(category(character).startswith("C") for character in value)
             ):
                 raise ValueError(f"{field} must be a non-empty string without control characters")
