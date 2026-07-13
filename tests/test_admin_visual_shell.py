@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 
 
 def test_base_template_contains_professional_sidebar_shell():
@@ -17,3 +18,39 @@ def test_app_shell_script_persists_and_closes_navigation():
     assert "localStorage" in script
     assert "Escape" in script
     assert "aria-expanded" in script
+
+
+def test_storage_failures_do_not_disable_interactions_and_toggle_label():
+    app_shell = Path("app/web/static/app-shell.js").resolve().as_posix()
+    harness = f"""
+const assert = require('node:assert/strict');
+class Element {{
+  constructor() {{ this.attrs = {{}}; this.listeners = {{}}; this.dataset = {{ sidebarState: 'expanded' }}; this.hidden = true; this.classList = {{ values: new Set(), add: x => this.classList.values.add(x), remove: x => this.classList.values.delete(x) }}; }}
+  setAttribute(name, value) {{ this.attrs[name] = value; }}
+  addEventListener(name, handler) {{ this.listeners[name] = handler; }}
+  querySelectorAll() {{ return [link]; }}
+}}
+const shell = new Element(); const sidebar = new Element(); const desktop = new Element();
+const mobile = new Element(); const backdrop = new Element(); const link = new Element();
+const documentListeners = {{}};
+global.document = {{
+  querySelector: () => shell,
+  getElementById: id => ({{ 'app-sidebar': sidebar, 'sidebar-toggle': desktop, 'mobile-nav-toggle': mobile, 'nav-backdrop': backdrop }})[id],
+  addEventListener: (name, handler) => {{ documentListeners[name] = handler; }},
+}};
+global.localStorage = {{ getItem() {{ throw new Error('blocked'); }}, setItem() {{ throw new Error('blocked'); }} }};
+require('{app_shell}');
+assert.equal(shell.dataset.sidebarState, 'expanded');
+assert.equal(desktop.attrs['aria-label'], '折叠侧栏');
+desktop.listeners.click();
+assert.equal(shell.dataset.sidebarState, 'collapsed');
+assert.equal(desktop.attrs['aria-label'], '展开侧栏');
+mobile.listeners.click();
+assert.equal(mobile.attrs['aria-expanded'], 'true');
+assert.equal(backdrop.hidden, false);
+documentListeners.keydown({{ key: 'Escape' }});
+assert.equal(mobile.attrs['aria-expanded'], 'false');
+mobile.listeners.click(); link.listeners.click();
+assert.equal(mobile.attrs['aria-expanded'], 'false');
+"""
+    subprocess.run(["node", "-e", harness], check=True, capture_output=True, text=True)
