@@ -12,6 +12,7 @@ from app.services.collection_job_service import (
     CreateCollectionJobCommand,
     JobListFilter,
     JobMixedPipelineError,
+    ManagedJobMutationError,
     JobNotFoundError,
     JobOverlapError,
     JobStateTransitionError,
@@ -536,6 +537,19 @@ def test_repeated_delete_is_idempotent_and_active_delete_is_rejected() -> None:
     active = Engine([Result(rows=[{"status": "active", "version": 4}])])
     with pytest.raises(JobStateTransitionError):
         MysqlCollectionJobRepo(active).soft_delete(11, 4, "admin", NOW)
+
+
+@pytest.mark.parametrize("method", ["request_stop", "soft_delete"])
+def test_repository_rejects_system_managed_job_mutation_under_row_lock(method) -> None:
+    engine = Engine([Result(rows=[{
+        "status": "active", "version": 1, "managed_key": "article_global"
+    }])])
+
+    with pytest.raises(ManagedJobMutationError):
+        getattr(MysqlCollectionJobRepo(engine), method)(11, 1, "admin", NOW)
+
+    assert len(engine.connection.executions) == 1
+    assert "FOR UPDATE" in engine.connection.executions[0][0]
 
 
 def test_get_job_attaches_shanghai_timezone_and_normalizes_mysql_times() -> None:

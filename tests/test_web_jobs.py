@@ -19,6 +19,7 @@ from app.services.collection_job_service import (
     CollectionJobDetail,
     CollectionJobSummary,
     JobMixedPipelineError,
+    ManagedJobMutationError,
     JobNotFoundError,
     JobOverlapError,
     JobStateTransitionError,
@@ -93,7 +94,7 @@ class FakeSourceService:
         return self.articles
 
 
-def _job_detail(status: JobStatus = JobStatus.ACTIVE, version: int = 3):
+def _job_detail(status: JobStatus = JobStatus.ACTIVE, version: int = 3, managed_key=None):
     return CollectionJobDetail(
         id=11,
         job_name="晨间群采集",
@@ -109,7 +110,27 @@ def _job_detail(status: JobStatus = JobStatus.ACTIVE, version: int = 3):
         status=status,
         next_run_at=NOW,
         version=version,
+        managed_key=managed_key,
     )
+
+
+def test_system_article_job_detail_hides_actions_and_direct_posts_are_rejected(authenticated_client, job_service):
+    job_service.detail = _job_detail(managed_key="article_global")
+
+    detail = authenticated_client.get("/jobs/11")
+    assert "/jobs/11/stop" not in detail.text
+    assert "/jobs/11/delete" not in detail.text
+
+    for action in ("stop", "delete"):
+        if action == "stop":
+            job_service.stop_error = ManagedJobMutationError("managed")
+        else:
+            job_service.delete_error = ManagedJobMutationError("managed")
+        response = authenticated_client.post(
+            f"/jobs/11/{action}",
+            data={"csrf_token": "test-csrf", "version": "3"},
+        )
+        assert response.status_code == 403
 
 
 class FakeJobService:

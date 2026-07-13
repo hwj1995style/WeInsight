@@ -19,6 +19,7 @@ from app.services.collection_job_service import (
     CreateCollectionJobCommand,
     JobListFilter,
     JobMixedPipelineError,
+    ManagedJobMutationError,
     JobNotFoundError,
     JobOverlapError,
     JobStateTransitionError,
@@ -327,6 +328,17 @@ async def _job_action(request: Request, job_id: int, action: str) -> Response:
             current,
             message,
             status_code=409,
+        )
+    except ManagedJobMutationError:
+        try:
+            current = await run_in_threadpool(service.get_job, job_id)
+        except JobNotFoundError:
+            current = None
+        return _job_detail_response(
+            request,
+            current,
+            "系统管理任务不允许人工停止或删除。",
+            status_code=403,
         )
     except JobValidationError:
         return _job_detail_response(

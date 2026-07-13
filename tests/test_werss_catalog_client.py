@@ -157,6 +157,23 @@ def test_invalid_item_fields_fail_closed(item) -> None:
     assert_error(client_for(lambda request: response([item])), "werss_catalog_invalid")
 
 
+@pytest.mark.parametrize(
+    "item",
+    [
+        {"id": "M" * 201, "mp_name": "name", "status": 1},
+        {"id": "MP1", "mp_name": "名" * 201, "status": 1},
+        {"id": " MP1", "mp_name": "name", "status": 1},
+        {"id": "MP1 ", "mp_name": "name", "status": 1},
+        {"id": "MP1", "mp_name": " name", "status": 1},
+        {"id": "MP1", "mp_name": "name\n", "status": 1},
+        {"id": "MP\x00", "mp_name": "name", "status": 1},
+        {"id": "MP1", "mp_name": "na\x1fme", "status": 1},
+    ],
+)
+def test_database_identity_fields_reject_oversize_whitespace_and_controls(item) -> None:
+    assert_error(client_for(lambda request: response([item])), "werss_catalog_invalid")
+
+
 def test_duplicate_ids_fail_closed() -> None:
     item = {"id": "MP1", "mp_name": "name", "status": 1}
     assert_error(client_for(lambda request: response([item, item])), "werss_catalog_invalid")

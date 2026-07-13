@@ -36,6 +36,7 @@
         {% if history.events %}<ol class="event-list compact-events">{% for event in history.events %}<li><time>{{ event.create_time.strftime("%m-%d %H:%M:%S") }}</time><strong>{{ event.event_type }}</strong><span>{{ event.message }}</span></li>{% endfor %}</ol>{% else %}<p class="muted">暂无操作事件。</p>{% endif %}
       </section>
     </div>
+    {% if job.managed_key != "article_global" %}
     <section class="content-panel job-action-panel" aria-label="任务操作">
       <div>
         <h2>任务操作</h2>
@@ -63,6 +64,7 @@
         </form>
       {% endif %}
     </section>
+    {% endif %}
   {% else %}
     <section class="content-panel narrow">
       <h1>无法显示任务</h1>

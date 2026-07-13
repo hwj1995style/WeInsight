@@ -7,13 +7,15 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.domain.admin_results import PagedResult
-from app.domain.collection_jobs import JobStatus, PipelineType
+from app.domain.collection_jobs import JobStatus, PipelineType, ScheduleSpec
 from app.services.collection_job_service import (
     CollectionJobService,
     CreateCollectionJobCommand,
     JobListFilter,
     JobNotFoundError,
     JobValidationError,
+    ManagedJobMutationError,
+    CollectionJobDetail,
 )
 
 
@@ -83,6 +85,24 @@ def test_create_deduplicates_ids_and_allows_now_grid(service, repo) -> None:
     assert status is JobStatus.ACTIVE
     assert next_run == NOW
     assert actor == "admin"
+
+
+def test_system_article_job_cannot_be_stopped_or_deleted(service, repo) -> None:
+    repo.details[11] = CollectionJobDetail(
+        id=11, job_name="system", pipeline_type=PipelineType.ARTICLE,
+        target_names=(), schedule=ScheduleSpec(
+            effective_start_at=NOW, effective_end_at=datetime(2026, 7, 12, 18, 0, tzinfo=ZONE),
+            daily_window_start=time(0), daily_window_end=time(0), interval_seconds=600,
+        ), status=JobStatus.ACTIVE, next_run_at=NOW, version=1,
+        managed_key="article_global",
+    )
+
+    with pytest.raises(ManagedJobMutationError):
+        service.request_stop(11, 1, "admin", NOW)
+    with pytest.raises(ManagedJobMutationError):
+        service.delete_job(11, 1, "admin", NOW)
+    assert repo.stop_calls == []
+    assert repo.delete_calls == []
 
 
 def test_future_job_is_scheduled_even_when_window_is_current(service, repo) -> None:

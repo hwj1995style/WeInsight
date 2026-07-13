@@ -198,6 +198,67 @@ def test_repo_uses_named_lock_row_lock_one_transaction_and_releases():
     assert repo.engine.wrapper.transaction.committed
 
 
+def test_repo_renames_history_only_when_old_name_identifies_one_config():
+    connection = Connection(rows=({
+        "id": 1, "account_name": "旧名", "feed_url": "http://old",
+        "werss_source_id": "MP1", "upstream_status": "active",
+        "upstream_last_seen_at": NOW, "upstream_missing_at": None,
+    },))
+
+    MysqlWeRSSCatalogSyncRepo(Engine(connection)).sync_catalog(
+        (WeRSSCatalogItem("MP1", "新名", True),), (), NOW
+    )
+
+    history_updates = [
+        (sql, params) for sql, params in connection.executions
+        if "UPDATE wechat_article_raw" in sql or "UPDATE wechat_article_collect_log" in sql
+    ]
+    assert len(history_updates) == 2
+    assert all(params == {"old_name": "旧名", "new_name": "新名"} for _, params in history_updates)
+
+
+def test_repo_does_not_migrate_ambiguous_same_name_history():
+    common = {
+        "account_name": "同名", "upstream_status": "active",
+        "upstream_last_seen_at": NOW, "upstream_missing_at": None,
+    }
+    connection = Connection(rows=(
+        {"id": 1, "feed_url": "http://one", "werss_source_id": "MP1", **common},
+        {"id": 2, "feed_url": "http://two", "werss_source_id": "MP2", **common},
+    ))
+
+    MysqlWeRSSCatalogSyncRepo(Engine(connection)).sync_catalog(
+        (WeRSSCatalogItem("MP1", "新名", True), WeRSSCatalogItem("MP2", "同名", True)), (), NOW
+    )
+
+    assert all("UPDATE wechat_article_raw" not in sql for sql, _ in connection.executions)
+
+
+def test_repo_does_not_merge_history_into_another_sources_current_name():
+    connection = Connection(rows=(
+        {
+            "id": 1, "account_name": "旧名", "feed_url": "http://one",
+            "werss_source_id": "MP1", "upstream_status": "active",
+            "upstream_last_seen_at": NOW, "upstream_missing_at": None,
+        },
+        {
+            "id": 2, "account_name": "新名", "feed_url": "http://two",
+            "werss_source_id": "MP2", "upstream_status": "active",
+            "upstream_last_seen_at": NOW, "upstream_missing_at": None,
+        },
+    ))
+
+    MysqlWeRSSCatalogSyncRepo(Engine(connection)).sync_catalog(
+        (WeRSSCatalogItem("MP1", "新名", True), WeRSSCatalogItem("MP2", "另名", True)), (), NOW
+    )
+
+    risky_migrations = [
+        params for sql, params in connection.executions
+        if "UPDATE wechat_article_raw" in sql and params["old_name"] == "旧名"
+    ]
+    assert risky_migrations == []
+
+
 def test_repo_busy_rolls_back_transaction_and_still_releases_lock():
     connection = Connection(lock=0)
     repo = MysqlWeRSSCatalogSyncRepo(Engine(connection))

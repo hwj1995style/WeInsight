@@ -21,6 +21,7 @@ from app.services.collection_job_service import (
     CreateCollectionJobCommand,
     JobListFilter,
     JobMixedPipelineError,
+    ManagedJobMutationError,
     JobNotFoundError,
     JobOverlapError,
     JobStateTransitionError,
@@ -268,6 +269,7 @@ class MysqlCollectionJobRepo:
             status=JobStatus(str(row["status"])),
             next_run_at=_optional_db_datetime(row.get("next_run_at")),
             version=int(row["version"]),
+            managed_key=row.get("managed_key"),
         )
 
     def list_jobs(
@@ -334,6 +336,8 @@ class MysqlCollectionJobRepo:
     ) -> JobStatus:
         with self.engine.begin() as connection:
             row = self._lock_job(connection, job_id)
+            if row.get("managed_key") == "article_global":
+                raise ManagedJobMutationError("system-managed job cannot be mutated")
             current = JobStatus(str(row["status"]))
             if current in {JobStatus.STOP_REQUESTED, JobStatus.STOPPED}:
                 return current
@@ -383,6 +387,8 @@ class MysqlCollectionJobRepo:
     ) -> bool:
         with self.engine.begin() as connection:
             row = self._lock_job(connection, job_id)
+            if row.get("managed_key") == "article_global":
+                raise ManagedJobMutationError("system-managed job cannot be mutated")
             current = JobStatus(str(row["status"]))
             if current is JobStatus.DELETED:
                 return True
@@ -834,7 +840,8 @@ _GET_JOB = text(
         interval_seconds,
         status,
         next_run_at,
-        version
+        version,
+        managed_key
     FROM wechat_collection_job
     WHERE id = :job_id
     """
@@ -853,7 +860,7 @@ _GET_JOB_TARGET_NAMES = text(
 
 _LOCK_JOB = text(
     """
-    SELECT job.status, job.version,
+    SELECT job.status, job.version, job.managed_key,
         EXISTS(
             SELECT 1
             FROM wechat_collection_job_run run

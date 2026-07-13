@@ -65,6 +65,7 @@ class CollectionJobDetail:
     status: JobStatus
     next_run_at: datetime | None
     version: int
+    managed_key: str | None = None
 
 
 class JobValidationError(ValueError):
@@ -94,6 +95,10 @@ class JobNotFoundError(LookupError):
 
 
 class JobVersionConflictError(RuntimeError):
+    pass
+
+
+class ManagedJobMutationError(RuntimeError):
     pass
 
 
@@ -183,6 +188,7 @@ class CollectionJobService:
         self._validate_identity(expected_version, "expected_version")
         self._validate_actor(actor)
         self._validate_now(now)
+        self._reject_managed_mutation(job_id)
         return self.repo.request_stop(job_id, expected_version, actor, now)
 
     def delete_job(
@@ -196,7 +202,13 @@ class CollectionJobService:
         self._validate_identity(expected_version, "expected_version")
         self._validate_actor(actor)
         self._validate_now(now)
+        self._reject_managed_mutation(job_id)
         return self.repo.soft_delete(job_id, expected_version, actor, now)
+
+    def _reject_managed_mutation(self, job_id: int) -> None:
+        detail = self.repo.get_job(job_id)
+        if detail is not None and detail.managed_key == "article_global":
+            raise ManagedJobMutationError("system-managed job cannot be mutated")
 
     def list_jobs(
         self,

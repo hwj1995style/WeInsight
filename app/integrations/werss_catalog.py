@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
@@ -172,12 +173,21 @@ class WeRSSCatalogClient:
         status = raw_item.get("status")
         if (
             not isinstance(source_id, str)
-            or not source_id.strip()
+            or not WeRSSCatalogClient._valid_identity_text(source_id)
             or not isinstance(name, str)
-            or not name.strip()
+            or not WeRSSCatalogClient._valid_identity_text(name)
             or not isinstance(status, int)
             or isinstance(status, bool)
             or status not in {0, 1}
         ):
             raise WeRSSCatalogError("werss_catalog_invalid")
         return WeRSSCatalogItem(source_id, name, status == 1)
+
+    @staticmethod
+    def _valid_identity_text(value: str) -> bool:
+        return (
+            bool(value)
+            and len(value) <= 200
+            and value == value.strip()
+            and not any(unicodedata.category(char).startswith("C") for char in value)
+        )

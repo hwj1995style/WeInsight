@@ -291,8 +291,21 @@ class MysqlWeRSSCatalogSyncRepo:
                     raise WeRSSCatalogSyncBusyError()
                 rows = self._locked_rows(connection)
                 plan = plan_catalog_sync(rows, items, excluded, now)
+                rows_by_id = {row.id: row for row in rows}
+                name_counts: dict[str, int] = {}
+                for row in rows:
+                    name_counts[row.account_name] = name_counts.get(row.account_name, 0) + 1
                 for change in plan.changes:
-                    self._apply_change(connection, change)
+                    original = rows_by_id[change.row_id]
+                    self._apply_change(
+                        connection,
+                        change,
+                        original=original,
+                        original_name_is_unique=name_counts.get(
+                            original.account_name, 0
+                        ) == 1,
+                        new_name_was_unused=name_counts.get(change.name, 0) == 0,
+                    )
                 for insert in plan.inserts:
                     self._insert(connection, insert)
                 if plan.audit_required:
@@ -332,7 +345,30 @@ class MysqlWeRSSCatalogSyncRepo:
         ) for row in result)
 
     @staticmethod
-    def _apply_change(connection, change: CatalogChange) -> None:
+    def _apply_change(
+        connection,
+        change: CatalogChange,
+        *,
+        original: CatalogRow,
+        original_name_is_unique: bool,
+        new_name_was_unused: bool,
+    ) -> None:
+        if (
+            original.account_name != change.name
+            and original_name_is_unique
+            and new_name_was_unused
+        ):
+            rename_params = {"old_name": original.account_name, "new_name": change.name}
+            connection.execute(text("""
+                UPDATE wechat_article_raw
+                SET account_name = :new_name
+                WHERE account_name = :old_name
+            """), rename_params)
+            connection.execute(text("""
+                UPDATE wechat_article_collect_log
+                SET account_name = :new_name
+                WHERE account_name = :old_name
+            """), rename_params)
         connection.execute(text("""
             UPDATE wechat_public_account_config
             SET account_name = :account_name, feed_url = :feed_url,
