@@ -41,6 +41,37 @@ def test_article_catalog_interval_rejects_values_below_ten(minutes):
         replace(valid_article_config(), sync_interval_minutes=minutes)
 
 
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "http://localhost:8001",
+        "http://127.0.0.1:8001/",
+        "http://127.0.0.1:8001?catalog=1",
+        "http://user@127.0.0.1:8001",
+    ],
+)
+def test_article_catalog_rejects_nonexact_base_url(base_url):
+    with pytest.raises(ValueError, match="werss_catalog_base_url"):
+        replace(valid_article_config(), werss_catalog_base_url=base_url)
+
+
+@pytest.mark.parametrize("field", ["werss_access_key", "werss_secret_key"])
+@pytest.mark.parametrize("value", ["", " surrounded ", "unsafe\nvalue", "unsafe\u200bvalue"])
+def test_article_catalog_rejects_unsafe_credentials(field, value):
+    with pytest.raises(ValueError, match=field):
+        replace(valid_article_config(), **{field: value})
+
+
+@pytest.mark.parametrize("path", ["config/config.e2e.yaml", "config/config.poc.yaml"])
+def test_article_catalog_additional_configs_load(path):
+    article = load_config(Path(path)).pipelines.article
+
+    assert article.sync_interval_minutes == 10
+    assert article.werss_catalog_base_url == "http://127.0.0.1:8001"
+    assert article.werss_access_key == "WK-test-default"
+    assert article.werss_secret_key == "secret-test-default"
+
+
 def test_load_config_expands_mysql_password() -> None:
     config = load_config(Path("config/config.dev.yaml"))
 

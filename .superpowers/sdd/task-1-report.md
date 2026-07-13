@@ -49,3 +49,39 @@ python -m pytest tests/test_config.py -q
 ## Concerns
 
 无已知阻塞或遗留 concerns。Git 在 Windows 工作区提示未来可能将 LF 转换为 CRLF，此为仓库行尾策略提示，不影响测试或配置契约。
+
+## Review fix：严格边界回归测试
+
+根据 `task-1-review.md` 补充以下覆盖：
+
+- 非精确目录端点：localhost、尾随路径、查询参数、用户信息。
+- AK/SK 非法值：空字符串、首尾空白、换行控制字符、零宽格式字符。
+- `config/config.e2e.yaml` 与 `config/config.poc.yaml` 的加载、环境变量展开及 dataclass 构造。
+
+### Review fix RED
+
+测试先行运行：
+
+```text
+python -m pytest tests/test_config.py -q
+..........FF........................................................     [100%]
+2 failed, 66 passed in 1.01s
+```
+
+两个失败分别为 `werss_access_key` 与 `werss_secret_key` 的首尾空白值未抛出 `ValueError`。其他新增安全边界用例在既有实现上通过。
+
+### Review fix GREEN
+
+最小修复为要求 AK/SK 与其 `strip()` 结果完全一致。随后运行：
+
+```text
+python -m pytest tests/test_config.py -q
+....................................................................     [100%]
+68 passed in 0.92s
+```
+
+### Review fix 变更与 concerns
+
+- 修改：`tests/test_config.py`、`app/core/config.py`、`.superpowers/sdd/task-1-report.md`。
+- 未修改 YAML、旧 RPA 或其他运行逻辑。
+- 无遗留 concerns。
