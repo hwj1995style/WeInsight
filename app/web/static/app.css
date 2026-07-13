@@ -60,7 +60,7 @@ form button { margin-top: 1.25rem; }
 .icon-button svg { width: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .primary-nav { display: flex; flex: 1; flex-direction: column; gap: .2rem; padding: .75rem; }
 .primary-nav a { display: flex; align-items: center; gap: .75rem; min-height: 40px; padding: 0 .8rem; color: #c8d5e5; font-size: .9rem; font-weight: 620; border-left: 2px solid transparent; white-space: nowrap; }
-.nav-icon { flex: 0 0 20px; width: 20px; height: 20px; fill: currentColor; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.nav-icon { flex: 0 0 20px; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .primary-nav a:hover { color: #fff; background: var(--color-sidebar-hover); text-decoration: none; }
 .primary-nav a[aria-current="page"] { color: #fff; background: var(--color-sidebar-hover); border-left-color: #6eaeff; }
 .sidebar-account { display: grid; gap: .55rem; padding: 1rem; border-top: 1px solid var(--color-sidebar-border); font-size: .85rem; }

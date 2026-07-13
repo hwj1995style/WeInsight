@@ -123,8 +123,13 @@ def test_base_template_contains_professional_sidebar_shell():
 
 def test_collapsed_navigation_has_icons_and_accessible_names():
     text = Path("app/web/templates/base.html").read_text("utf-8")
+    css = Path("app/web/static/app.css").read_text("utf-8")
     assert text.count('class="nav-icon"') == 9
     assert text.count('class="nav-label"') == 9
+    nav_icon_rule = css.split(".nav-icon {", 1)[1].split("}", 1)[0]
+    assert "fill: none" in nav_icon_rule
+    assert "stroke: currentColor" in nav_icon_rule
+    assert "fill: currentColor" not in nav_icon_rule
     for label in ("总览", "微信群", "公众号", "任务", "运行", "日志", "Worker", "结果", "日报"):
         assert f'aria-label="{label}" title="{label}"' in text
 
