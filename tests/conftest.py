@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -12,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 @pytest.fixture(autouse=True)
 def default_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("WEINSIGHT_MYSQL_PASSWORD", "weinsight_dev")
+    if not os.getenv("WEINSIGHT_MYSQL_PASSWORD"):
+        monkeypatch.setenv("WEINSIGHT_MYSQL_PASSWORD", "weinsight_dev")
     monkeypatch.setenv("WEINSIGHT_WEB_HOST", "127.0.0.1")
     monkeypatch.setenv("WEINSIGHT_ENV", "test")
