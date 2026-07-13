@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Iterator
@@ -166,6 +167,23 @@ def test_events_page_strict_filters_and_safe_output(
     assert filters.target_run_id == 51
     assert filters.pipeline_type is PipelineType.GROUP
     assert filters.start_at.tzinfo is ZONE
+
+
+def test_events_page_does_not_link_target_without_run(
+    authenticated_client: TestClient,
+    runtime_service: RuntimeService,
+) -> None:
+    target_only = replace(_runtime_event(), run_id=None)
+    runtime_service.list_events = lambda filters, page, page_size: PagedResult(
+        [target_only], page, page_size, 1
+    )
+
+    response = authenticated_client.get("/events")
+
+    assert response.status_code == 200
+    assert "目标 #51" in response.text
+    assert "/runs/0" not in response.text
+    assert 'href="/runs/' not in response.text
 
 
 @pytest.mark.parametrize(

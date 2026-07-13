@@ -303,6 +303,7 @@ def test_run_detail_shows_local_path_as_text_only(
     assert "file://" not in response.text.lower()
     assert "最近事件" in response.text
     assert "ERROR · 目标处理完成" in response.text
+    assert 'id="target-51"' in response.text
 
 
 def test_article_run_detail_shows_rss_metrics_without_rpa_presentation(
