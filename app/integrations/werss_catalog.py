@@ -37,6 +37,11 @@ class WeRSSCatalogError(RuntimeError):
         self.code = code
 
 
+def normalize_werss_source_name(name: str) -> str:
+    """Return the catalog identity form used for exact source-name rules."""
+    return name.strip()
+
+
 class WeRSSCatalogClient:
     def __init__(
         self,

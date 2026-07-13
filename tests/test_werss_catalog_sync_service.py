@@ -42,6 +42,19 @@ def test_sync_excludes_yixiangdan_on_server():
     assert repo.calls == [((client.items[0],), (client.items[1],), NOW)]
 
 
+def test_sync_excludes_yixiangdan_after_name_normalization():
+    client, repo = Client(), Repo()
+    client.items = (
+        WeRSSCatalogItem("MP1", " 一箱蛋", True),
+        WeRSSCatalogItem("MP2", "一箱蛋 ", False),
+    )
+
+    summary = WeRSSCatalogSyncService(client, repo).sync(NOW)
+
+    assert (summary.created, summary.excluded) == (0, 2)
+    assert repo.calls == [((), client.items, NOW)]
+
+
 def test_failed_incomplete_catalog_never_enters_repository():
     client, repo = Client(), Repo()
     client.error = WeRSSCatalogError("werss_catalog_incomplete")
@@ -50,4 +63,3 @@ def test_failed_incomplete_catalog_never_enters_repository():
         WeRSSCatalogSyncService(client, repo).sync(NOW)
 
     assert repo.calls == []
-

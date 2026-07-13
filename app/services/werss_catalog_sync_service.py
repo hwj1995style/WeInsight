@@ -3,7 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
-from app.integrations.werss_catalog import WeRSSCatalogClient, WeRSSCatalogItem
+from app.integrations.werss_catalog import (
+    WeRSSCatalogClient,
+    WeRSSCatalogItem,
+    normalize_werss_source_name,
+)
 from app.storage.werss_catalog_sync_repo import CatalogSyncSummary
 
 
@@ -22,6 +26,12 @@ class WeRSSCatalogSyncService:
 
     def sync(self, now: datetime) -> CatalogSyncSummary:
         catalog = self.client.fetch_all()
-        excluded = tuple(item for item in catalog if item.name == "一箱蛋")
-        included = tuple(item for item in catalog if item.name != "一箱蛋")
+        excluded = tuple(
+            item for item in catalog
+            if normalize_werss_source_name(item.name) == "一箱蛋"
+        )
+        included = tuple(
+            item for item in catalog
+            if normalize_werss_source_name(item.name) != "一箱蛋"
+        )
         return self.repo.sync_catalog(included, excluded, now)

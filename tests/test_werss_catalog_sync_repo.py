@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 
 import pytest
 
@@ -76,22 +77,67 @@ def test_plan_handles_disabled_missing_restore_and_historical_exclusion():
     assert (plan.summary.disabled, plan.summary.missing, plan.summary.restored, plan.summary.excluded) == (1, 1, 1, 1)
 
 
+@pytest.mark.parametrize(
+    ("existing", "source_id"),
+    [
+        (row(1, "旧排除名", "http://old", "MPX", "active"), "MPX"),
+        (row(1, "旧排除名", "http://127.0.0.1:8001/feed/MPX.atom", None, "active"), "MPX"),
+        (row(1, " 一箱蛋 ", None, None, "active"), "MPX"),
+    ],
+)
+def test_excluded_item_binds_by_id_feed_or_normalized_exact_name(existing, source_id):
+    item = WeRSSCatalogItem(source_id, " 一箱蛋 ", True)
+
+    plan = plan_catalog_sync((existing,), (), (item,), NOW)
+
+    assert len(plan.changes) == 1
+    change = plan.changes[0]
+    assert (change.row_id, change.source_id, change.feed_url, change.status) == (
+        1,
+        source_id,
+        f"http://127.0.0.1:8001/feed/{source_id}.atom",
+        "excluded",
+    )
+
+
+def test_unmatched_historical_exclusion_preserves_null_identity_and_feed():
+    historical = row(1, " 一箱蛋 ", None, None, "active")
+
+    plan = plan_catalog_sync((historical,), (), (), NOW)
+
+    change = plan.changes[0]
+    assert change.status == "excluded"
+    assert change.source_id is None
+    assert change.feed_url is None
+
+
 class Result:
     def __init__(self, rows=(), scalar=None): self.rows, self._scalar = rows, scalar
     def scalar_one(self): return self._scalar
     def mappings(self): return self
     def all(self): return list(self.rows)
+    def first(self): return self.rows[0] if self.rows else None
 
 
 class Connection:
-    def __init__(self, lock=1, fail_on_insert=False):
-        self.lock, self.fail_on_insert, self.executions = lock, fail_on_insert, []
+    def __init__(self, lock=1, fail_on_insert=False, fail_on_release=False, rows=()):
+        self.lock, self.fail_on_insert = lock, fail_on_insert
+        self.fail_on_release, self.rows, self.executions = fail_on_release, rows, []
+        self.audit_metrics = None
+        self.invalidated = False
+    def invalidate(self): self.invalidated = True
     def execute(self, statement, params=None):
         sql = str(statement); self.executions.append((sql, params))
         if "GET_LOCK" in sql: return Result(scalar=self.lock)
-        if "RELEASE_LOCK" in sql: return Result(scalar=1)
-        if "SELECT" in sql and "FOR UPDATE" in sql: return Result([])
+        if "RELEASE_LOCK" in sql:
+            if self.fail_on_release: raise RuntimeError("release failed")
+            return Result(scalar=1)
+        if "FROM wechat_public_account_config" in sql and "FOR UPDATE" in sql: return Result(self.rows)
+        if "FROM wechat_collection_job_event" in sql:
+            return Result(() if self.audit_metrics is None else ({"metrics_json": self.audit_metrics},))
         if self.fail_on_insert and "INSERT INTO" in sql: raise RuntimeError("boom")
+        if "INSERT INTO wechat_collection_job_event" in sql:
+            self.audit_metrics = params["metrics_json"]
         return Result()
 
 
@@ -107,6 +153,7 @@ class EngineConnection:
     def __exit__(self, *args): return False
     def begin(self): self.events.append("begin"); return self.transaction
     def execute(self, *args, **kwargs): self.events.append("execute"); return self.connection.execute(*args, **kwargs)
+    def invalidate(self): self.connection.invalidate()
 
 
 class Engine:
@@ -162,3 +209,90 @@ def test_new_source_insert_uses_compatibility_defaults_and_no_delete():
     assert (params["request_timeout_seconds"], params["daily_window_start"], params["daily_window_end"]) == (30, "00:00:00", "23:59:59")
     assert params["collect_today_only"] == 1
     assert all("DELETE" not in sql.upper() for sql, _ in connection.executions)
+
+
+def test_repo_writes_safe_structured_summary_audit_in_same_transaction():
+    connection = Connection()
+
+    summary = MysqlWeRSSCatalogSyncRepo(Engine(connection)).sync_catalog(
+        (WeRSSCatalogItem("MP1", "甲", True),), (), NOW
+    )
+
+    audit_sql, params = next(x for x in connection.executions if "INSERT INTO wechat_collection_job_event" in x[0])
+    assert "metrics_json" in audit_sql
+    assert params["event_type"] == "werss_catalog_sync_changed"
+    assert params["message"] == "WeRSS catalog synchronization changed source configuration."
+    assert params["actor_name"] == "werss-catalog-sync"
+    metrics = json.loads(params["metrics_json"])
+    digest = metrics.pop("catalog_digest")
+    assert len(digest) == 64
+    assert metrics == {"conflicts": 0, "created": 1, "disabled": 0, "excluded": 0, "missing": 0, "restored": 0, "updated": 0}
+    assert summary.created == 1
+
+
+def test_repo_does_not_write_audit_for_idempotent_no_change_catalog():
+    connection = Connection(rows=({
+        "id": 1,
+        "account_name": "甲",
+        "feed_url": "http://127.0.0.1:8001/feed/MP1.atom",
+        "werss_source_id": "MP1",
+        "upstream_status": "active",
+        "upstream_last_seen_at": NOW,
+        "upstream_missing_at": None,
+    },))
+
+    MysqlWeRSSCatalogSyncRepo(Engine(connection)).sync_catalog(
+        (WeRSSCatalogItem("MP1", "甲", True),), (), NOW
+    )
+
+    assert all("wechat_collection_job_event" not in sql for sql, _ in connection.executions)
+
+
+def test_repo_audits_conflict_even_without_source_write():
+    connection = Connection(rows=({
+        "id": 1, "account_name": "甲", "feed_url": None,
+        "werss_source_id": "OTHER", "upstream_status": "missing",
+        "upstream_last_seen_at": NOW, "upstream_missing_at": NOW,
+    },))
+
+    MysqlWeRSSCatalogSyncRepo(Engine(connection)).sync_catalog(
+        (WeRSSCatalogItem("MP1", "甲", True), WeRSSCatalogItem("OTHER", "甲旧", True)), (), NOW
+    )
+
+    params = next(params for sql, params in connection.executions if "INSERT INTO wechat_collection_job_event" in sql)
+    assert '"conflicts":1' in params["metrics_json"]
+
+
+def test_repo_deduplicates_identical_conflict_audit():
+    connection = Connection(rows=({
+        "id": 1, "account_name": "甲", "feed_url": None,
+        "werss_source_id": "OTHER", "upstream_status": "missing",
+        "upstream_last_seen_at": NOW, "upstream_missing_at": NOW,
+    },))
+    repo = MysqlWeRSSCatalogSyncRepo(Engine(connection))
+    items = (WeRSSCatalogItem("MP1", "甲", True), WeRSSCatalogItem("OTHER", "甲旧", True))
+
+    repo.sync_catalog(items, (), NOW)
+    repo.sync_catalog(items, (), NOW)
+
+    audit_inserts = [sql for sql, _ in connection.executions if "INSERT INTO wechat_collection_job_event" in sql]
+    assert len(audit_inserts) == 1
+
+
+def test_release_lock_failure_does_not_override_committed_success():
+    connection = Connection(fail_on_release=True)
+
+    summary = MysqlWeRSSCatalogSyncRepo(Engine(connection)).sync_catalog((), (), NOW)
+
+    assert summary.created == 0
+    assert connection.executions[-1][0].find("RELEASE_LOCK") >= 0
+    assert connection.invalidated
+
+
+def test_release_lock_failure_does_not_override_original_business_error():
+    connection = Connection(fail_on_insert=True, fail_on_release=True)
+
+    with pytest.raises(RuntimeError, match="^boom$"):
+        MysqlWeRSSCatalogSyncRepo(Engine(connection)).sync_catalog(
+            (WeRSSCatalogItem("MP1", "甲", True),), (), NOW
+        )
