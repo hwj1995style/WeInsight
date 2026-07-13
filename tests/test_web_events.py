@@ -16,7 +16,7 @@ from app.core.config import Config, load_config
 from app.domain.admin_results import PagedResult
 from app.domain.collection_jobs import PipelineType
 from app.services.auth_service import AuthenticatedAdmin
-from app.services.runtime_monitor_service import RuntimeEvent
+from app.services.runtime_monitor_service import RuntimeEvent, RunOutsideVisibilityError
 from app.storage.collection_event_repo import CollectionEvent
 from app.web.app import create_app
 from app.web.routes import events
@@ -62,6 +62,14 @@ class RuntimeService:
         self.calls.append((filters, page, page_size))
         return PagedResult([_runtime_event()], page, page_size, 1)
 
+    def get_run(self, run_id):
+        self.calls.append(("get_run", run_id))
+
+    def visible_since(self):
+        boundary = datetime(2026, 4, 13, 12, 30, tzinfo=ZONE)
+        self.calls.append(("visible_since", boundary))
+        return boundary
+
 
 def _collection_event(event_id=101, message="safe event") -> CollectionEvent:
     return CollectionEvent(
@@ -86,9 +94,9 @@ class EventRepo:
         self.calls = []
         self.in_call = False
 
-    def list_events(self, run_id, after_id, limit):
+    def list_events(self, run_id, after_id, limit, visible_since):
         self.in_call = True
-        self.calls.append((run_id, after_id, limit))
+        self.calls.append((run_id, after_id, limit, visible_since))
         result = self.batches.pop(0) if self.batches else []
         self.in_call = False
         return result
@@ -236,7 +244,9 @@ def _request(
     )
 
 
-def test_sse_response_headers_and_last_event_id_precedence(app: FastAPI) -> None:
+def test_sse_response_headers_and_last_event_id_precedence(
+    app: FastAPI, runtime_service: RuntimeService
+) -> None:
     request = _request(
         app=app,
         query=b"run_id=31&after_id=2",
@@ -251,6 +261,17 @@ def test_sse_response_headers_and_last_event_id_precedence(app: FastAPI) -> None
     assert response.headers["x-accel-buffering"] == "no"
     assert response.body_iterator.after_id == 100
     assert response.body_iterator.run_id == 31
+    assert runtime_service.calls == [("get_run", 31), ("visible_since", datetime(2026, 4, 13, 12, 30, tzinfo=ZONE))]
+
+
+def test_sse_expired_run_is_rejected_before_stream_creation(app: FastAPI, runtime_service: RuntimeService) -> None:
+    def expired(run_id):
+        raise RunOutsideVisibilityError("expired")
+    runtime_service.get_run = expired
+    with pytest.raises(Exception) as caught:
+        asyncio.run(events.event_stream(_request(app=app, query=b"run_id=31")))
+    assert caught.value.status_code == 404
+    assert caught.value.detail == "该记录已超出可查看范围"
 
 
 @pytest.mark.parametrize(
@@ -284,6 +305,7 @@ def test_sse_resumes_caps_batch_and_does_not_hold_connection_across_yield(
         event_repo=repo,
         run_id=31,
         after_id=100,
+        visible_since=datetime(2026, 4, 13, 12, 30, tzinfo=ZONE),
         max_polls=1,
         poll_seconds=0,
     )
@@ -298,7 +320,7 @@ def test_sse_resumes_caps_batch_and_does_not_hold_connection_across_yield(
     chunks = asyncio.run(consume())
     payload = "".join(chunks)
 
-    assert repo.calls == [(31, 100, 200)]
+    assert repo.calls == [(31, 100, 200, datetime(2026, 4, 13, 12, 30, tzinfo=ZONE))]
     assert "id: 101\n" in payload
     assert "event: collection\n" in payload
     data_line = next(line for line in payload.splitlines() if line.startswith("data: "))
@@ -318,6 +340,7 @@ def test_sse_seeded_after_initial_history_appends_only_new_event(
         event_repo=repo,
         run_id=31,
         after_id=103,
+        visible_since=datetime(2026, 4, 13, 12, 30, tzinfo=ZONE),
         max_polls=1,
         poll_seconds=0,
     )
@@ -327,7 +350,7 @@ def test_sse_seeded_after_initial_history_appends_only_new_event(
 
     payload = asyncio.run(consume())
 
-    assert repo.calls == [(31, 103, 200)]
+    assert repo.calls == [(31, 103, 200, datetime(2026, 4, 13, 12, 30, tzinfo=ZONE))]
     assert "id: 104\n" in payload
     for initial_id in (101, 102, 103):
         assert f"id: {initial_id}\n" not in payload
@@ -342,6 +365,7 @@ def test_sse_keepalive_disconnect_and_cancellation(app: FastAPI) -> None:
         event_repo=repo,
         run_id=None,
         after_id=None,
+        visible_since=datetime(2026, 4, 13, 12, 30, tzinfo=ZONE),
         max_polls=2,
         poll_seconds=0,
         keepalive_seconds=15,
@@ -360,6 +384,7 @@ def test_sse_keepalive_disconnect_and_cancellation(app: FastAPI) -> None:
         event_repo=EventRepo([[_collection_event()]]),
         run_id=None,
         after_id=None,
+        visible_since=datetime(2026, 4, 13, 12, 30, tzinfo=ZONE),
         max_polls=1,
         poll_seconds=0,
     )
@@ -377,6 +402,7 @@ def test_sse_keepalive_disconnect_and_cancellation(app: FastAPI) -> None:
         event_repo=EventRepo([[]]),
         run_id=None,
         after_id=None,
+        visible_since=datetime(2026, 4, 13, 12, 30, tzinfo=ZONE),
         max_polls=None,
         poll_seconds=1,
         sleeper=cancelled_sleep,

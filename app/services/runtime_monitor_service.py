@@ -306,6 +306,10 @@ class RunNotFoundError(LookupError):
     pass
 
 
+class RunOutsideVisibilityError(LookupError):
+    pass
+
+
 class RuntimeMonitorService:
     def __init__(
         self,
@@ -335,14 +339,19 @@ class RuntimeMonitorService:
     ) -> PagedResult[RunSummary]:
         _validate_run_filters(filters)
         _page(page, page_size, maximum=100)
-        visible_since = runtime_visibility_start(self.now_provider())
+        visible_since = self.visible_since()
         return self.repo.list_runs(filters, page, page_size, visible_since)
+
+    def visible_since(self) -> datetime:
+        return runtime_visibility_start(self.now_provider())
 
     def get_run(self, run_id: int) -> RunDetail:
         _positive_integer(run_id, "run_id")
         detail = self.repo.get_run(run_id)
         if detail is None:
             raise RunNotFoundError(f"run not found: {run_id}")
+        if detail.run.scheduled_at < self.visible_since():
+            raise RunOutsideVisibilityError(f"run outside visibility: {run_id}")
         return replace(
             detail,
             error_summary=_safe_optional(detail.error_summary),
@@ -357,7 +366,7 @@ class RuntimeMonitorService:
     ) -> PagedResult[RuntimeEvent]:
         _validate_event_filters(filters)
         _page(page, page_size, maximum=200)
-        visible_since = runtime_visibility_start(self.now_provider())
+        visible_since = self.visible_since()
         effective_filters = replace(
             filters,
             start_at=(

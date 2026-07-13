@@ -16,6 +16,7 @@ from app.services.runtime_monitor_service import (
     EventListFilter,
     RunListFilter,
     RunNotFoundError,
+    RunOutsideVisibilityError,
 )
 
 
@@ -97,21 +98,10 @@ async def run_detail(request: Request, run_id: int) -> Response:
             1,
             50,
         )
+    except RunOutsideVisibilityError:
+        return _detail_error_response(request, "该记录已超出可查看范围")
     except (RunNotFoundError, TypeError, ValueError):
-        return templates.TemplateResponse(
-            request=request,
-            name="runs/detail.html",
-            context={
-                "section": "runs",
-                "detail": None,
-                "events": (),
-                "initial_event_id": None,
-                "error": "运行实例不存在。",
-                "pipeline_labels": PIPELINE_LABELS,
-                "run_status_labels": RUN_STATUS_LABELS,
-            },
-            status_code=404,
-        )
+        return _detail_error_response(request, "运行实例不存在。")
     initial_events = tuple(reversed(events.items))
     initial_event_id = max(
         (event.id for event in initial_events),
@@ -129,6 +119,23 @@ async def run_detail(request: Request, run_id: int) -> Response:
             "pipeline_labels": PIPELINE_LABELS,
             "run_status_labels": RUN_STATUS_LABELS,
         },
+    )
+
+
+def _detail_error_response(request: Request, error: str) -> Response:
+    return templates.TemplateResponse(
+        request=request,
+        name="runs/detail.html",
+        context={
+            "section": "runs",
+            "detail": None,
+            "events": (),
+            "initial_event_id": None,
+            "error": error,
+            "pipeline_labels": PIPELINE_LABELS,
+            "run_status_labels": RUN_STATUS_LABELS,
+        },
+        status_code=404,
     )
 
 

@@ -18,6 +18,7 @@ from app.services.auth_service import AuthenticatedAdmin
 from app.services.runtime_monitor_service import (
     JobRuntimeHistory,
     RunDetail,
+    RunOutsideVisibilityError,
     RunSummary,
     RuntimeDashboardSnapshot,
     RuntimeEvent,
@@ -377,6 +378,22 @@ def test_run_detail_without_initial_events_omits_sse_cursor(
 
     assert "new EventSource('/events/stream?run_id=31')" in response.text
     assert "after_id=" not in response.text
+
+
+def test_expired_run_detail_has_distinct_404_and_skips_events(
+    authenticated_client: TestClient,
+    runtime_service: FakeRuntimeMonitorService,
+) -> None:
+    def expired(run_id):
+        runtime_service.calls.append(("get_run", run_id))
+        raise RunOutsideVisibilityError("expired run: 31")
+
+    runtime_service.get_run = expired
+    response = authenticated_client.get("/runs/31")
+    assert response.status_code == 404
+    assert "该记录已超出可查看范围" in response.text
+    assert "运行实例不存在" not in response.text
+    assert [call[0] for call in runtime_service.calls] == ["get_run"]
 
 
 def test_run_detail_invalid_path_never_echoes_original(

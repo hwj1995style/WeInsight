@@ -198,31 +198,35 @@ def test_list_events_uses_bound_stable_incremental_page() -> None:
         ]
     )
 
-    events = MysqlCollectionEventRepo(engine).list_events(41, 10, 20)
+    visible_since = datetime(2026, 4, 13, 12, 30, tzinfo=ZONE)
+    events = MysqlCollectionEventRepo(engine).list_events(41, 10, 20, visible_since)
 
     assert events[0].create_time == datetime(2026, 7, 10, 9, 30, tzinfo=ZONE)
     sql, params = engine.connection.executions[0]
     assert "run_id = :run_id" in sql
     assert "id > :after_id" in sql
+    assert "create_time >= :visible_since" in sql
     assert "ORDER BY id ASC" in sql
     assert "LIMIT :limit" in sql
-    assert params == {"run_id": 41, "after_id": 10, "limit": 20}
+    assert params == {"run_id": 41, "after_id": 10, "limit": 20,
+                      "visible_since": datetime(2026, 4, 13, 12, 30)}
 
 
 def test_list_events_none_run_means_all_runs_not_null_run_only() -> None:
     engine = Engine([Result(rows=[])])
-    assert MysqlCollectionEventRepo(engine).list_events(None, None, 50) == []
+    visible_since = datetime(2026, 4, 13, 12, 30, tzinfo=ZONE)
+    assert MysqlCollectionEventRepo(engine).list_events(None, None, 50, visible_since) == []
     sql, params = engine.connection.executions[0]
     assert "run_id =" not in sql
     assert "run_id IS NULL" not in sql
     assert "id >" not in sql
-    assert params == {"limit": 50}
+    assert params == {"limit": 50, "visible_since": datetime(2026, 4, 13, 12, 30)}
 
 
 @pytest.mark.parametrize("limit", [0, 501, True])
 def test_list_events_rejects_invalid_limit(limit) -> None:
     with pytest.raises(ValueError, match="limit"):
-        MysqlCollectionEventRepo(Engine([])).list_events(None, None, limit)
+        MysqlCollectionEventRepo(Engine([])).list_events(None, None, limit, datetime(2026, 4, 13, 12, 30, tzinfo=ZONE))
 
 
 def test_list_events_requires_real_shanghai_zone_from_database() -> None:
@@ -248,6 +252,14 @@ def test_list_events_requires_real_shanghai_zone_from_database() -> None:
             )
         ]
     )
-    event = MysqlCollectionEventRepo(aware_engine).list_events(None, None, 1)[0]
+    event = MysqlCollectionEventRepo(aware_engine).list_events(None, None, 1, datetime(2026, 4, 13, 12, 30, tzinfo=ZONE))[0]
     assert event.create_time == datetime(2026, 7, 10, 9, 30, tzinfo=ZONE)
     assert isinstance(event.create_time.tzinfo, ZoneInfo)
+
+
+def test_list_events_requires_shanghai_aware_visibility_boundary() -> None:
+    repo = MysqlCollectionEventRepo(Engine([]))
+    with pytest.raises(ValueError, match="visible_since"):
+        repo.list_events(None, None, 1, datetime(2026, 4, 13, 12, 30))
+    with pytest.raises(ValueError, match="visible_since"):
+        repo.list_events(None, None, 1, datetime(2026, 4, 13, 4, 30, tzinfo=timezone.utc))

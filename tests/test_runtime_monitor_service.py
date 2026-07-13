@@ -11,6 +11,10 @@ from app.domain.collection_jobs import PipelineType, RunStatus
 from app.services.runtime_monitor_service import (
     EventListFilter,
     RunListFilter,
+    RunDetail,
+    RunNotFoundError,
+    RunOutsideVisibilityError,
+    RunSummary,
     RuntimeDashboardSnapshot,
     RuntimeEvent,
     RuntimeMonitorService,
@@ -114,6 +118,38 @@ def test_list_calls_read_clock_once_and_apply_visibility_boundary(tmp_path: Path
     service.list_events(EventListFilter(start_at=later, end_at=NOW), 1, 50)
     assert repo.calls[-1][1].start_at == later
     assert repo.calls[-1][1].end_at == NOW
+
+
+def _detail_at(scheduled_at: datetime) -> RunDetail:
+    return RunDetail(
+        run=RunSummary(31, 7, "secret job", PipelineType.GROUP, scheduled_at,
+                       RunStatus.FAILED, "secret-worker", None, None, 0, 0, 0),
+        hostname=None, lease_expires_at=None, error_code=None,
+        error_summary="secret failure", targets=(),
+    )
+
+
+def test_get_run_enforces_visibility_boundary_without_leaking_detail(tmp_path: Path) -> None:
+    boundary = datetime(2026, 4, 13, 12, 0, tzinfo=ZONE)
+    repo = Repo()
+    service = RuntimeMonitorService(
+        repo, tmp_path, heartbeat_ttl_seconds=30,
+        now_provider=lambda: datetime(2026, 7, 13, 12, 0, tzinfo=ZONE),
+    )
+    repo.detail = _detail_at(boundary)
+    assert service.get_run(31).run.scheduled_at == boundary
+
+    repo.detail = _detail_at(boundary - timedelta(microseconds=1))
+    with pytest.raises(RunOutsideVisibilityError) as caught:
+        service.get_run(31)
+    message = str(caught.value)
+    assert "secret job" not in message
+    assert "secret-worker" not in message
+    assert "secret failure" not in message
+
+    repo.detail = None
+    with pytest.raises(RunNotFoundError):
+        service.get_run(31)
 
 
 def test_run_and_event_filters_validate_allowlisted_types(tmp_path: Path) -> None:

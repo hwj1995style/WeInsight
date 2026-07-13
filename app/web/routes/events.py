@@ -18,7 +18,12 @@ from fastapi.templating import Jinja2Templates
 
 from app.domain.admin_results import PagedResult
 from app.domain.collection_jobs import PipelineType
-from app.services.runtime_monitor_service import EVENT_LEVELS, EventListFilter
+from app.services.runtime_monitor_service import (
+    EVENT_LEVELS,
+    EventListFilter,
+    RunNotFoundError,
+    RunOutsideVisibilityError,
+)
 from app.storage.collection_event_repo import CollectionEvent, sanitize_output
 
 
@@ -109,11 +114,23 @@ async def event_stream(request: Request) -> StreamingResponse:
         run_id, after_id = _stream_parameters(request)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="Invalid event cursor") from exc
+    service = request.app.state.runtime_monitor_service
+    if run_id is not None:
+        try:
+            await run_in_threadpool(service.get_run, run_id)
+        except RunOutsideVisibilityError as exc:
+            raise HTTPException(
+                status_code=404, detail="该记录已超出可查看范围"
+            ) from exc
+        except RunNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="运行实例不存在") from exc
+    visible_since = service.visible_since()
     stream = CollectionEventStream(
         request=request,
         event_repo=request.app.state.event_repo,
         run_id=run_id,
         after_id=after_id,
+        visible_since=visible_since,
     )
     return StreamingResponse(
         stream,
@@ -133,6 +150,7 @@ class CollectionEventStream:
         event_repo,
         run_id: int | None,
         after_id: int | None,
+        visible_since: datetime,
         poll_seconds: float = 1.0,
         keepalive_seconds: float = 15.0,
         sleeper: Callable[[float], Awaitable[None]] = asyncio.sleep,
@@ -143,6 +161,7 @@ class CollectionEventStream:
         self.event_repo = event_repo
         self.run_id = run_id
         self.after_id = after_id
+        self.visible_since = visible_since
         self.poll_seconds = poll_seconds
         self.keepalive_seconds = keepalive_seconds
         self.sleeper = sleeper
@@ -163,6 +182,7 @@ class CollectionEventStream:
                 self.run_id,
                 self.after_id,
                 200,
+                self.visible_since,
             )
             polls += 1
             if events:

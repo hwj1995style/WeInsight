@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from app.domain.collection_jobs import APPLICATION_TIMEZONE
+from app.domain.collection_jobs import APPLICATION_TIMEZONE, ensure_schedule_datetime
 from app.domain.desensitize import mask_phone, mask_wechat_id
 
 
@@ -108,13 +108,18 @@ class MysqlCollectionEventRepo:
         run_id: int | None,
         after_id: int | None,
         limit: int,
+        visible_since: datetime,
     ) -> list[CollectionEvent]:
         _optional_identity(run_id, "run_id")
         _optional_identity(after_id, "after_id")
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
             raise ValueError("limit must be between 1 and 500")
-        conditions: list[str] = []
-        params: dict[str, Any] = {"limit": limit}
+        ensure_schedule_datetime(visible_since, field_name="visible_since")
+        conditions: list[str] = ["create_time >= :visible_since"]
+        params: dict[str, Any] = {
+            "limit": limit,
+            "visible_since": visible_since.replace(tzinfo=None),
+        }
         if run_id is not None:
             conditions.append("run_id = :run_id")
             params["run_id"] = run_id
