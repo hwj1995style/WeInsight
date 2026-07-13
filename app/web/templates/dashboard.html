@@ -3,14 +3,14 @@
 {% block content %}
   <div class="page-heading"><div><h1>实时总览</h1><p>安全聚合结果与运行控制面快照。最近更新时间 {{ runtime.generated_at.strftime("%Y-%m-%d %H:%M:%S") }}。</p></div></div>
   {% if not runtime_available %}<p class="notice error" role="status">运行控制面暂时不可用；采集结果和最后可渲染的零值结构仍可查看。</p>{% endif %}
-  <section class="kpi-grid runtime-kpi-grid" aria-label="实时运行指标">
+  <section class="kpi-grid runtime-kpi-grid dashboard-primary-kpis" aria-label="实时运行指标">
     <article class="kpi-card"><span>Collector / 全部 Worker</span><strong>{{ runtime.live_collector_count }} / {{ runtime.total_worker_count }}</strong><small>在线 Collector / 心跳记录</small></article>
     <article class="kpi-card"><span>微信状态</span><strong>{{ runtime.latest_wechat_status.value if runtime.latest_wechat_status else "暂无" }}</strong><small>{{ runtime.latest_wechat_checked_at.strftime("%m-%d %H:%M:%S") if runtime.latest_wechat_checked_at else "暂无完整检查" }}</small></article>
     <article class="kpi-card"><span>UI 锁</span><strong>{% if runtime.ui_lock_state == "live" %}占用中{% elif runtime.ui_lock_state == "expired" %}已过期{% elif runtime.ui_lock_state == "free" %}空闲{% else %}最小权限下不可用{% endif %}</strong><small>{% if runtime.ui_lock_state == "unavailable" %}状态未知，不代表 UI 锁空闲 · {% endif %}<a href="/workers">查看 Worker 与健康详情</a></small></article>
     <article class="kpi-card"><span>采集任务</span><strong>{{ runtime.active_job_count }} / {{ runtime.stop_requested_job_count }}</strong><small>运行中 {{ runtime.active_job_count }} · 停止中 {{ runtime.stop_requested_job_count }}</small></article>
     <article class="kpi-card"><span>今日运行</span><strong>{{ runtime.today_runs.total }}</strong><small>运行中 {{ runtime.today_runs.running }} · 成功 {{ runtime.today_runs.success }} · 部分成功 {{ runtime.today_runs.partial_success }} · 失败 {{ runtime.today_runs.failed }} · 取消 {{ runtime.today_runs.cancelled }} · 异常 {{ runtime.today_runs.aborted }}</small></article>
   </section>
-  <section class="kpi-grid" aria-label="关键指标">
+  <section class="kpi-grid dashboard-secondary-kpis" aria-label="关键指标">
     <article class="kpi-card"><span>微信群采集</span><strong>{{ snapshot.group_collection.total }}</strong><small>成功 {{ snapshot.group_collection.success }} · 失败 {{ snapshot.group_collection.failed }} · 跳过 {{ snapshot.group_collection.skipped }}</small></article>
     <article class="kpi-card"><span>公众号采集</span><strong>{{ snapshot.article_collection.total }}</strong><small>成功 {{ snapshot.article_collection.success }} · 失败 {{ snapshot.article_collection.failed }} · 跳过 {{ snapshot.article_collection.skipped }}</small></article>
     <article class="kpi-card"><span>微信群配置</span><strong>{{ snapshot.group_config_enabled }} / {{ snapshot.group_config_total }}</strong><small>启用 / 全部</small></article>
@@ -18,7 +18,7 @@
     <article class="kpi-card"><span>生成日报</span><strong>{{ snapshot.daily_report_count }}</strong><small>群 {{ snapshot.group_daily_report_count }} · 公众号 {{ snapshot.article_daily_report_count }}</small></article>
     <article class="kpi-card"><span>任务积压</span><strong>{{ snapshot.backlog_count }}</strong><small>待处理、运行中与失败</small></article>
   </section>
-  <div class="dashboard-grid">
+  <div class="dashboard-chart-grid">
     <section class="content-panel chart-panel trend-panel">
       <div class="panel-heading"><div><h2>24 小时运行终态趋势</h2><p id="run-trend-summary" class="muted">{{ trend_summary }}</p></div><a href="/runs">查看运行</a></div>
       <div id="run-trend-chart" class="run-trend-chart" role="img" aria-label="{{ trend_summary }}"></div>
@@ -38,8 +38,8 @@
         </tbody></table>
       </div>
     </section>
-    <section class="content-panel backlog-panel"><h2>待处理任务</h2>{% if snapshot.backlogs %}<div class="table-scroll" tabindex="0" aria-label="待处理任务摘要"><table class="data-table compact-table"><thead><tr><th scope="col">链路</th><th scope="col">任务类型</th><th scope="col">状态</th><th scope="col">数量</th></tr></thead><tbody>{% for item in snapshot.backlogs %}<tr><th scope="row">{{ '微信群' if item.pipeline == 'group' else '公众号' }}</th><td>{{ item.task_type }}</td><td>{{ item.status }}</td><td>{{ item.count }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state"><h3>当前没有待处理任务</h3><p>待处理、运行中和失败任务均为 0。</p></div>{% endif %}</section>
   </div>
+  <section class="content-panel backlog-panel dashboard-backlog"><h2>待处理任务</h2>{% if snapshot.backlogs %}<div class="table-scroll" tabindex="0" aria-label="待处理任务摘要"><table class="data-table compact-table"><thead><tr><th scope="col">链路</th><th scope="col">任务类型</th><th scope="col">状态</th><th scope="col">数量</th></tr></thead><tbody>{% for item in snapshot.backlogs %}<tr><th scope="row">{{ '微信群' if item.pipeline == 'group' else '公众号' }}</th><td>{{ item.task_type }}</td><td>{{ item.status }}</td><td>{{ item.count }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state"><h3>当前没有待处理任务</h3><p>待处理、运行中和失败任务均为 0。</p></div>{% endif %}</section>
 {% endblock %}
 {% block scripts %}
   <script src="/static/vendor/echarts.min.js"></script>
@@ -58,12 +58,12 @@
       chart.setOption({
         animation: false,
         aria: { enabled: true, description: document.getElementById('chart-summary').textContent },
-        color: ['#225fd1', '#a61b1b', '#98a2b3'],
+        color: ['#16855b', '#c23838', '#8b98aa'],
         grid: { left: 72, right: 28, top: 20, bottom: 32, containLabel: true },
         tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-        legend: { bottom: 0, data: ['成功', '失败', '跳过'] },
-        xAxis: { type: 'value', minInterval: 1 },
-        yAxis: { type: 'category', data: data.categories },
+        legend: { bottom: 0, textStyle: { color: '#68758a' }, data: ['成功', '失败', '跳过'] },
+        xAxis: { type: 'value', minInterval: 1, axisLabel: { color: '#68758a' }, splitLine: { lineStyle: { color: '#e6ebf2' } } },
+        yAxis: { type: 'category', data: data.categories, axisLabel: { color: '#68758a' }, axisLine: { lineStyle: { color: '#e6ebf2' } } },
         series: [
           { name: '成功', type: 'bar', data: data.success, label: { show: true, position: 'right' } },
           { name: '失败', type: 'bar', data: data.failed, label: { show: true, position: 'right' } },
@@ -86,12 +86,12 @@
       chart.setOption({
         animation: false,
         aria: { enabled: true, description: document.getElementById('run-trend-summary').textContent },
-        color: ['#225fd1', '#a61b1b', '#b25e09'],
+        color: ['#16855b', '#c23838', '#1769d2'],
         grid: { left: 48, right: 20, top: 38, bottom: 72, containLabel: true },
         tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-        legend: { top: 0, data: ['成功（含部分成功）', '失败（含异常终止）', '取消'] },
-        xAxis: { type: 'category', data: data.categories, axisLabel: { rotate: 45, interval: 3 } },
-        yAxis: { type: 'value', min: 0, minInterval: 1 },
+        legend: { top: 0, textStyle: { color: '#68758a' }, data: ['成功（含部分成功）', '失败（含异常终止）', '取消'] },
+        xAxis: { type: 'category', data: data.categories, axisLabel: { color: '#68758a', rotate: 45, interval: 3 }, axisLine: { lineStyle: { color: '#e6ebf2' } } },
+        yAxis: { type: 'value', min: 0, minInterval: 1, axisLabel: { color: '#68758a' }, splitLine: { lineStyle: { color: '#e6ebf2' } } },
         series: [
           { name: '成功（含部分成功）', type: 'bar', stack: 'terminal', data: data.successful },
           { name: '失败（含异常终止）', type: 'bar', stack: 'terminal', data: data.failed },

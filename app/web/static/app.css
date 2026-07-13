@@ -168,6 +168,10 @@ form button { margin-top: 1.25rem; }
 .kpi-card span, .kpi-card small { color: var(--color-muted); }
 .kpi-card strong { font-size: 1.7rem; letter-spacing: -.03em; }
 .dashboard-grid { display: grid; gap: 1rem; }
+.dashboard-primary-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.dashboard-secondary-kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.dashboard-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.dashboard-backlog { margin-top: 1rem; }
 .chart-panel, .backlog-panel { min-width: 0; padding: 1.4rem; }
 .panel-heading h2, .backlog-panel h2 { margin: 0 0 .45rem; font-size: 1.2rem; }
 .collection-chart { width: 100%; height: 330px; margin: .75rem 0; }
@@ -262,6 +266,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .report-request-panel, .report-request-form { grid-template-columns: 1fr; }
   .report-request-form button { width: 100%; }
   .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard-primary-kpis, .dashboard-secondary-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard-chart-grid { grid-template-columns: 1fr; }
   .collection-chart { height: 300px; }
   .job-filters { grid-template-columns: 1fr; }
   .target-options, .detail-grid { grid-template-columns: 1fr; }
@@ -277,4 +283,5 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 @media (max-width: 420px) {
   .kpi-grid { grid-template-columns: 1fr; }
   .runtime-kpi-grid { grid-template-columns: 1fr; }
+  .dashboard-primary-kpis, .dashboard-secondary-kpis { grid-template-columns: 1fr; }
 }

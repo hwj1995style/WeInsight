@@ -178,6 +178,30 @@ def test_dashboard_renders_aggregated_kpis_and_conserving_fallback_table(
         assert forbidden not in response.text.lower()
 
 
+def test_dashboard_uses_direction_a_layout(authenticated_client: TestClient) -> None:
+    response = authenticated_client.get("/dashboard")
+
+    assert response.status_code == 200
+    for class_name in (
+        "dashboard-primary-kpis",
+        "dashboard-secondary-kpis",
+        "dashboard-chart-grid",
+        "dashboard-backlog",
+    ):
+        assert class_name in response.text
+    assert "管理控制台" not in response.text
+
+
+def test_dashboard_uses_direction_a_echarts_theme(
+    authenticated_client: TestClient,
+) -> None:
+    response = authenticated_client.get("/dashboard")
+
+    for color in ("#16855b", "#c23838", "#8b98aa", "#1769d2", "#e6ebf2", "#68758a"):
+        assert color in response.text
+    assert "animation: false" in response.text
+
+
 def test_dashboard_has_one_accessible_horizontal_chart_and_text_fallback(
     authenticated_client: TestClient,
 ) -> None:
