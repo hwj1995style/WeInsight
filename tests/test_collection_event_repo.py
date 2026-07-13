@@ -206,7 +206,9 @@ def test_list_events_uses_bound_stable_incremental_page() -> None:
     assert "run_id = :run_id" in sql
     assert "id > :after_id" in sql
     assert "create_time >= :visible_since" in sql
-    assert "ORDER BY id ASC" in sql
+    assert "LEFT JOIN wechat_collection_job_run run ON run.id = event.run_id" in sql
+    assert "(event.run_id IS NULL OR run.scheduled_at >= :visible_since)" in sql
+    assert "ORDER BY event.id ASC" in sql
     assert "LIMIT :limit" in sql
     assert params == {"run_id": 41, "after_id": 10, "limit": 20,
                       "visible_since": datetime(2026, 4, 13, 12, 30)}
@@ -217,10 +219,25 @@ def test_list_events_none_run_means_all_runs_not_null_run_only() -> None:
     visible_since = datetime(2026, 4, 13, 12, 30, tzinfo=ZONE)
     assert MysqlCollectionEventRepo(engine).list_events(None, None, 50, visible_since) == []
     sql, params = engine.connection.executions[0]
-    assert "run_id =" not in sql
-    assert "run_id IS NULL" not in sql
+    assert "event.run_id = :run_id" not in sql
+    assert "event.run_id IS NULL" in sql
     assert "id >" not in sql
     assert params == {"limit": 50, "visible_since": datetime(2026, 4, 13, 12, 30)}
+
+
+def test_list_events_global_stream_keeps_system_events_but_guards_run_age() -> None:
+    engine = Engine([Result(rows=[])])
+    boundary = datetime(2026, 4, 13, 12, 30, tzinfo=ZONE)
+
+    MysqlCollectionEventRepo(engine).list_events(None, 10, 50, boundary)
+
+    sql, params = engine.connection.executions[0]
+    normalized = " ".join(sql.split())
+    assert "LEFT JOIN wechat_collection_job_run run ON run.id = event.run_id" in normalized
+    assert "event.create_time >= :visible_since" in normalized
+    assert "(event.run_id IS NULL OR run.scheduled_at >= :visible_since)" in normalized
+    assert "event.id > :after_id" in normalized
+    assert params["visible_since"] == datetime(2026, 4, 13, 12, 30)
 
 
 @pytest.mark.parametrize("limit", [0, 501, True])

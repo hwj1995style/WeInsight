@@ -116,16 +116,18 @@ async def event_stream(request: Request) -> StreamingResponse:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="Invalid event cursor") from exc
     service = request.app.state.runtime_monitor_service
+    visible_since = service.visible_since()
     if run_id is not None:
         try:
-            await run_in_threadpool(service.get_run, run_id)
+            await run_in_threadpool(
+                service.get_run, run_id, visible_since=visible_since
+            )
         except RunOutsideVisibilityError as exc:
             raise HTTPException(
                 status_code=404, detail="该记录已超出可查看范围"
             ) from exc
         except RunNotFoundError as exc:
             raise HTTPException(status_code=404, detail="运行实例不存在") from exc
-    visible_since = service.visible_since()
     stream = CollectionEventStream(
         request=request,
         event_repo=request.app.state.event_repo,

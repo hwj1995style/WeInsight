@@ -115,27 +115,32 @@ class MysqlCollectionEventRepo:
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
             raise ValueError("limit must be between 1 and 500")
         ensure_schedule_datetime(visible_since, field_name="visible_since")
-        conditions: list[str] = ["create_time >= :visible_since"]
+        conditions: list[str] = [
+            "event.create_time >= :visible_since",
+            "(event.run_id IS NULL OR run.scheduled_at >= :visible_since)",
+        ]
         params: dict[str, Any] = {
             "limit": limit,
             "visible_since": visible_since.replace(tzinfo=None),
         }
         if run_id is not None:
-            conditions.append("run_id = :run_id")
+            conditions.append("event.run_id = :run_id")
             params["run_id"] = run_id
         if after_id is not None:
-            conditions.append("id > :after_id")
+            conditions.append("event.id > :after_id")
             params["after_id"] = after_id
         where = "" if not conditions else "WHERE " + " AND ".join(conditions)
         statement = text(
             f"""
             SELECT
-                id, job_id, run_id, target_run_id, level, event_type,
-                stage, message, metrics_json, actor_type, actor_name,
-                create_time
-            FROM wechat_collection_job_event
+                event.id, event.job_id, event.run_id, event.target_run_id,
+                event.level, event.event_type, event.stage, event.message,
+                event.metrics_json, event.actor_type, event.actor_name,
+                event.create_time
+            FROM wechat_collection_job_event event
+            LEFT JOIN wechat_collection_job_run run ON run.id = event.run_id
             {where}
-            ORDER BY id ASC
+            ORDER BY event.id ASC
             LIMIT :limit
             """
         )

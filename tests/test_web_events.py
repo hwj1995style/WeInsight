@@ -63,8 +63,8 @@ class RuntimeService:
         self.calls.append((filters, page, page_size))
         return PagedResult([_runtime_event()], page, page_size, 1)
 
-    def get_run(self, run_id):
-        self.calls.append(("get_run", run_id))
+    def get_run(self, run_id, *, visible_since=None):
+        self.calls.append(("get_run", run_id, visible_since))
 
     def visible_since(self):
         boundary = datetime(2026, 4, 13, 12, 30, tzinfo=ZONE)
@@ -288,11 +288,42 @@ def test_sse_response_headers_and_last_event_id_precedence(
     assert response.headers["x-accel-buffering"] == "no"
     assert response.body_iterator.after_id == 100
     assert response.body_iterator.run_id == 31
-    assert runtime_service.calls == [("get_run", 31), ("visible_since", datetime(2026, 4, 13, 12, 30, tzinfo=ZONE))]
+    boundary = datetime(2026, 4, 13, 12, 30, tzinfo=ZONE)
+    assert runtime_service.calls == [
+        ("visible_since", boundary),
+        ("get_run", 31, boundary),
+    ]
+    assert response.body_iterator.visible_since == boundary
+
+
+def test_sse_samples_mutable_clock_once_for_validation_and_polling(
+    app: FastAPI, runtime_service: RuntimeService
+) -> None:
+    boundaries = iter(
+        [
+            datetime(2026, 4, 13, 12, 30, tzinfo=ZONE),
+            datetime(2026, 4, 13, 12, 31, tzinfo=ZONE),
+        ]
+    )
+    sampled = []
+
+    def visible_since():
+        value = next(boundaries)
+        sampled.append(value)
+        return value
+
+    runtime_service.visible_since = visible_since
+    response = asyncio.run(events.event_stream(_request(app=app, query=b"run_id=31")))
+
+    assert sampled == [datetime(2026, 4, 13, 12, 30, tzinfo=ZONE)]
+    assert runtime_service.calls == [
+        ("get_run", 31, datetime(2026, 4, 13, 12, 30, tzinfo=ZONE))
+    ]
+    assert response.body_iterator.visible_since == sampled[0]
 
 
 def test_sse_expired_run_is_rejected_before_stream_creation(app: FastAPI, runtime_service: RuntimeService) -> None:
-    def expired(run_id):
+    def expired(run_id, *, visible_since=None):
         raise RunOutsideVisibilityError("expired")
     runtime_service.get_run = expired
     with pytest.raises(HTTPException) as caught:

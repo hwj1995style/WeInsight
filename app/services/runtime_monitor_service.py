@@ -360,12 +360,16 @@ class RuntimeMonitorService:
     def visible_since(self) -> datetime:
         return runtime_visibility_start(self.now_provider())
 
-    def get_run(self, run_id: int) -> RunDetail:
+    def get_run(
+        self, run_id: int, *, visible_since: datetime | None = None
+    ) -> RunDetail:
         _positive_integer(run_id, "run_id")
+        boundary = self.visible_since() if visible_since is None else visible_since
+        ensure_schedule_datetime(boundary, field_name="visible_since")
         detail = self.repo.get_run(run_id)
         if detail is None:
             raise RunNotFoundError(f"run not found: {run_id}")
-        if detail.run.scheduled_at < self.visible_since():
+        if detail.run.scheduled_at < boundary:
             raise RunOutsideVisibilityError(f"run outside visibility: {run_id}")
         return replace(
             detail,

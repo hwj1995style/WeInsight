@@ -128,6 +128,44 @@ def test_list_sql_applies_visibility_to_count_and_data_before_pagination() -> No
             )
 
 
+def test_get_job_history_uses_mysql_datetime_floor_not_rolling_boundary() -> None:
+    executed = []
+
+    class Result:
+        def scalar_one(self):
+            return 0
+
+        def mappings(self):
+            return self
+
+        def all(self):
+            return []
+
+    class Connection:
+        def execute(self, statement, params=None):
+            executed.append((str(statement), params))
+            return Result()
+
+    class Context:
+        def __enter__(self):
+            return Connection()
+
+        def __exit__(self, *args):
+            return False
+
+    class Engine:
+        def begin(self):
+            return Context()
+
+    runtime_monitor_repo.MysqlRuntimeMonitorRepo(Engine()).get_job_history(7, 10)
+
+    assert len(executed) == 4
+    assert all(
+        params["visible_since"] == datetime(1000, 1, 1)
+        for _, params in executed
+    )
+
+
 def test_fill_trend_produces_24_shanghai_buckets_and_terminal_conservation() -> None:
     rows = [
         {"bucket_start": datetime(2026, 7, 10, 11), "status": "success", "count": 2},
