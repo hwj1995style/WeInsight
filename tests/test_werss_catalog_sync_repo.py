@@ -279,15 +279,16 @@ def _sqlite_unique_catalog(rows):
         connection.execute(text("""
             CREATE TABLE wechat_article_collect_log (account_name VARCHAR(200))
         """))
-        connection.execute(text("""
-            INSERT INTO wechat_public_account_config
-              (id, account_name, feed_url, werss_source_id, upstream_status)
-            VALUES (:id, :account_name, :feed_url, :werss_source_id, :upstream_status)
-        """), [{
-            "id": item.id, "account_name": item.account_name,
-            "feed_url": item.feed_url, "werss_source_id": item.werss_source_id,
-            "upstream_status": item.upstream_status,
-        } for item in rows])
+        if rows:
+            connection.execute(text("""
+                INSERT INTO wechat_public_account_config
+                  (id, account_name, feed_url, werss_source_id, upstream_status)
+                VALUES (:id, :account_name, :feed_url, :werss_source_id, :upstream_status)
+            """), [{
+                "id": item.id, "account_name": item.account_name,
+                "feed_url": item.feed_url, "werss_source_id": item.werss_source_id,
+                "upstream_status": item.upstream_status,
+            } for item in rows])
     return engine
 
 
@@ -357,6 +358,72 @@ def test_rename_cycle_keeps_original_names_without_rolling_back_state_updates():
     result = _execute_safe_changes(_sqlite_unique_catalog(rows), rows, plan.changes)
 
     assert result == [(1, "A", "disabled"), (2, "B", "disabled")]
+
+
+def _execute_planned_names_under_unique_constraint(rows, plan):
+    engine = _sqlite_unique_catalog(rows)
+    rows_by_id = {item.id: item for item in rows}
+    name_counts = {
+        item.account_name: sum(other.account_name == item.account_name for other in rows)
+        for item in rows
+    }
+    with engine.begin() as connection:
+        for change in prepare_safe_catalog_changes(rows, plan.changes):
+            original = rows_by_id[change.row_id]
+            MysqlWeRSSCatalogSyncRepo._apply_change(
+                connection, change, original=original,
+                original_name_is_unique=name_counts[original.account_name] == 1,
+                new_name_is_safe=True,
+            )
+        for insert in plan.inserts:
+            connection.execute(text("""
+                INSERT INTO wechat_public_account_config
+                  (account_name, feed_url, werss_source_id, upstream_status)
+                VALUES (:name, :feed_url, :source_id, :status)
+            """), {
+                "name": insert.name, "feed_url": insert.feed_url,
+                "source_id": insert.source_id, "status": insert.status,
+            })
+        return connection.execute(text(
+            "SELECT account_name, werss_source_id FROM wechat_public_account_config ORDER BY werss_source_id"
+        )).all()
+
+
+@pytest.mark.filterwarnings("ignore:The default datetime adapter is deprecated:DeprecationWarning")
+def test_two_new_sources_with_same_name_are_planned_as_conflicts_not_duplicate_inserts():
+    items = (
+        WeRSSCatalogItem("MP1", "同名", True),
+        WeRSSCatalogItem("MP2", "同名", True),
+    )
+
+    first = plan_catalog_sync((), items, (), NOW)
+    second = plan_catalog_sync((), items, (), NOW)
+    result = _execute_planned_names_under_unique_constraint((), first)
+
+    assert result == []
+    assert first.inserts == second.inserts == ()
+    assert first.summary.conflicts == second.summary.conflicts == 2
+
+
+@pytest.mark.filterwarnings("ignore:The default datetime adapter is deprecated:DeprecationWarning")
+def test_existing_stable_mapping_wins_name_over_new_source_without_rollback():
+    rows = (row(1, "A", source_id="MP1", status="active"),)
+    items = (
+        WeRSSCatalogItem("MP1", "B", False),
+        WeRSSCatalogItem("MP2", "B", True),
+    )
+
+    plan = plan_catalog_sync(rows, items, (), NOW)
+    result = _execute_planned_names_under_unique_constraint(rows, plan)
+
+    assert result == [("B", "MP1")]
+    assert plan.inserts == ()
+    assert plan.summary.conflicts == 1
+    repeated = plan_catalog_sync(
+        (row(1, "B", source_id="MP1", status="disabled"),), items, (), NOW
+    )
+    assert repeated.inserts == ()
+    assert repeated.summary.conflicts == 1
 
 
 def test_repo_busy_rolls_back_transaction_and_still_releases_lock():

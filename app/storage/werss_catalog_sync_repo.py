@@ -211,15 +211,52 @@ def plan_catalog_sync(
             audit_required = True
 
     changes.sort(key=lambda change: change.row_id)
+    safe_changes = prepare_safe_catalog_changes(rows, tuple(changes))
+    safe_inserts, insert_conflicts = _filter_conflicting_catalog_inserts(
+        rows,
+        safe_changes,
+        tuple(inserts),
+    )
+    if insert_conflicts:
+        summary = replace(
+            summary,
+            created=summary.created - insert_conflicts,
+            conflicts=summary.conflicts + insert_conflicts,
+        )
+        audit_required = True
     audit_digest = _planned_final_state_digest(
         rows,
-        tuple(changes),
-        tuple(inserts),
+        safe_changes,
+        safe_inserts,
         tuple(conflict_source_ids),
     )
     return CatalogSyncPlan(
-        tuple(changes), tuple(inserts), summary, audit_required, audit_digest
+        safe_changes, safe_inserts, summary, audit_required, audit_digest
     )
+
+
+def _filter_conflicting_catalog_inserts(
+    rows: tuple[CatalogRow, ...],
+    changes: tuple[CatalogChange, ...],
+    inserts: tuple[CatalogInsert, ...],
+) -> tuple[tuple[CatalogInsert, ...], int]:
+    changes_by_id = {change.row_id: change for change in changes}
+    existing_final_names = {
+        changes_by_id[row.id].name if row.id in changes_by_id else row.account_name
+        for row in rows
+    }
+    by_name: dict[str, list[CatalogInsert]] = {}
+    for insert in inserts:
+        by_name.setdefault(insert.name, []).append(insert)
+    accepted: list[CatalogInsert] = []
+    conflicts = 0
+    for name, candidates in by_name.items():
+        if name in existing_final_names or len(candidates) != 1:
+            conflicts += len(candidates)
+            continue
+        accepted.append(candidates[0])
+    accepted.sort(key=lambda insert: (insert.name, insert.source_id))
+    return tuple(accepted), conflicts
 
 
 def _planned_final_state_digest(
@@ -341,8 +378,7 @@ class MysqlWeRSSCatalogSyncRepo:
                 name_counts: dict[str, int] = {}
                 for row in rows:
                     name_counts[row.account_name] = name_counts.get(row.account_name, 0) + 1
-                safe_changes = prepare_safe_catalog_changes(rows, plan.changes)
-                for change in safe_changes:
+                for change in plan.changes:
                     original = rows_by_id[change.row_id]
                     self._apply_change(
                         connection,
