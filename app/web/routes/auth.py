@@ -163,7 +163,7 @@ async def login(request: Request) -> Response:
 
     config = request.app.state.config
     limiter.reset(client_ip)
-    response = RedirectResponse("/", status_code=303)
+    response = RedirectResponse("/dashboard", status_code=303)
     max_age = max(0, int((session.expires_at - _now(request)).total_seconds()))
     response.set_cookie(
         config.auth.session_cookie_name,
@@ -189,11 +189,7 @@ async def login(request: Request) -> Response:
 
 @router.get("/", response_class=HTMLResponse)
 async def home(request: Request) -> Response:
-    return templates.TemplateResponse(
-        request=request,
-        name="home.html",
-        context={"view": "home"},
-    )
+    return RedirectResponse("/dashboard", status_code=303)
 
 
 @router.get("/account/password", response_class=HTMLResponse)

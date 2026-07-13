@@ -29,11 +29,6 @@
         </form>
       </div>
     </header>
-    {% if request.state.admin.using_default_password %}
-      <aside class="security-warning" role="alert">
-        当前仍使用默认密码 admin123456。建议在“账户设置”中主动修改。
-      </aside>
-    {% endif %}
     <main class="page-shell">{% block content %}{% endblock %}</main>
     {% block scripts %}{% endblock %}
   </body>

@@ -1,34 +1,18 @@
 {% extends "base.html" %}
-{% block title %}{% if view == "password" %}账户设置{% else %}控制台{% endif %} · WeInsight{% endblock %}
+{% block title %}账户设置 · WeInsight{% endblock %}
 {% block content %}
-  {% if view == "password" %}
-    <section class="content-panel narrow">
-      <a class="back-link" href="/">返回控制台</a>
-      <h1>修改管理员密码</h1>
-      <p class="muted">新密码至少 12 个字符。修改后需要重新登录。</p>
-      {% if error %}<p class="notice error" role="alert">{{ error }}</p>{% endif %}
-      <form method="post" action="/account/password">
-        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-        <label for="current-password">当前密码</label>
-        <input id="current-password" name="current_password" type="password" autocomplete="current-password" required>
-        <label for="new-password">新密码</label>
-        <input id="new-password" name="new_password" type="password" autocomplete="new-password" minlength="12" required>
-        <button type="submit">保存新密码</button>
-      </form>
-    </section>
-  {% else %}
-    <section class="page-heading">
-      <div>
-        <h1>管理控制台</h1>
-        <p>Web 鉴权基础已启用，采集 Worker 保持独立运行。</p>
-      </div>
-      <a class="button secondary" href="/account/password">账户设置</a>
-    </section>
-    <dl class="status-list">
-      <div><dt>登录账户</dt><dd>{{ request.state.admin.username }}</dd></div>
-      <div><dt>运行环境</dt><dd>{{ request.app.state.config.app.env }}</dd></div>
-      <div><dt>数据库配置</dt><dd>{{ request.app.state.config.mysql.database }}</dd></div>
-    </dl>
-    <p class="session-marker" data-csrf-token="{{ request.state.csrf_token }}">当前会话已通过数据库 Session 验证。</p>
-  {% endif %}
+  <section class="content-panel narrow">
+    <a class="back-link" href="/dashboard">返回控制台</a>
+    <h1>修改管理员密码</h1>
+    <p class="muted">新密码至少 12 个字符。修改后需要重新登录。</p>
+    {% if error %}<p class="notice error" role="alert">{{ error }}</p>{% endif %}
+    <form method="post" action="/account/password">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+      <label for="current-password">当前密码</label>
+      <input id="current-password" name="current_password" type="password" autocomplete="current-password" required>
+      <label for="new-password">新密码</label>
+      <input id="new-password" name="new_password" type="password" autocomplete="new-password" minlength="12" required>
+      <button type="submit">保存新密码</button>
+    </form>
+  </section>
 {% endblock %}

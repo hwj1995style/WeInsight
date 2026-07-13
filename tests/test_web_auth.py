@@ -550,21 +550,34 @@ def test_login_attempt_limiter_prunes_expired_ips_and_fails_closed_at_capacity()
     assert limiter.tracked_ip_count == 1
 
 
-def test_default_admin_can_login_without_forced_change(client: TestClient) -> None:
+def test_successful_login_redirects_to_dashboard(client: TestClient) -> None:
     response = _login(client, username="admin", password="admin123456")
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/"
-    home = client.get("/")
-    assert "当前仍使用默认密码" in home.text
-    assert "必须修改密码后继续" not in home.text
+    assert response.headers["location"] == "/dashboard"
+
+
+def test_authenticated_home_redirects_to_dashboard(client: TestClient) -> None:
+    _login(client, username="admin", password="admin123456")
+    response = client.get("/", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/dashboard"
+
+
+def test_default_password_warning_is_not_rendered(client: TestClient) -> None:
+    _login(client, username="admin", password="admin123456")
+    response = client.get("/dashboard")
+
+    assert "当前仍使用默认密码" not in response.text
+    assert "admin123456" not in response.text
 
 
 def test_authenticated_request_receives_admin_and_csrf_state(
     authenticated_client: TestClient,
     auth_service: FakeAuthService,
 ) -> None:
-    response = authenticated_client.get("/")
+    response = authenticated_client.get("/dashboard")
 
     assert response.status_code == 200
     assert "admin" in response.text
@@ -584,7 +597,7 @@ def test_jinja_templates_escape_admin_controlled_text(
         using_default_password=False,
     )
 
-    response = authenticated_client.get("/")
+    response = authenticated_client.get("/dashboard")
 
     assert "<script>alert(1)</script>" not in response.text
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in response.text
