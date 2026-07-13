@@ -2,6 +2,7 @@ from datetime import datetime
 import json
 
 import pytest
+from sqlalchemy import create_engine, text
 
 from app.integrations.werss_catalog import WeRSSCatalogItem
 from app.storage.werss_catalog_sync_repo import (
@@ -9,6 +10,7 @@ from app.storage.werss_catalog_sync_repo import (
     WeRSSCatalogSyncBusyError,
     MysqlWeRSSCatalogSyncRepo,
     plan_catalog_sync,
+    prepare_safe_catalog_changes,
 )
 
 
@@ -234,7 +236,7 @@ def test_repo_does_not_migrate_ambiguous_same_name_history():
     assert all("UPDATE wechat_article_raw" not in sql for sql, _ in connection.executions)
 
 
-def test_repo_does_not_merge_history_into_another_sources_current_name():
+def test_repo_migrates_history_after_other_source_releases_target_name():
     connection = Connection(rows=(
         {
             "id": 1, "account_name": "旧名", "feed_url": "http://one",
@@ -256,7 +258,105 @@ def test_repo_does_not_merge_history_into_another_sources_current_name():
         params for sql, params in connection.executions
         if "UPDATE wechat_article_raw" in sql and params["old_name"] == "旧名"
     ]
-    assert risky_migrations == []
+    assert risky_migrations == [{"old_name": "旧名", "new_name": "新名"}]
+
+
+def _sqlite_unique_catalog(rows):
+    engine = create_engine("sqlite://")
+    with engine.begin() as connection:
+        connection.execute(text("""
+            CREATE TABLE wechat_public_account_config (
+                id INTEGER PRIMARY KEY,
+                account_name VARCHAR(200) NOT NULL UNIQUE,
+                feed_url VARCHAR(500), werss_source_id VARCHAR(200),
+                upstream_status VARCHAR(20), upstream_last_seen_at DATETIME,
+                upstream_missing_at DATETIME, update_time DATETIME
+            )
+        """))
+        connection.execute(text("""
+            CREATE TABLE wechat_article_raw (account_name VARCHAR(200))
+        """))
+        connection.execute(text("""
+            CREATE TABLE wechat_article_collect_log (account_name VARCHAR(200))
+        """))
+        connection.execute(text("""
+            INSERT INTO wechat_public_account_config
+              (id, account_name, feed_url, werss_source_id, upstream_status)
+            VALUES (:id, :account_name, :feed_url, :werss_source_id, :upstream_status)
+        """), [{
+            "id": item.id, "account_name": item.account_name,
+            "feed_url": item.feed_url, "werss_source_id": item.werss_source_id,
+            "upstream_status": item.upstream_status,
+        } for item in rows])
+    return engine
+
+
+def _execute_safe_changes(engine, rows, changes):
+    ordered = prepare_safe_catalog_changes(rows, changes)
+    rows_by_id = {row.id: row for row in rows}
+    name_counts = {row.account_name: sum(x.account_name == row.account_name for x in rows) for row in rows}
+    with engine.begin() as connection:
+        for change in ordered:
+            original = rows_by_id[change.row_id]
+            MysqlWeRSSCatalogSyncRepo._apply_change(
+                connection, change, original=original,
+                original_name_is_unique=name_counts[original.account_name] == 1,
+                new_name_is_safe=True,
+            )
+        return connection.execute(text(
+            "SELECT id, account_name, upstream_status FROM wechat_public_account_config ORDER BY id"
+        )).all()
+
+
+@pytest.mark.filterwarnings("ignore:The default datetime adapter is deprecated:DeprecationWarning")
+def test_static_name_owner_keeps_target_name_while_other_state_updates_under_unique_constraint():
+    rows = (
+        row(1, "A", source_id="MP1", status="active"),
+        row(2, "B", source_id="MP2", status="active"),
+    )
+    plan = plan_catalog_sync(
+        rows,
+        (WeRSSCatalogItem("MP1", "B", False), WeRSSCatalogItem("MP2", "B", True)),
+        (), NOW,
+    )
+
+    result = _execute_safe_changes(_sqlite_unique_catalog(rows), rows, plan.changes)
+
+    assert result == [(1, "A", "disabled"), (2, "B", "active")]
+
+
+@pytest.mark.filterwarnings("ignore:The default datetime adapter is deprecated:DeprecationWarning")
+def test_chain_rename_releases_unique_target_before_claiming_it():
+    rows = (
+        row(1, "A", source_id="MP1", status="active"),
+        row(2, "B", source_id="MP2", status="active"),
+    )
+    plan = plan_catalog_sync(
+        rows,
+        (WeRSSCatalogItem("MP1", "B", True), WeRSSCatalogItem("MP2", "C", True)),
+        (), NOW,
+    )
+
+    result = _execute_safe_changes(_sqlite_unique_catalog(rows), rows, plan.changes)
+
+    assert result == [(1, "B", "active"), (2, "C", "active")]
+
+
+@pytest.mark.filterwarnings("ignore:The default datetime adapter is deprecated:DeprecationWarning")
+def test_rename_cycle_keeps_original_names_without_rolling_back_state_updates():
+    rows = (
+        row(1, "A", source_id="MP1", status="active"),
+        row(2, "B", source_id="MP2", status="active"),
+    )
+    plan = plan_catalog_sync(
+        rows,
+        (WeRSSCatalogItem("MP1", "B", False), WeRSSCatalogItem("MP2", "A", False)),
+        (), NOW,
+    )
+
+    result = _execute_safe_changes(_sqlite_unique_catalog(rows), rows, plan.changes)
+
+    assert result == [(1, "A", "disabled"), (2, "B", "disabled")]
 
 
 def test_repo_busy_rolls_back_transaction_and_still_releases_lock():

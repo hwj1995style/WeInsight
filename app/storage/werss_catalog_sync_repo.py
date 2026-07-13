@@ -268,6 +268,52 @@ def _status_change(row: CatalogRow, status: str, seen: datetime | None, missing:
     return CatalogChange(row.id, row.account_name, row.feed_url, row.werss_source_id, status, seen, missing)
 
 
+def prepare_safe_catalog_changes(
+    rows: tuple[CatalogRow, ...],
+    changes: tuple[CatalogChange, ...],
+) -> tuple[CatalogChange, ...]:
+    """Order acyclic renames and suppress names that cannot be claimed safely."""
+    rows_by_id = {row.id: row for row in rows}
+    occupancy = {row.account_name: row.id for row in rows}
+    changes_by_id = {change.row_id: change for change in changes}
+    pending = {
+        change.row_id
+        for change in changes
+        if rows_by_id[change.row_id].account_name != change.name
+    }
+    ordered: list[CatalogChange] = []
+
+    while pending:
+        progressed = False
+        for row_id in sorted(pending):
+            change = changes_by_id[row_id]
+            occupant = occupancy.get(change.name)
+            if occupant is not None and occupant != row_id:
+                if occupant in pending:
+                    continue
+                pending.remove(row_id)
+                ordered.append(replace(change, name=rows_by_id[row_id].account_name))
+                progressed = True
+                break
+            old_name = rows_by_id[row_id].account_name
+            if occupancy.get(old_name) == row_id:
+                del occupancy[old_name]
+            occupancy[change.name] = row_id
+            pending.remove(row_id)
+            ordered.append(change)
+            progressed = True
+            break
+        if not progressed:
+            for row_id in sorted(pending):
+                change = changes_by_id[row_id]
+                ordered.append(replace(change, name=rows_by_id[row_id].account_name))
+            pending.clear()
+
+    renamed_ids = {change.row_id for change in ordered}
+    ordered.extend(change for change in changes if change.row_id not in renamed_ids)
+    return tuple(ordered)
+
+
 class MysqlWeRSSCatalogSyncRepo:
     def __init__(self, engine: Engine) -> None:
         self.engine = engine
@@ -295,7 +341,8 @@ class MysqlWeRSSCatalogSyncRepo:
                 name_counts: dict[str, int] = {}
                 for row in rows:
                     name_counts[row.account_name] = name_counts.get(row.account_name, 0) + 1
-                for change in plan.changes:
+                safe_changes = prepare_safe_catalog_changes(rows, plan.changes)
+                for change in safe_changes:
                     original = rows_by_id[change.row_id]
                     self._apply_change(
                         connection,
@@ -304,7 +351,7 @@ class MysqlWeRSSCatalogSyncRepo:
                         original_name_is_unique=name_counts.get(
                             original.account_name, 0
                         ) == 1,
-                        new_name_was_unused=name_counts.get(change.name, 0) == 0,
+                        new_name_is_safe=True,
                     )
                 for insert in plan.inserts:
                     self._insert(connection, insert)
@@ -351,12 +398,12 @@ class MysqlWeRSSCatalogSyncRepo:
         *,
         original: CatalogRow,
         original_name_is_unique: bool,
-        new_name_was_unused: bool,
+        new_name_is_safe: bool,
     ) -> None:
         if (
             original.account_name != change.name
             and original_name_is_unique
-            and new_name_was_unused
+            and new_name_is_safe
         ):
             rename_params = {"old_name": original.account_name, "new_name": change.name}
             connection.execute(text("""
