@@ -7,10 +7,12 @@ from sqlalchemy import create_engine, text
 from app.integrations.werss_catalog import WeRSSCatalogItem
 from app.storage.werss_catalog_sync_repo import (
     CatalogRow,
+    CatalogInsert,
     WeRSSCatalogSyncBusyError,
     MysqlWeRSSCatalogSyncRepo,
     plan_catalog_sync,
     prepare_safe_catalog_changes,
+    _filter_conflicting_catalog_inserts,
 )
 
 
@@ -424,6 +426,56 @@ def test_existing_stable_mapping_wins_name_over_new_source_without_rollback():
     )
     assert repeated.inserts == ()
     assert repeated.summary.conflicts == 1
+
+
+def test_insert_conflict_ids_are_sorted_deduplicated_and_affect_digest():
+    inserts = (
+        CatalogInsert("同名", "feed-2", "MP2", "active", NOW),
+        CatalogInsert("同名", "feed-1", "MP1", "active", NOW),
+        CatalogInsert("同名", "feed-2-duplicate", "MP2", "active", NOW),
+    )
+
+    accepted, conflict_ids = _filter_conflicting_catalog_inserts((), (), inserts)
+
+    assert accepted == ()
+    assert conflict_ids == ("MP1", "MP2")
+    first = plan_catalog_sync((), (
+        WeRSSCatalogItem("MP2", "同名", True),
+        WeRSSCatalogItem("MP1", "同名", True),
+    ), (), NOW)
+    reordered = plan_catalog_sync((), (
+        WeRSSCatalogItem("MP1", "同名", True),
+        WeRSSCatalogItem("MP2", "同名", True),
+    ), (), NOW)
+    changed = plan_catalog_sync((), (
+        WeRSSCatalogItem("MP1", "同名", True),
+        WeRSSCatalogItem("MP3", "同名", True),
+    ), (), NOW)
+    assert first.audit_digest == reordered.audit_digest
+    assert changed.audit_digest != first.audit_digest
+
+
+def test_repo_audits_changed_insert_conflict_set_but_deduplicates_identical_round():
+    connection = Connection()
+    repo = MysqlWeRSSCatalogSyncRepo(Engine(connection))
+    first = (
+        WeRSSCatalogItem("MP1", "同名", True),
+        WeRSSCatalogItem("MP2", "同名", True),
+    )
+    changed = (
+        WeRSSCatalogItem("MP1", "同名", True),
+        WeRSSCatalogItem("MP3", "同名", True),
+    )
+
+    repo.sync_catalog(first, (), NOW)
+    repo.sync_catalog(tuple(reversed(first)), (), NOW)
+    repo.sync_catalog(changed, (), NOW)
+
+    audit_inserts = [
+        params for sql, params in connection.executions
+        if "INSERT INTO wechat_collection_job_event" in sql
+    ]
+    assert len(audit_inserts) == 2
 
 
 def test_repo_busy_rolls_back_transaction_and_still_releases_lock():

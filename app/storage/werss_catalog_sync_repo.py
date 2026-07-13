@@ -212,23 +212,26 @@ def plan_catalog_sync(
 
     changes.sort(key=lambda change: change.row_id)
     safe_changes = prepare_safe_catalog_changes(rows, tuple(changes))
-    safe_inserts, insert_conflicts = _filter_conflicting_catalog_inserts(
+    safe_inserts, insert_conflict_source_ids = _filter_conflicting_catalog_inserts(
         rows,
         safe_changes,
         tuple(inserts),
     )
-    if insert_conflicts:
+    all_conflict_source_ids = tuple(sorted(set(
+        conflict_source_ids + list(insert_conflict_source_ids)
+    )))
+    if insert_conflict_source_ids:
         summary = replace(
             summary,
-            created=summary.created - insert_conflicts,
-            conflicts=summary.conflicts + insert_conflicts,
+            created=summary.created - (len(inserts) - len(safe_inserts)),
+            conflicts=len(all_conflict_source_ids),
         )
         audit_required = True
     audit_digest = _planned_final_state_digest(
         rows,
         safe_changes,
         safe_inserts,
-        tuple(conflict_source_ids),
+        all_conflict_source_ids,
     )
     return CatalogSyncPlan(
         safe_changes, safe_inserts, summary, audit_required, audit_digest
@@ -239,7 +242,7 @@ def _filter_conflicting_catalog_inserts(
     rows: tuple[CatalogRow, ...],
     changes: tuple[CatalogChange, ...],
     inserts: tuple[CatalogInsert, ...],
-) -> tuple[tuple[CatalogInsert, ...], int]:
+) -> tuple[tuple[CatalogInsert, ...], tuple[str, ...]]:
     changes_by_id = {change.row_id: change for change in changes}
     existing_final_names = {
         changes_by_id[row.id].name if row.id in changes_by_id else row.account_name
@@ -249,14 +252,14 @@ def _filter_conflicting_catalog_inserts(
     for insert in inserts:
         by_name.setdefault(insert.name, []).append(insert)
     accepted: list[CatalogInsert] = []
-    conflicts = 0
+    conflict_source_ids: set[str] = set()
     for name, candidates in by_name.items():
         if name in existing_final_names or len(candidates) != 1:
-            conflicts += len(candidates)
+            conflict_source_ids.update(candidate.source_id for candidate in candidates)
             continue
         accepted.append(candidates[0])
     accepted.sort(key=lambda insert: (insert.name, insert.source_id))
-    return tuple(accepted), conflicts
+    return tuple(accepted), tuple(sorted(conflict_source_ids))
 
 
 def _planned_final_state_digest(
