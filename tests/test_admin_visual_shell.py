@@ -2,6 +2,19 @@ from pathlib import Path
 import subprocess
 
 
+def test_account_and_editor_pages_use_shared_heading_and_actions():
+    paths = (
+        "app/web/templates/home.html",
+        "app/web/templates/sources/group_form.html",
+        "app/web/templates/sources/article_form.html",
+        "app/web/templates/jobs/form.html",
+    )
+    for path in paths:
+        text = Path(path).read_text("utf-8")
+        assert 'class="page-heading' in text, path
+        assert 'class="form-actions"' in text, path
+
+
 def test_direction_a_tokens_and_components_are_declared():
     css = Path("app/web/static/app.css").read_text("utf-8")
     for token in (

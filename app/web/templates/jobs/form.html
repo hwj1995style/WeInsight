@@ -2,9 +2,9 @@
 {% block title %}创建采集任务 · WeInsight{% endblock %}
 {% block content %}
   <section class="content-panel source-form-panel job-form-panel">
-    <a class="back-link" href="/jobs">返回采集任务</a>
+    <div class="page-heading form-heading"><div><a class="back-link" href="/jobs">返回采集任务</a>
     <h1>创建采集任务</h1>
-    <p class="muted">一个任务只能选择同一采集链路中的一个或多个目标。</p>
+    <p class="muted">一个任务只能选择同一采集链路中的一个或多个目标。</p></div></div>
     <nav class="section-tabs job-pipeline-tabs" aria-label="选择采集链路">
       <a href="/jobs/new?pipeline=group" {% if pipeline.value == "group" %}aria-current="page"{% endif %}>微信群任务</a>
       <a href="/jobs/new?pipeline=article" {% if pipeline.value == "article" %}aria-current="page"{% endif %}>公众号任务</a>
