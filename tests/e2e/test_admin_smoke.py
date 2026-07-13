@@ -26,7 +26,12 @@ def test_fake_admin_login_to_report_smoke(admin_base_url, browser):
     page = context.new_page()
     console = []
     pageerrors = []
-    page.on("console", lambda item: console.append(item.text) if item.type == "error" else None)
+    page.on(
+        "console",
+        lambda item: console.append((item.type, item.text))
+        if item.type in {"warning", "error"}
+        else None,
+    )
     page.on("pageerror", lambda error: pageerrors.append(str(error)))
 
     page.goto(f"{admin_base_url}/login")
@@ -87,6 +92,9 @@ def test_fake_admin_login_to_report_smoke(admin_base_url, browser):
         page.goto(admin_base_url + route)
         assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
     mobile_toggle = page.get_by_role("button", name="打开导航")
+    mobile_toggle.focus()
+    assert page.evaluate("document.activeElement.id") == "mobile-nav-toggle"
+    assert mobile_toggle.evaluate("element => element.matches(':focus-visible')")
     mobile_toggle.click()
     expect(mobile_toggle).to_have_attribute("aria-expanded", "true")
     expect(page.locator(".app-shell")).to_have_class(re.compile(r"nav-open"))
@@ -94,6 +102,12 @@ def test_fake_admin_login_to_report_smoke(admin_base_url, browser):
     expect(mobile_toggle).to_have_attribute("aria-expanded", "false")
     mobile_toggle.click()
     page.locator("#nav-backdrop").click(position={"x": 380, "y": 400})
+    expect(mobile_toggle).to_have_attribute("aria-expanded", "false")
+    mobile_toggle.click()
+    page.get_by_role("link", name="总览").click()
+    expect(page).to_have_url(re.compile(r"/dashboard$"))
+    mobile_toggle = page.get_by_role("button", name="打开导航")
+    expect(page.locator(".app-shell")).not_to_have_class(re.compile(r".*nav-open.*"))
     expect(mobile_toggle).to_have_attribute("aria-expanded", "false")
     assert console == []
     assert pageerrors == []

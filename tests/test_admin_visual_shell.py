@@ -123,6 +123,18 @@ def test_responsive_shell_css_has_desktop_tablet_and_mobile_boundaries():
     assert "prefers-reduced-motion" in css
 
 
+def test_e2e_proves_mobile_keyboard_console_and_navigation_contracts():
+    test = Path("tests/e2e/test_admin_smoke.py").read_text("utf-8")
+    for evidence in (
+        'item.type in {"warning", "error"}',
+        'document.activeElement.id',
+        'get_by_role("link", name="总览")',
+        'not_to_have_class(re.compile(r".*nav-open.*"))',
+        'assert console == []',
+    ):
+        assert evidence in test
+
+
 def test_storage_failures_do_not_disable_interactions_and_toggle_label():
     app_shell = Path("app/web/static/app-shell.js").resolve().as_posix()
     harness = f"""
