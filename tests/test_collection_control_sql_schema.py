@@ -373,3 +373,12 @@ def test_schema_validation_rejects_extra_column_semantics() -> None:
 
     with pytest.raises(AssertionError):
         _assert_schema(migration.replace(original, altered, 1))
+
+
+def test_system_article_job_has_database_singleton_identity_and_coordination_lock() -> None:
+    sql = INIT_SQL.read_text(encoding="utf-8")
+    assert "managed_key VARCHAR(100) NULL" in sql
+    assert "UNIQUE KEY uk_collection_job_managed_key (managed_key)" in sql
+    assert "CREATE TABLE IF NOT EXISTS wechat_system_job_coordination" in sql
+    assert "coordination_key VARCHAR(100) PRIMARY KEY" in sql
+    assert "'article_global'" in sql

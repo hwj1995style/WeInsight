@@ -29,3 +29,14 @@
 - 系统任务目标变化采用“完成旧任务 + 创建新任务”，避免删除已有 target/run 历史或篡改历史快照；任务列表会保留历史系统任务，但任一时刻只有一个可运行系统任务。
 - WeRSS catalog 的鉴权环境变量在测试命令中使用测试值注入，未写入仓库。
 - catalog 预期错误与同步锁忙会降级到本地最后 active 快照；数据库协调失败仍向上抛出，使 collector 进入既有启动/运行错误处理，而不是静默吞掉持久化故障。
+
+## Review findings 修复（2026-07-13）
+
+- 增加固定协调表与 `article_global` 锁行。所有 collector 在读取或创建系统任务前执行 `SELECT ... FOR UPDATE`，空表首次并发也被数据库串行化。
+- 为任务增加 nullable `managed_key` 及唯一索引。人工任务保持 `NULL`，系统仓储只写固定 `article_global` identity；数据库约束保证最多一个当前 managed job。
+- 增加幂等迁移 `20260713_004_system_article_job_singleton.sql`。迁移认领已有最新系统任务，不删除历史，并把其他旧可运行副本改为 `stop_requested` 且清空 `next_run_at`。
+- 目标变化时先查询固定系统 identity 全部历史任务的 queued/running run。存在活跃 run 时只请求停止当前 managed job并延后切换；确认全部终态后才把旧 job 置为 completed、释放 managed key并创建新快照，因此旧 job 不会在活跃 run 期间显示 completed。
+- collector 角色仅对 `wechat_collection_job` 增加 INSERT、对 `wechat_collection_job_target` 增加 INSERT，并只读固定协调表；未增加 DELETE，也未扩展到无关表。
+- 新增仓储状态机、缺失锁行拒绝运行、双 collector 首次并发、schema、幂等迁移及生产角色权限测试。
+
+Review 修复后的 Task 5、权限与迁移定向回归：`387 passed in 4.25s`。仓库完整回归：`1826 passed, 2 skipped, 14 failed`；14 项均来自 Web 视觉/鉴权测试连接本地 MySQL 时返回 `1045 Access denied`，未出现本次系统任务、迁移或权限测试失败。

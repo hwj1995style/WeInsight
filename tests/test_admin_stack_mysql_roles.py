@@ -179,8 +179,9 @@ def test_collector_role_is_limited_to_collection_runtime_policy() -> None:
     expected = {
         "wechat_group_config": {"SELECT"},
         "wechat_public_account_config": {"SELECT", "UPDATE"},
-        "wechat_collection_job": {"SELECT", "UPDATE"},
-        "wechat_collection_job_target": {"SELECT"},
+        "wechat_collection_job": {"SELECT", "INSERT", "UPDATE"},
+        "wechat_collection_job_target": {"SELECT", "INSERT"},
+        "wechat_system_job_coordination": {"SELECT"},
         **{
             table: {"SELECT", "INSERT", "UPDATE"}
             for table in (
@@ -389,3 +390,20 @@ def test_deployment_guide_contains_no_embedded_secret_or_unsafe_network_example(
     assert "0.0.0.0/0" not in content
     assert "-RemoteAddress Any" not in content
     assert "<ADMIN_LAN_CIDR>" in content
+
+
+def test_collector_can_maintain_only_system_job_tables_without_delete() -> None:
+    sql = ROLE_SQL.read_text(encoding="utf-8")
+    assert "GRANT SELECT, INSERT, UPDATE ON `weinsight_prod`.`wechat_collection_job` TO 'weinsight_collector_role'" in sql
+    assert "GRANT SELECT, INSERT ON `weinsight_prod`.`wechat_collection_job_target` TO 'weinsight_collector_role'" in sql
+    assert "GRANT SELECT ON `weinsight_prod`.`wechat_system_job_coordination` TO 'weinsight_collector_role'" in sql
+    managed_lines = [
+        line for line in sql.splitlines()
+        if "weinsight_collector_role" in line
+        and any(table in line for table in (
+            "wechat_collection_job`",
+            "wechat_collection_job_target`",
+            "wechat_system_job_coordination`",
+        ))
+    ]
+    assert all("DELETE" not in line for line in managed_lines)

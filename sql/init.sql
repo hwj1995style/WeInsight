@@ -462,6 +462,7 @@ CREATE TABLE IF NOT EXISTS weinsight_admin_session (
 
 CREATE TABLE IF NOT EXISTS wechat_collection_job (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '采集任务主键',
+    managed_key VARCHAR(100) NULL COMMENT '系统管理任务唯一身份，人工任务为空',
     job_name VARCHAR(200) NOT NULL COMMENT '采集任务名称',
     pipeline_type VARCHAR(20) NOT NULL COMMENT 'group/article',
     effective_start_at DATETIME NOT NULL COMMENT '任务整体开始时间',
@@ -479,9 +480,18 @@ CREATE TABLE IF NOT EXISTS wechat_collection_job (
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT ck_collection_job_pipeline CHECK (pipeline_type IN ('group', 'article')),
+    UNIQUE KEY uk_collection_job_managed_key (managed_key),
     KEY idx_collection_job_due (status, next_run_at),
     KEY idx_collection_job_window (effective_start_at, effective_end_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS wechat_system_job_coordination (
+    coordination_key VARCHAR(100) PRIMARY KEY COMMENT '固定系统协调键',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO wechat_system_job_coordination (coordination_key)
+VALUES ('article_global');
 
 CREATE TABLE IF NOT EXISTS wechat_collection_job_target (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '任务目标主键',

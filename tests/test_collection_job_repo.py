@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -131,6 +132,73 @@ class Engine:
         return self.connection
 
 
+class ConcurrentSystemEngine:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.barrier = threading.Barrier(2)
+        self.jobs: list[dict] = []
+        self.targets: dict[int, tuple[int, ...]] = {}
+        self.next_id = 40
+
+    def begin(self):
+        return ConcurrentSystemConnection(self)
+
+
+class ConcurrentSystemConnection:
+    def __init__(self, engine: ConcurrentSystemEngine) -> None:
+        self.engine = engine
+        self.locked = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self.locked:
+            self.engine.lock.release()
+        return False
+
+    def execute(self, statement, params=None):
+        sql = str(statement)
+        if "FROM wechat_system_job_coordination" in sql:
+            self.engine.barrier.wait(timeout=2)
+            self.engine.lock.acquire()
+            self.locked = True
+            return Result(rows=[{"coordination_key": "article_global"}])
+        if "WHERE job.managed_key" in sql:
+            current = next(
+                (job for job in self.engine.jobs if job["managed_key"]), None
+            )
+            if current is None:
+                return Result(rows=[])
+            ids = self.engine.targets.get(current["id"], ())
+            return Result(rows=[{
+                "id": current["id"],
+                "status": current["status"],
+                "target_ids": ",".join(map(str, ids)),
+            }])
+        if "FROM wechat_collection_job_run" in sql:
+            return Result(rows=[])
+        if "FROM wechat_public_account_config" in sql:
+            return Result(rows=[article_row(params["source_id"])])
+        if "INSERT INTO wechat_collection_job (" in sql:
+            self.engine.next_id += 1
+            self.engine.jobs.append({
+                "id": self.engine.next_id,
+                "managed_key": params["managed_key"],
+                "status": params["status"],
+            })
+            return Result(lastrowid=self.engine.next_id)
+        if "INSERT INTO wechat_collection_job_target" in sql:
+            rows = params
+            self.engine.targets[rows[0]["job_id"]] = tuple(
+                row["article_config_id"] for row in rows
+            )
+            return Result()
+        if "UPDATE wechat_collection_job" in sql:
+            return Result()
+        raise AssertionError(sql)
+
+
 def create_results(*source_rows):
     return [
         *(Result(rows=[row]) for row in source_rows),
@@ -173,6 +241,78 @@ def test_create_locks_deduplicated_sources_then_checks_overlap_before_insert() -
     assert all(row["article_config_id"] is None for row in target_params)
     assert executions[3][1]["effective_start_at"].tzinfo is None
     assert executions[3][1]["next_run_at"].tzinfo is None
+
+
+def test_system_reconcile_defers_target_switch_while_old_run_is_live() -> None:
+    engine = Engine([
+        Result(rows=[{"coordination_key": "article_global"}]),
+        Result(rows=[{"id": 41, "status": "active", "target_ids": "7"}]),
+        Result(rows=[{"id": 99}]),
+        Result(),
+    ])
+
+    MysqlCollectionJobRepo(engine).reconcile_system_article_job((8,), 10, NOW)
+
+    sql = [item[0] for item in engine.connection.executions]
+    assert "wechat_system_job_coordination" in sql[0]
+    assert "FOR UPDATE" in sql[0]
+    assert "queued', 'running" in sql[2]
+    assert "JOIN wechat_collection_job" in sql[2]
+    assert "job.job_name = :job_name" in sql[2]
+    assert "stop_requested" in sql[3]
+    assert all("INSERT INTO wechat_collection_job_target" not in item for item in sql)
+    assert all("completed" not in item for item in sql)
+
+
+def test_system_reconcile_refuses_to_run_without_seeded_coordination_row() -> None:
+    engine = Engine([Result(rows=[])])
+
+    with pytest.raises(RuntimeError, match="coordination row"):
+        MysqlCollectionJobRepo(engine).reconcile_system_article_job((8,), 10, NOW)
+
+    assert len(engine.connection.executions) == 1
+
+
+def test_system_reconcile_serializes_then_rotates_after_runs_are_terminal() -> None:
+    engine = Engine([
+        Result(rows=[{"coordination_key": "article_global"}]),
+        Result(rows=[{"id": 41, "status": "stopped", "target_ids": "7"}]),
+        Result(rows=[]),
+        Result(),
+        Result(rows=[article_row(8)]),
+        Result(lastrowid=42),
+        Result(),
+    ])
+
+    MysqlCollectionJobRepo(engine).reconcile_system_article_job((8,), 10, NOW)
+
+    sql = [item[0] for item in engine.connection.executions]
+    assert "managed_key = NULL" in sql[3]
+    assert "status = 'completed'" in sql[3]
+    assert "managed_key" in sql[5]
+    assert engine.connection.executions[5][1]["managed_key"] == "article_global"
+    assert "INSERT INTO wechat_collection_job_target" in sql[6]
+
+
+def test_two_collectors_first_reconcile_create_one_runnable_system_job() -> None:
+    engine = ConcurrentSystemEngine()
+    errors = []
+
+    def reconcile():
+        try:
+            MysqlCollectionJobRepo(engine).reconcile_system_article_job((8,), 10, NOW)
+        except Exception as exc:  # pragma: no cover - assertion reports details
+            errors.append(exc)
+
+    threads = [threading.Thread(target=reconcile) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=3)
+
+    assert errors == []
+    assert len([job for job in engine.jobs if job["managed_key"]]) == 1
+    assert list(engine.targets.values()) == [(8,)]
 
 
 def test_two_creation_transactions_use_same_exclusive_lock_then_overlap_protocol() -> None:

@@ -70,3 +70,18 @@ def test_werss_catalog_migration_is_idempotent_and_preserves_history() -> None:
     assert "INDEX_NAME = 'uk_public_account_werss_source_id'" in sql
     for destructive in ("DROP TABLE", "TRUNCATE TABLE", "DELETE FROM"):
         assert destructive not in sql.upper()
+
+
+def test_system_job_singleton_migration_is_idempotent_and_preserves_history() -> None:
+    path = Path("sql/migrations/20260713_004_system_article_job_singleton.sql")
+    sql = path.read_text(encoding="utf-8")
+    assert "CREATE TABLE IF NOT EXISTS wechat_system_job_coordination" in sql
+    assert "INSERT IGNORE INTO wechat_system_job_coordination" in sql
+    assert "information_schema.COLUMNS" in sql
+    assert "information_schema.STATISTICS" in sql
+    assert "ADD COLUMN managed_key" in sql
+    assert "ADD UNIQUE KEY uk_collection_job_managed_key" in sql
+    assert "SET managed_key = 'article_global'" in sql
+    assert "SET status = 'stop_requested', next_run_at = NULL" in sql
+    for destructive in ("DELETE FROM", "DROP TABLE", "TRUNCATE TABLE"):
+        assert destructive not in sql.upper()

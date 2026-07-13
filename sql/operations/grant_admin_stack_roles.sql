@@ -34,8 +34,9 @@ GRANT SELECT ON `weinsight_prod`.`wechat_article_process_task` TO 'weinsight_web
 -- collector role
 GRANT SELECT ON `weinsight_prod`.`wechat_group_config` TO 'weinsight_collector_role';
 GRANT SELECT, UPDATE ON `weinsight_prod`.`wechat_public_account_config` TO 'weinsight_collector_role';
-GRANT SELECT, UPDATE ON `weinsight_prod`.`wechat_collection_job` TO 'weinsight_collector_role';
-GRANT SELECT ON `weinsight_prod`.`wechat_collection_job_target` TO 'weinsight_collector_role';
+GRANT SELECT, INSERT, UPDATE ON `weinsight_prod`.`wechat_collection_job` TO 'weinsight_collector_role';
+GRANT SELECT, INSERT ON `weinsight_prod`.`wechat_collection_job_target` TO 'weinsight_collector_role';
+GRANT SELECT ON `weinsight_prod`.`wechat_system_job_coordination` TO 'weinsight_collector_role';
 GRANT SELECT, INSERT, UPDATE ON `weinsight_prod`.`wechat_collection_job_run` TO 'weinsight_collector_role';
 GRANT SELECT, INSERT, UPDATE ON `weinsight_prod`.`wechat_collection_job_target_run` TO 'weinsight_collector_role';
 GRANT INSERT ON `weinsight_prod`.`wechat_collection_job_event` TO 'weinsight_collector_role';

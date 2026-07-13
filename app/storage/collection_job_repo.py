@@ -147,22 +147,46 @@ class MysqlCollectionJobRepo:
         """Keep exactly one runnable system article job for the active catalog."""
         normalized = tuple(sorted(set(target_ids)))
         with self.engine.begin() as connection:
+            coordination = connection.execute(
+                _LOCK_SYSTEM_ARTICLE_COORDINATION,
+                {"managed_key": "article_global"},
+            ).mappings().first()
+            if coordination is None:
+                raise RuntimeError("system article coordination row is missing")
             row = connection.execute(
                 _LOCK_SYSTEM_ARTICLE_JOB,
-                {"job_name": SYSTEM_ARTICLE_JOB_NAME},
+                {"managed_key": "article_global"},
             ).mappings().first()
             current_ids = () if row is None or not row.get("target_ids") else tuple(
                 sorted(int(value) for value in str(row["target_ids"]).split(","))
             )
+            live_run = None
+            if row is not None:
+                live_run = connection.execute(
+                    _FIND_LIVE_SYSTEM_ARTICLE_RUN,
+                    {"job_name": SYSTEM_ARTICLE_JOB_NAME},
+                ).mappings().first()
             if row is not None and current_ids == normalized:
                 connection.execute(
                     _REFRESH_SYSTEM_ARTICLE_JOB,
                     {
                         "job_id": int(row["id"]),
                         "interval_seconds": interval_minutes * 60,
-                        "next_run_at": _to_db_datetime(now),
-                        "status": "active" if normalized else "stopped",
+                        "next_run_at": (
+                            _to_db_datetime(now) if normalized and live_run is None else None
+                        ),
+                        "status": (
+                            str(row["status"])
+                            if live_run is not None
+                            else ("active" if normalized else "stopped")
+                        ),
                     },
+                )
+                return
+            if row is not None and live_run is not None:
+                connection.execute(
+                    _REQUEST_STOP_SYSTEM_ARTICLE_JOB,
+                    {"job_id": int(row["id"]), "now": _to_db_datetime(now)},
                 )
                 return
             if row is not None:
@@ -177,8 +201,9 @@ class MysqlCollectionJobRepo:
                 for source_id in normalized
             ]
             result = connection.execute(
-                _INSERT_JOB,
+                _INSERT_SYSTEM_ARTICLE_JOB,
                 {
+                    "managed_key": "article_global",
                     "job_name": SYSTEM_ARTICLE_JOB_NAME,
                     "pipeline_type": "article",
                     "effective_start_at": _to_db_datetime(now),
@@ -658,13 +683,39 @@ _LOCK_SYSTEM_ARTICLE_JOB = text(
            GROUP_CONCAT(target.article_config_id ORDER BY target.article_config_id) AS target_ids
     FROM wechat_collection_job AS job
     LEFT JOIN wechat_collection_job_target AS target ON target.job_id = job.id
-    WHERE job.job_name = :job_name
+    WHERE job.managed_key = :managed_key
       AND job.pipeline_type = 'article'
-      AND job.status IN ('scheduled', 'active')
     GROUP BY job.id
     ORDER BY job.id DESC
     LIMIT 1
     FOR UPDATE
+    """
+)
+_LOCK_SYSTEM_ARTICLE_COORDINATION = text(
+    """
+    SELECT coordination_key
+    FROM wechat_system_job_coordination
+    WHERE coordination_key = :managed_key
+    FOR UPDATE
+    """
+)
+_FIND_LIVE_SYSTEM_ARTICLE_RUN = text(
+    """
+    SELECT run.id
+    FROM wechat_collection_job_run AS run
+    INNER JOIN wechat_collection_job AS job ON job.id = run.job_id
+    WHERE job.job_name = :job_name
+      AND run.status IN ('queued', 'running')
+    LIMIT 1
+    """
+)
+_REQUEST_STOP_SYSTEM_ARTICLE_JOB = text(
+    """
+    UPDATE wechat_collection_job
+    SET status = 'stop_requested', next_run_at = NULL,
+        stop_requested_at = :now, stop_requested_by = 'system',
+        version = version + 1
+    WHERE id = :job_id
     """
 )
 _REFRESH_SYSTEM_ARTICLE_JOB = text(
@@ -680,8 +731,23 @@ _REFRESH_SYSTEM_ARTICLE_JOB = text(
 _COMPLETE_SYSTEM_ARTICLE_JOB = text(
     """
     UPDATE wechat_collection_job
-    SET status = 'completed', next_run_at = NULL, version = version + 1
+    SET managed_key = NULL, status = 'completed', next_run_at = NULL,
+        version = version + 1
     WHERE id = :job_id
+    """
+)
+
+_INSERT_SYSTEM_ARTICLE_JOB = text(
+    """
+    INSERT INTO wechat_collection_job (
+        managed_key, job_name, pipeline_type, effective_start_at,
+        effective_end_at, daily_window_start, daily_window_end,
+        interval_seconds, status, next_run_at
+    ) VALUES (
+        :managed_key, :job_name, :pipeline_type, :effective_start_at,
+        :effective_end_at, :daily_window_start, :daily_window_end,
+        :interval_seconds, :status, :next_run_at
+    )
     """
 )
 
