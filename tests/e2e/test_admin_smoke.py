@@ -33,8 +33,15 @@ def test_fake_admin_login_to_report_smoke(admin_base_url, browser):
     page.get_by_label("用户名").fill("admin")
     page.get_by_label("密码").fill("admin123456")
     page.get_by_role("button", name="登录").click()
-    expect(page).to_have_url(re.compile(r"/$"))
-    expect(page.get_by_text("默认密码", exact=False)).to_be_visible()
+    expect(page).to_have_url(re.compile(r"/dashboard$"))
+    expect(page.get_by_text("默认密码", exact=False)).not_to_be_visible()
+
+    desktop_toggle = page.get_by_role("button", name="折叠侧栏")
+    desktop_toggle.click()
+    expect(page.locator(".app-shell")).to_have_attribute("data-sidebar-state", "collapsed")
+    page.reload()
+    expect(page.locator(".app-shell")).to_have_attribute("data-sidebar-state", "collapsed")
+    page.get_by_role("button", name="展开侧栏").click()
 
     for target in targets:
         page.goto(f"{admin_base_url}/sources/groups/new")
@@ -79,6 +86,15 @@ def test_fake_admin_login_to_report_smoke(admin_base_url, browser):
     for route in ("/dashboard", "/sources/groups", "/jobs", "/runs", "/reports"):
         page.goto(admin_base_url + route)
         assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
+    mobile_toggle = page.get_by_role("button", name="打开导航")
+    mobile_toggle.click()
+    expect(mobile_toggle).to_have_attribute("aria-expanded", "true")
+    expect(page.locator(".app-shell")).to_have_class(re.compile(r"nav-open"))
+    page.keyboard.press("Escape")
+    expect(mobile_toggle).to_have_attribute("aria-expanded", "false")
+    mobile_toggle.click()
+    page.locator("#nav-backdrop").click(position={"x": 380, "y": 400})
+    expect(mobile_toggle).to_have_attribute("aria-expanded", "false")
     assert console == []
     assert pageerrors == []
     context.close()

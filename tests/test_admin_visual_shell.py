@@ -114,6 +114,15 @@ def test_app_shell_script_persists_and_closes_navigation():
     assert "aria-expanded" in script
 
 
+def test_responsive_shell_css_has_desktop_tablet_and_mobile_boundaries():
+    css = Path("app/web/static/app.css").read_text("utf-8")
+    assert "@media (max-width: 980px)" in css
+    assert "@media (max-width: 720px)" in css
+    assert ".app-shell.nav-open .sidebar" in css
+    assert ".table-scroll { overflow-x: auto;" in css
+    assert "prefers-reduced-motion" in css
+
+
 def test_storage_failures_do_not_disable_interactions_and_toggle_label():
     app_shell = Path("app/web/static/app-shell.js").resolve().as_posix()
     harness = f"""
