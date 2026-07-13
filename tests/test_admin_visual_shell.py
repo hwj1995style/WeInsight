@@ -47,6 +47,21 @@ def test_admin_pages_use_shared_direction_a_shell(authenticated_client, path):
         assert unsafe_copy not in response.text
 
 
+@pytest.mark.parametrize(
+    ("path", "page_title"),
+    (
+        ("/dashboard", "基础总览"), ("/sources/groups", "微信群名单"),
+        ("/sources/articles", "公众号名单"), ("/jobs", "采集任务"),
+        ("/runs", "运行实例"), ("/events", "结构化日志"),
+        ("/workers", "Worker 与微信状态"), ("/results/groups", "微信群结果"),
+        ("/reports", "日报"),
+    ),
+)
+def test_admin_toolbar_shows_current_page_title(authenticated_client, path, page_title):
+    response = authenticated_client.get(path)
+    assert f'<span class="toolbar-title">{page_title}</span>' in response.text
+
+
 def test_login_does_not_advertise_default_credentials(raw_client):
     response = raw_client.get("/login")
 
@@ -106,6 +121,14 @@ def test_base_template_contains_professional_sidebar_shell():
         assert fragment in text
 
 
+def test_collapsed_navigation_has_icons_and_accessible_names():
+    text = Path("app/web/templates/base.html").read_text("utf-8")
+    assert text.count('class="nav-icon"') == 9
+    assert text.count('class="nav-label"') == 9
+    for label in ("总览", "微信群", "公众号", "任务", "运行", "日志", "Worker", "结果", "日报"):
+        assert f'aria-label="{label}" title="{label}"' in text
+
+
 def test_app_shell_script_persists_and_closes_navigation():
     script = Path("app/web/static/app-shell.js").read_text("utf-8")
     assert "weinsight.sidebar.v1" in script
@@ -131,8 +154,20 @@ def test_e2e_proves_mobile_keyboard_console_and_navigation_contracts():
         'get_by_role("link", name="总览")',
         'not_to_have_class(re.compile(r".*nav-open.*"))',
         'assert console == []',
+        'document.querySelector(".sidebar").contains(document.activeElement)',
+        'expect(page.locator(".app-main")).to_have_attribute("inert", "")',
+        'page.keyboard.press("Tab")',
+        'page.keyboard.press("Shift+Tab")',
+        'document.activeElement.id") == "mobile-nav-toggle"',
     ):
         assert evidence in test
+
+
+def test_shell_uses_fluid_workspace_and_has_no_security_warning_residue():
+    css = Path("app/web/static/app.css").read_text("utf-8")
+    assert "max-width: 1600px" in css
+    assert "min(1120px" not in css
+    assert ".security-warning" not in css
 
 
 def test_storage_failures_do_not_disable_interactions_and_toggle_label():
@@ -140,17 +175,21 @@ def test_storage_failures_do_not_disable_interactions_and_toggle_label():
     harness = f"""
 const assert = require('node:assert/strict');
 class Element {{
-  constructor() {{ this.attrs = {{}}; this.listeners = {{}}; this.dataset = {{ sidebarState: 'expanded' }}; this.hidden = true; this.classList = {{ values: new Set(), add: x => this.classList.values.add(x), remove: x => this.classList.values.delete(x) }}; }}
+  constructor() {{ this.attrs = {{}}; this.listeners = {{}}; this.dataset = {{ sidebarState: 'expanded' }}; this.hidden = true; this.classList = {{ values: new Set(), add: x => this.classList.values.add(x), remove: x => this.classList.values.delete(x), contains: x => this.classList.values.has(x) }}; }}
   setAttribute(name, value) {{ this.attrs[name] = value; }}
+  removeAttribute(name) {{ delete this.attrs[name]; }}
   addEventListener(name, handler) {{ this.listeners[name] = handler; }}
   querySelectorAll() {{ return [link]; }}
+  querySelector() {{ return link; }}
+  getClientRects() {{ return [1]; }}
+  focus() {{ global.document.activeElement = this; }}
 }}
 const shell = new Element(); const sidebar = new Element(); const desktop = new Element();
-const mobile = new Element(); const backdrop = new Element(); const link = new Element();
+const mobile = new Element(); const backdrop = new Element(); const link = new Element(); const appMain = new Element();
 const documentListeners = {{}};
 global.document = {{
   querySelector: () => shell,
-  getElementById: id => ({{ 'app-sidebar': sidebar, 'sidebar-toggle': desktop, 'mobile-nav-toggle': mobile, 'nav-backdrop': backdrop }})[id],
+  getElementById: id => ({{ 'app-sidebar': sidebar, 'sidebar-toggle': desktop, 'mobile-nav-toggle': mobile, 'nav-backdrop': backdrop, 'app-main': appMain }})[id],
   addEventListener: (name, handler) => {{ documentListeners[name] = handler; }},
 }};
 global.localStorage = {{ getItem() {{ throw new Error('blocked'); }}, setItem() {{ throw new Error('blocked'); }} }};

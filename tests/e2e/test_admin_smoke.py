@@ -98,8 +98,27 @@ def test_fake_admin_login_to_report_smoke(admin_base_url, browser):
     mobile_toggle.click()
     expect(mobile_toggle).to_have_attribute("aria-expanded", "true")
     expect(page.locator(".app-shell")).to_have_class(re.compile(r"nav-open"))
+    expect(page.locator(".app-main")).to_have_attribute("inert", "")
+    assert page.evaluate(
+        'document.querySelector(".sidebar").contains(document.activeElement)'
+    )
+    drawer_focusables = page.locator(
+        ".sidebar a:visible, .sidebar button:visible, .sidebar input:visible"
+    )
+    drawer_focusables.last.focus()
+    page.keyboard.press("Tab")
+    assert page.evaluate(
+        'document.querySelector(".sidebar").contains(document.activeElement)'
+    )
+    drawer_focusables.first.focus()
+    page.keyboard.press("Shift+Tab")
+    assert page.evaluate(
+        'document.querySelector(".sidebar").contains(document.activeElement)'
+    )
     page.keyboard.press("Escape")
     expect(mobile_toggle).to_have_attribute("aria-expanded", "false")
+    expect(page.locator(".app-main")).not_to_have_attribute("inert", "")
+    assert page.evaluate("document.activeElement.id") == "mobile-nav-toggle"
     mobile_toggle.click()
     page.locator("#nav-backdrop").click(position={"x": 380, "y": 400})
     expect(mobile_toggle).to_have_attribute("aria-expanded", "false")

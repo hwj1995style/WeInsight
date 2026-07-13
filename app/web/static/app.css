@@ -59,7 +59,8 @@ form button { margin-top: 1.25rem; }
 .icon-button { display: grid; place-items: center; flex: 0 0 36px; width: 36px; height: 36px; padding: 0; }
 .icon-button svg { width: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .primary-nav { display: flex; flex: 1; flex-direction: column; gap: .2rem; padding: .75rem; }
-.primary-nav a { display: flex; align-items: center; min-height: 40px; padding: 0 .8rem; color: #c8d5e5; font-size: .9rem; font-weight: 620; border-left: 2px solid transparent; white-space: nowrap; }
+.primary-nav a { display: flex; align-items: center; gap: .75rem; min-height: 40px; padding: 0 .8rem; color: #c8d5e5; font-size: .9rem; font-weight: 620; border-left: 2px solid transparent; white-space: nowrap; }
+.nav-icon { flex: 0 0 20px; width: 20px; height: 20px; fill: currentColor; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .primary-nav a:hover { color: #fff; background: var(--color-sidebar-hover); text-decoration: none; }
 .primary-nav a[aria-current="page"] { color: #fff; background: var(--color-sidebar-hover); border-left-color: #6eaeff; }
 .sidebar-account { display: grid; gap: .55rem; padding: 1rem; border-top: 1px solid var(--color-sidebar-border); font-size: .85rem; }
@@ -75,10 +76,12 @@ form button { margin-top: 1.25rem; }
 .app-shell[data-sidebar-state="collapsed"] .sidebar-brand .brand { display: none; }
 .app-shell[data-sidebar-state="collapsed"] .sidebar-brand { justify-content: center; }
 .app-shell[data-sidebar-state="collapsed"] .sidebar-toggle svg { transform: rotate(180deg); }
+.app-shell[data-sidebar-state="collapsed"] .primary-nav { padding-inline: .5rem; }
+.app-shell[data-sidebar-state="collapsed"] .primary-nav a { justify-content: center; padding-inline: 0; }
+.app-shell[data-sidebar-state="collapsed"] .nav-label { display: none; }
 .text-button { padding: 0; color: var(--color-accent); background: transparent; font-weight: 500; }
 .text-button:hover { color: var(--color-accent-hover); background: transparent; text-decoration: underline; }
-.security-warning { padding: .8rem max(1.25rem, calc((100vw - 1120px) / 2)); background: var(--color-warning-bg); border-bottom: 1px solid var(--color-warning-border); font-size: .9rem; }
-.page-shell { width: min(1120px, calc(100% - 2.5rem)); margin: 0 auto; padding: 3rem 0; }
+.page-shell { width: calc(100% - 2.5rem); max-width: 1600px; margin: 0 auto; padding: 3rem 0; }
 .page-heading { display: flex; justify-content: space-between; align-items: end; gap: 2rem; margin-bottom: 2rem; }
 .page-heading h1, .content-panel h1 { margin: 0 0 .6rem; font-size: clamp(1.8rem, 4vw, 2.5rem); letter-spacing: -.035em; }
 .page-heading p, .muted { margin: 0; color: var(--color-muted); line-height: 1.6; }
@@ -245,6 +248,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .app-shell[data-sidebar-state="collapsed"] .sidebar-brand .brand { display: flex; }
   .app-shell[data-sidebar-state="collapsed"] .sidebar-brand { justify-content: space-between; }
   .app-shell[data-sidebar-state="collapsed"] .brand-label { display: inline; }
+  .app-shell[data-sidebar-state="collapsed"] .nav-label { display: inline; }
+  .app-shell[data-sidebar-state="collapsed"] .primary-nav { padding: .75rem; }
+  .app-shell[data-sidebar-state="collapsed"] .primary-nav a { justify-content: flex-start; padding: 0 .8rem; }
   .app-shell[data-sidebar-state="collapsed"] .sidebar-account { display: grid; }
   .sidebar-toggle { display: none; }
   .mobile-nav-toggle { display: grid; }
@@ -256,7 +262,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .login-intro { padding: 2rem 1.5rem; }
   .login-intro h1 { margin-top: 1.5rem; font-size: 2rem; }
   .login-panel { padding: 2rem 1.5rem 3rem; }
-  .page-shell { width: min(100% - 2rem, 1120px); padding: 2rem 0; }
+  .page-shell { width: calc(100% - 2rem); padding: 2rem 0; }
   .page-heading { align-items: flex-start; flex-direction: column; }
   .status-list div { grid-template-columns: 1fr; gap: .35rem; }
   .source-panel { margin-inline: -1rem; border-right: 0; border-left: 0; border-radius: 0; }
