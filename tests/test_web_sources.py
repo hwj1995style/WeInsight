@@ -300,6 +300,23 @@ def test_article_page_is_read_only_and_refreshes_with_get(authenticated_client):
         assert text not in response.text
 
 
+def test_unknown_article_source_is_rendered_as_pending_binding(
+    authenticated_client, article_status_service
+):
+    original = article_status_service.list_page
+
+    def list_unknown(page, page_size, now):
+        result = original(page, page_size, now)
+        return replace(result, items=(replace(
+            result.items[0], upstream_status="unknown", display_status="unknown"
+        ),))
+
+    article_status_service.list_page = list_unknown
+    html = authenticated_client.get("/sources/articles").text
+    assert "待绑定" in html
+    assert "正常" not in html
+
+
 @pytest.mark.parametrize("path", [
     "/sources/articles", "/sources/articles/9", "/sources/articles/9/enable",
     "/sources/articles/9/disable", "/sources/articles/9/delete",

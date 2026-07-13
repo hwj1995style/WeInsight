@@ -39,6 +39,7 @@ def record(**changes):
         ({"upstream_status": "excluded", "last_collect_status": "failed"}, "excluded"),
         ({"upstream_status": "missing", "last_collect_status": "failed"}, "missing"),
         ({"upstream_status": "disabled", "last_collect_status": "failed"}, "disabled"),
+        ({"upstream_status": "unknown", "last_collect_status": "failed"}, "unknown"),
         ({"last_collect_status": "failed"}, "collect_error"),
         ({"last_success_collect_time": NOW - timedelta(minutes=21)}, "stale"),
         ({}, "normal"),
@@ -83,3 +84,11 @@ def test_status_updated_at_uses_latest_failure_log_time():
         record(updated_at=NOW - timedelta(minutes=9), latest_collect_log_time=latest), NOW
     )
     assert row.status_updated_at == latest
+
+
+def test_unknown_legacy_source_is_not_reported_normal():
+    row = ArticleSourceStatusService(FakeRepo(), 10).to_status(
+        record(upstream_status="unknown"), NOW
+    )
+    assert row.display_status == "unknown"
+    assert row.display_status != "normal"

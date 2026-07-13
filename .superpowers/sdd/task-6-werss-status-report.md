@@ -27,3 +27,10 @@
 ## Concerns
 
 - 集成测试针对当前开发库的现有只读快照，不创建专用夹具；因此它验证真实 MySQL 8 语法、结果一致性和分页，但覆盖到的状态组合取决于当前库数据。
+
+## 视觉 QA 修复：旧记录待绑定状态
+
+- 真实页面发现 `upstream_status='unknown'` 的历史记录被误显示为“正常”。
+- 新增派生状态 `unknown`，页面文案为“待绑定”；优先级为 `excluded > missing > disabled > unknown > collect_error > stale > normal`。
+- 未隐藏或删除任何历史记录，active 的等待首轮、陈旧与正常逻辑保持不变。
+- RED：unknown 服务与 Web 测试共 3 项按预期失败；GREEN：Task 6 focused、真实 MySQL 只读集成与 Direction A 视觉回归共 98 passed，`git diff --check` 通过。

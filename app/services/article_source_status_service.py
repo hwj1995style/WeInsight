@@ -77,6 +77,7 @@ class ArticleSourceStatusService:
         if record.upstream_status == "excluded": return "excluded"
         if record.upstream_status == "missing": return "missing"
         if record.upstream_status == "disabled": return "disabled"
+        if record.upstream_status == "unknown": return "unknown"
         if record.last_collect_status == "failed": return "collect_error"
         if record.upstream_status == "active" and record.last_success_collect_time is None:
             return "waiting_first_run"
