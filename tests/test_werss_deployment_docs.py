@@ -1,6 +1,37 @@
 from pathlib import Path
 
 
+def test_runbook_documents_read_only_catalog_boundary() -> None:
+    text = Path("docs/operations/公众号RSS采集运行手册.md").read_text("utf-8")
+    for phrase in (
+        "http://127.0.0.1:8001/api/v1/wx/mps",
+        "WEINSIGHT_WERSS_ACCESS_KEY",
+        "WEINSIGHT_WERSS_SECRET_KEY",
+        "WeInsight read-only catalog",
+        "只读",
+        "每 10 分钟",
+        "一箱蛋",
+        "重新开始连续 24 小时",
+        "禁止跨库",
+        "禁止向 WeRSS 发起写请求",
+    ):
+        assert phrase in text
+    assert "WeInsight 不读取 WeRSS 私有表或管理 API" not in text
+
+
+def test_readme_describes_current_read_only_werss_catalog_contract() -> None:
+    text = Path("README.md").read_text("utf-8")
+    for phrase in (
+        "固定本机只读 API",
+        "WEINSIGHT_WERSS_ACCESS_KEY",
+        "WEINSIGHT_WERSS_SECRET_KEY",
+        "禁止跨库",
+        "禁止向 WeRSS 发起写请求",
+        "公众号旧 RPA",
+    ):
+        assert phrase in text
+
+
 def test_werss_compose_is_pinned_and_not_public():
     compose = Path("deploy/werss/docker-compose.yml").read_text("utf-8")
     assert "ghcr.io/rachelos/we-mp-rss@sha256:53912fcb3d523d1e640adcb7066cc18123f00e9510882a7982d0991f3113845f" in compose

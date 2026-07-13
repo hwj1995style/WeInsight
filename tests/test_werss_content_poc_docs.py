@@ -48,6 +48,21 @@ def test_poc_record_does_not_claim_unfinished_24_hour_observation_passed() -> No
     assert "24 小时观察：通过" not in content
 
 
+def test_poc_record_invalidates_old_window_after_catalog_architecture_change() -> None:
+    content = POC.read_text(encoding="utf-8")
+    for required in (
+        "旧 24 小时观察窗口：失效",
+        "架构改造",
+        "首个 9/9 成功",
+        "增量流水线健康",
+        "桌面截图",
+        "窄屏截图",
+        "待 controller 执行",
+    ):
+        assert required in content
+    assert "当前有效连续 24 小时窗口开始" not in content
+
+
 def test_poc_record_marks_observation_as_in_progress_with_explicit_window() -> None:
     content = POC.read_text(encoding="utf-8")
     assert "24 小时观察状态：进行中" in content

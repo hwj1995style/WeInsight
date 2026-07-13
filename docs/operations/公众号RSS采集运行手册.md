@@ -1,6 +1,24 @@
 # 公众号 RSS 采集运行手册
 
-本手册用于在 Windows 采集机的 Docker Desktop 中运行 WeRSS，并通过标准 RSS/Atom 向 WeInsight 提供公众号文章。WeRSS 只监听 `127.0.0.1`，连接现有外部 MySQL；禁止将管理端口开放到公网。WeInsight 不读取 WeRSS 私有表或管理 API。
+本手册用于在 Windows 采集机的 Docker Desktop 中运行 WeRSS，并通过标准 RSS/Atom 向 WeInsight 提供公众号文章。WeRSS 只监听 `127.0.0.1`，连接现有外部 MySQL；禁止将管理端口开放到公网。WeInsight 只通过固定本机只读 API `http://127.0.0.1:8001/api/v1/wx/mps` 的 GET 请求同步公众号清单；禁止跨库读取 WeRSS 私有表，禁止向 WeRSS 发起写请求。
+
+## 只读清单凭据与边界
+
+1. 由 controller 在 WeRSS 管理端创建专用凭据，名称固定为 `WeInsight read-only catalog`，权限只允许读取公众号清单；不得复用管理员凭据。
+2. 将 AK/SK 写入 Windows User 环境变量 `WEINSIGHT_WERSS_ACCESS_KEY` 和 `WEINSIGHT_WERSS_SECRET_KEY`。仓库、YAML、数据库、日志、HTML、截图和测试输出均不得出现真实值。
+3. 新进程只在启动时读取环境变量。凭据轮换时先创建新只读凭据、更新两个 User 环境变量并受控重启 WeInsight，再撤销旧凭据；核验日志仅允许出现稳定错误码。
+4. 清单同步每 10 分钟运行一次，只读 API 不可用时保留最近一次完整清单和历史文章，不把来源误标为缺失，不尝试跨库或写 WeRSS。
+5. 服务端始终排除“一箱蛋”，不得为其创建采集、清洗、分析或报价任务。公众号旧 RPA 继续禁止，禁止恢复旧命令、调度、探针或 UI 锁入口。
+
+凭据创建和 User 环境变量变更会影响当前登录用户，服务停止、数据库备份、迁移和重启会影响开发运行环境，必须由 controller 在确认窗口后执行；本文不记录或推断其已完成。
+
+## 只读清单切换顺序
+
+1. 停止旧 collector 和 pipeline，记录运行中任务并备份 `weinsight_dev`。
+2. 应用 `20260713_001_add_werss_catalog_state.sql`，再启动 web、collector 和 pipeline。
+3. 等待至少两个全局周期，确认范围内来源同步完整、“一箱蛋”新任务为 0、公众号 `article_ui_lock_count` 为 0、新文章按状态进入 parse/analyze/报价表且微信群 Worker 正常。
+4. WeRSS 不可用时不得切回跨库或写接口；恢复 API 后等待完整清单成功，再观察下一全局周期。
+5. 旧观察窗口因清单同步架构改造失效。只有首个 9/9 成功且增量流水线健康后，才重新开始连续 24 小时观察，旧轮次不得拼接。
 
 公众号 RPA 已删除。现行回滚只能停止 RSS、恢复已批准的 RSS 代码版本和对应数据库备份；不得恢复或重新运行公众号 RPA。
 

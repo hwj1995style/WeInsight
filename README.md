@@ -561,6 +561,8 @@ HTMX 资产已本地保留以供后续局部交互使用；当前页面未实际
 
 WeRSS 在当前 Windows 采集机的 Docker Desktop 中运行，固定使用官方 `ghcr.io/rachelos/we-mp-rss@sha256:53912fcb3d523d1e640adcb7066cc18123f00e9510882a7982d0991f3113845f`，连接独立外部 MySQL 数据库，并仅监听 `127.0.0.1`。部署时复制环境模板为本机 `.env`，设置 NTFS ACL，且不得提交真实凭据。公众号旧 RPA 已删除；禁止使用已移除的旧采集命令，历史 POC 文档不得作为现行操作手册。
 
+公众号清单现由 WeInsight 每 10 分钟通过固定本机只读 API `http://127.0.0.1:8001/api/v1/wx/mps` 自动同步。专用 AK/SK 只从 Windows User 环境变量 `WEINSIGHT_WERSS_ACCESS_KEY`、`WEINSIGHT_WERSS_SECRET_KEY` 读取，不得写入仓库。该集成禁止跨库读取 WeRSS 私有表，禁止向 WeRSS 发起写请求；“一箱蛋”在服务端排除，公众号旧 RPA、旧调度和 UI 锁入口继续禁止。
+
 ```powershell
 Copy-Item deploy\werss\.env.example deploy\werss\.env
 docker compose --env-file deploy\werss\.env -f deploy\werss\docker-compose.yml up -d
