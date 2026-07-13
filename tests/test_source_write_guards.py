@@ -56,3 +56,11 @@ def test_rss_article_raw_and_collect_log_lock_current_account_before_writing():
     log_engine = Engine("行业观察")
     MysqlArticleCollectLogRepo(log_engine).insert_collect_log(ArticleCollectLogRecord("b1", "行业观察", datetime(2026,7,6,8), datetime(2026,7,6,8,1), "success"))
     _assert_first_history_lock(log_engine, "wechat_public_account_config")
+
+
+def test_werss_sync_source_never_deletes_history_or_task_references():
+    from pathlib import Path
+
+    source = Path("app/storage/werss_catalog_sync_repo.py").read_text(encoding="utf-8").upper()
+    assert "DELETE FROM" not in source
+    assert "TRUNCATE TABLE" not in source
