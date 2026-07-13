@@ -55,7 +55,7 @@
           <tbody>
             {% for job in jobs %}
               <tr>
-                <th scope="row">{{ job.job_name }}</th>
+                <th scope="row">{{ job.job_name }}{% if job.job_name == "公众号全局增量采集（系统）" %} <small>系统管理</small>{% endif %}</th>
                 <td>{{ pipeline_labels[job.pipeline_type] }}</td>
                 <td><span class="job-status status-{{ job.status.value }}">{{ status_labels[job.status] }}</span></td>
                 <td>{{ job.target_count }}</td>

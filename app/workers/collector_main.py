@@ -105,6 +105,15 @@ def main(
             max_instances=1,
             coalesce=True,
         )
+        article_cycle = getattr(worker, "article_global_cycle", None)
+        if article_cycle is not None:
+            article_cycle.run(clock())
+            _register_article_global_cycle(
+                background,
+                article_cycle,
+                config.pipelines.article.sync_interval_minutes,
+                clock,
+            )
         previous_handlers = _install_signal_handlers(stop_event, worker)
         background.start()
         degraded_failures = 0
@@ -196,6 +205,18 @@ def _bounded_tick_delay(
         return base_seconds
     exponent = min(max(degraded_failures, 1), 6)
     return min(60, base_seconds * (2**exponent))
+
+
+def _register_article_global_cycle(
+    scheduler, cycle, interval_minutes: int, now_provider
+) -> None:
+    scheduler.add_job(
+        lambda: cycle.run(now_provider()),
+        "interval",
+        minutes=interval_minutes,
+        max_instances=1,
+        coalesce=True,
+    )
 
 
 if __name__ == "__main__":

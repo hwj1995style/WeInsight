@@ -128,6 +128,8 @@ async def job_new(request: Request) -> Response:
             "请检查任务链路后重试。",
             status_code=422,
         )
+    if pipeline is PipelineType.ARTICLE:
+        return RedirectResponse("/jobs", status_code=303)
     try:
         targets = await _load_enabled_targets(request, pipeline)
     except ValueError:
@@ -161,6 +163,16 @@ async def job_create(request: Request) -> Response:
             targets,
             values,
             _form_validation_message(exc),
+            status_code=422,
+        )
+
+    if pipeline is PipelineType.ARTICLE:
+        return _job_form_response(
+            request,
+            pipeline,
+            (),
+            values,
+            "公众号采集任务由系统统一管理，不能人工创建。",
             status_code=422,
         )
 

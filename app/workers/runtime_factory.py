@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.engine import Engine
 
 from app.core.config import Config
+from app.integrations.werss_catalog import WeRSSCatalogClient
 from app.domain.collection_jobs import APPLICATION_TIMEZONE
 from app.pipelines.rss_article_collect_service import RssArticleCollectService, RssArticleTarget
 from app.pipelines.rss_article_polling_runner import RssArticlePollingRunner
@@ -41,6 +42,10 @@ from app.storage.group_repo import (
 from app.storage.lock_repo import MysqlUiLockRepo
 from app.storage.wechat_health_repo import MysqlWechatHealthRepo
 from app.storage.worker_heartbeat_repo import MysqlWorkerHeartbeatRepo
+from app.storage.collection_job_repo import MysqlCollectionJobRepo
+from app.storage.werss_catalog_sync_repo import MysqlWeRSSCatalogSyncRepo
+from app.services.werss_catalog_sync_service import WeRSSCatalogSyncService
+from app.workers.article_global_cycle import ArticleGlobalCycle
 from app.workers.collector_worker import (
     ManagedCollectorWorker,
     default_worker_identity,
@@ -162,7 +167,7 @@ def build_managed_collector_worker(
             config.wechat.check_login_interval_seconds
         ),
     )
-    return ManagedCollectorWorker(
+    worker = ManagedCollectorWorker(
         runtime_repo=runtime_repo,
         event_repo=event_repo,
         heartbeat_repo=heartbeat_repo,
@@ -178,6 +183,20 @@ def build_managed_collector_worker(
         article_max_concurrency=config.pipelines.article.rss_max_concurrency,
         now_provider=clock,
     )
+    worker.article_global_cycle = ArticleGlobalCycle(
+        WeRSSCatalogSyncService(
+            WeRSSCatalogClient(
+                config.pipelines.article.werss_catalog_base_url,
+                config.pipelines.article.werss_access_key,
+                config.pipelines.article.werss_secret_key,
+            ),
+            MysqlWeRSSCatalogSyncRepo(shared_engine),
+        ),
+        article_config_repo,
+        MysqlCollectionJobRepo(shared_engine),
+        config.pipelines.article.sync_interval_minutes,
+    )
+    return worker
 
 
 class _FixedDesktopProbe:

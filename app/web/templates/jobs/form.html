@@ -7,7 +7,6 @@
     <p class="muted">一个任务只能选择同一采集链路中的一个或多个目标。</p></div></div>
     <nav class="section-tabs job-pipeline-tabs" aria-label="选择采集链路">
       <a href="/jobs/new?pipeline=group" {% if pipeline.value == "group" %}aria-current="page"{% endif %}>微信群任务</a>
-      <a href="/jobs/new?pipeline=article" {% if pipeline.value == "article" %}aria-current="page"{% endif %}>公众号任务</a>
     </nav>
     {% if error %}<p class="notice error" role="alert">{{ error }}</p>{% endif %}
     {% if job_names %}

@@ -43,6 +43,7 @@ _ACTIVE_OVERLAP_STATUSES = (
     JobStatus.ACTIVE,
     JobStatus.STOP_REQUESTED,
 )
+SYSTEM_ARTICLE_JOB_NAME = "公众号全局增量采集（系统）"
 
 
 class MysqlCollectionJobRepo:
@@ -136,6 +137,75 @@ class MysqlCollectionJobRepo:
                 actor=actor,
             )
             return job_id
+
+    def reconcile_system_article_job(
+        self,
+        target_ids: tuple[int, ...],
+        interval_minutes: int,
+        now: datetime,
+    ) -> None:
+        """Keep exactly one runnable system article job for the active catalog."""
+        normalized = tuple(sorted(set(target_ids)))
+        with self.engine.begin() as connection:
+            row = connection.execute(
+                _LOCK_SYSTEM_ARTICLE_JOB,
+                {"job_name": SYSTEM_ARTICLE_JOB_NAME},
+            ).mappings().first()
+            current_ids = () if row is None or not row.get("target_ids") else tuple(
+                sorted(int(value) for value in str(row["target_ids"]).split(","))
+            )
+            if row is not None and current_ids == normalized:
+                connection.execute(
+                    _REFRESH_SYSTEM_ARTICLE_JOB,
+                    {
+                        "job_id": int(row["id"]),
+                        "interval_seconds": interval_minutes * 60,
+                        "next_run_at": _to_db_datetime(now),
+                        "status": "active" if normalized else "stopped",
+                    },
+                )
+                return
+            if row is not None:
+                connection.execute(
+                    _COMPLETE_SYSTEM_ARTICLE_JOB,
+                    {"job_id": int(row["id"])},
+                )
+            if not normalized:
+                return
+            snapshots = [
+                self._lock_source_snapshot(connection, "article", source_id)
+                for source_id in normalized
+            ]
+            result = connection.execute(
+                _INSERT_JOB,
+                {
+                    "job_name": SYSTEM_ARTICLE_JOB_NAME,
+                    "pipeline_type": "article",
+                    "effective_start_at": _to_db_datetime(now),
+                    "effective_end_at": datetime(9999, 12, 31, 23, 59, 59),
+                    "daily_window_start": time(0, 0),
+                    "daily_window_end": time(0, 0),
+                    "interval_seconds": interval_minutes * 60,
+                    "status": "active",
+                    "next_run_at": _to_db_datetime(now),
+                },
+            )
+            job_id = int(result.lastrowid)
+            connection.execute(
+                _INSERT_TARGET,
+                [
+                    {
+                        "job_id": job_id,
+                        "source_id": snapshot.source_id,
+                        "group_config_id": None,
+                        "article_config_id": snapshot.source_id,
+                        "target_name_snapshot": snapshot.source_name,
+                        "priority_snapshot": snapshot.priority,
+                        "config_snapshot_json": snapshot.config_json,
+                    }
+                    for snapshot in snapshots
+                ],
+            )
 
     def list_overlapping_jobs(
         self,
@@ -580,6 +650,40 @@ def _list_filter_clause(filters: JobListFilter) -> tuple[str, dict[str, Any]]:
         params["date_end_exclusive"] = _to_db_datetime(date_end)
     where_sql = "" if not conditions else "WHERE " + " AND ".join(conditions)
     return where_sql, params
+
+
+_LOCK_SYSTEM_ARTICLE_JOB = text(
+    """
+    SELECT job.id,
+           GROUP_CONCAT(target.article_config_id ORDER BY target.article_config_id) AS target_ids
+    FROM wechat_collection_job AS job
+    LEFT JOIN wechat_collection_job_target AS target ON target.job_id = job.id
+    WHERE job.job_name = :job_name
+      AND job.pipeline_type = 'article'
+      AND job.status IN ('scheduled', 'active')
+    GROUP BY job.id
+    ORDER BY job.id DESC
+    LIMIT 1
+    FOR UPDATE
+    """
+)
+_REFRESH_SYSTEM_ARTICLE_JOB = text(
+    """
+    UPDATE wechat_collection_job
+    SET interval_seconds = :interval_seconds,
+        status = :status,
+        next_run_at = :next_run_at,
+        version = version + 1
+    WHERE id = :job_id
+    """
+)
+_COMPLETE_SYSTEM_ARTICLE_JOB = text(
+    """
+    UPDATE wechat_collection_job
+    SET status = 'completed', next_run_at = NULL, version = version + 1
+    WHERE id = :job_id
+    """
+)
 
 
 _INSERT_JOB = text(

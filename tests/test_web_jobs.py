@@ -254,6 +254,18 @@ def _valid_article_form(**changes: object) -> dict[str, object]:
     return values
 
 
+def test_article_job_creation_is_system_managed(authenticated_client) -> None:
+    response = authenticated_client.get(
+        "/jobs/new?pipeline=article", follow_redirects=False
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/jobs"
+
+    response = authenticated_client.post("/jobs", data=_valid_article_form())
+    assert response.status_code == 422
+    assert "公众号采集任务由系统统一管理" in response.text
+
+
 def test_create_article_job_rejects_nine_minutes(
     authenticated_client: TestClient,
 ) -> None:
@@ -263,7 +275,7 @@ def test_create_article_job_rejects_nine_minutes(
     )
 
     assert response.status_code == 422
-    assert "最小间隔为 10 分钟" in response.text
+    assert "公众号采集任务由系统统一管理" in response.text
 
 
 def test_stop_active_job_shows_stopping(
@@ -375,14 +387,11 @@ def test_new_job_loads_only_selected_pipeline_sources(
     authenticated_client: TestClient,
     source_service: FakeSourceService,
 ) -> None:
-    article = authenticated_client.get("/jobs/new?pipeline=article")
-
-    assert article.status_code == 200
-    assert "行业观察" in article.text
-    assert "核心群A" not in article.text
-    assert source_service.calls == [("list_enabled_articles_for_job", 100)]
-
-    source_service.calls.clear()
+    article = authenticated_client.get(
+        "/jobs/new?pipeline=article", follow_redirects=False
+    )
+    assert article.status_code == 303
+    assert source_service.calls == []
     group = authenticated_client.get("/jobs/new?pipeline=group")
 
     assert group.status_code == 200
@@ -408,19 +417,17 @@ def test_new_job_rejects_invalid_pipeline_query_without_source_query(
 def test_new_job_uses_pipeline_specific_interval_units_and_minimums(
     authenticated_client: TestClient,
 ) -> None:
-    article = authenticated_client.get("/jobs/new?pipeline=article")
+    article = authenticated_client.get(
+        "/jobs/new?pipeline=article", follow_redirects=False
+    )
     group = authenticated_client.get("/jobs/new?pipeline=group")
 
-    assert 'name="interval_minutes"' in article.text
-    assert 'min="10"' in article.text
-    assert "公众号任务频率按分钟填写" in article.text
-    assert 'name="interval_seconds"' not in article.text
+    assert article.status_code == 303
     assert 'name="interval_seconds"' in group.text
     assert 'min="30"' in group.text
     assert "微信群任务频率按秒填写" in group.text
     assert 'name="interval_minutes"' not in group.text
-    assert 'href="/jobs/new?pipeline=group"' in article.text
-    assert 'href="/jobs/new?pipeline=article"' in group.text
+    assert 'href="/jobs/new?pipeline=article"' not in group.text
 
 
 def test_create_job_builds_timezone_aware_command_and_redirects_to_detail(
@@ -436,19 +443,9 @@ def test_create_job_builds_timezone_aware_command_and_redirects_to_detail(
         follow_redirects=False,
     )
 
-    assert response.status_code == 303
-    assert response.headers["location"] == "/jobs/41"
-    _, command, actor, now = job_service.calls[0]
-    assert command.target_ids == (9,)
-    assert command.interval_seconds == 600
-    assert command.effective_start_at == datetime(
-        2026, 7, 10, 9, 0, tzinfo=ZONE
-    )
-    assert command.effective_start_at.tzinfo is ZONE
-    assert command.daily_window_start == time(9, 0)
-    assert actor == "admin"
-    assert isinstance(now.tzinfo, ZoneInfo)
-    assert now.tzinfo.key == "Asia/Shanghai"
+    assert response.status_code == 422
+    assert "公众号采集任务由系统统一管理" in response.text
+    assert job_service.calls == []
 
 
 def test_create_group_job_uses_seconds_without_minutes_conversion(
@@ -499,7 +496,10 @@ def test_create_job_rejects_spoofed_or_noncanonical_form_values(
     )
 
     assert response.status_code == 422
-    assert "请检查任务参数" in response.text
+    assert (
+        "请检查任务参数" in response.text
+        or "公众号采集任务由系统统一管理" in response.text
+    )
     assert job_service.calls == []
 
 
@@ -557,10 +557,10 @@ def test_create_overlap_shows_escaped_job_names_without_internal_detail(
 
     response = authenticated_client.post("/jobs", data=_valid_article_form())
 
-    assert response.status_code == 409
-    assert "已有晨间任务" in response.text
+    assert response.status_code == 422
+    assert "公众号采集任务由系统统一管理" in response.text
     assert "<script>" not in response.text
-    assert "&lt;script&gt;bad&lt;/script&gt;" in response.text
+    assert "&lt;script&gt;bad&lt;/script&gt;" not in response.text
     assert "targets overlap existing collection jobs" not in response.text
 
 
@@ -583,7 +583,7 @@ def test_create_target_races_are_safely_mapped(
     response = authenticated_client.post("/jobs", data=_valid_article_form())
 
     assert response.status_code in {409, 422}
-    assert safe_text in response.text
+    assert "公众号采集任务由系统统一管理" in response.text
     assert str(error) not in response.text
 
 
@@ -898,7 +898,7 @@ def test_all_job_and_source_calls_run_in_threadpool(
     assert authenticated_client.get("/jobs/11").status_code == 200
     assert authenticated_client.post(
         "/jobs", data=_valid_article_form()
-    ).status_code == 200
+    ).status_code == 422
     assert authenticated_client.post(
         "/jobs/11/stop",
         data={"csrf_token": "csrf-token", "version": "3"},
@@ -917,10 +917,7 @@ def test_all_job_and_source_calls_run_in_threadpool(
         "list_enabled_groups_for_job",
         "get_job",
         "get_job_history",
-        "create_job",
-        "get_job",
-        "get_job_history",
-        "request_stop",
+            "request_stop",
         "get_job",
         "get_job_history",
         "delete_job",

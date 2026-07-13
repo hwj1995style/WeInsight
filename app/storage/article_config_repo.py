@@ -337,6 +337,28 @@ class MysqlArticleAccountConfigRepo:
             ).mappings().all()
         return [self._record_from_row(row) for row in rows]
 
+    def list_active_werss_accounts(self) -> list[ArticleAccountConfigRecord]:
+        statement = text(
+            """
+            SELECT
+                id, account_name, account_type, feed_url, source_type, enabled,
+                priority, poll_interval_minutes, request_timeout_seconds,
+                daily_window_start, daily_window_end, max_articles_per_round,
+                collect_today_only, dedup_key, last_success_collect_time,
+                last_feed_etag, last_feed_modified, last_error_code,
+                werss_source_id, upstream_status, upstream_last_seen_at,
+                upstream_missing_at, remark
+            FROM wechat_public_account_config
+            WHERE enabled = 1
+              AND upstream_status = 'active'
+              AND account_name <> '一箱蛋'
+            ORDER BY priority ASC, account_name ASC, id ASC
+            """
+        )
+        with self.engine.begin() as connection:
+            rows = connection.execute(statement).mappings().all()
+        return [self._record_from_row(row) for row in rows]
+
     def get_account(self, source_id: int) -> ArticleAccountConfigRecord | None:
         statement = text(
             """

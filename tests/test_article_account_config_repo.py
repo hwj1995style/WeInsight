@@ -89,6 +89,17 @@ def test_record_maps_werss_state() -> None:
         assert column in sql
 
 
+def test_list_active_werss_accounts_excludes_inactive_and_yixiangdan_in_sql():
+    engine = FakeEngine()
+
+    MysqlArticleAccountConfigRepo(engine).list_active_werss_accounts()
+
+    sql, _ = engine.connection.executions[0]
+    assert "upstream_status = 'active'" in sql
+    assert "enabled = 1" in sql
+    assert "一箱蛋" in sql
+
+
 def test_mysql_article_account_config_repo_upserts_account_config() -> None:
     engine = FakeEngine()
     repo = MysqlArticleAccountConfigRepo(engine)
