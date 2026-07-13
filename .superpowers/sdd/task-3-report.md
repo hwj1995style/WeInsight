@@ -55,3 +55,22 @@ python -m pytest tests/test_werss_catalog_client.py tests/test_sensitive_output_
 - 实现中无日志调用、无 `response.text`、无响应正文拼入异常。
 - 未输出 AK/SK 或响应正文。
 - `git diff --check` 通过（仅有 Git 的 LF/CRLF 工作区提示）。
+
+## 评审修复（2026-07-13）
+
+根据 `task-3-review.md` 的两个 Important 完成修复：
+
+- 分页 `limit`、`offset`、`total` 与顶层 `total` 均要求精确 `int` 且排除 `bool`；拒绝 `100.0`、`0.0`、`False`、`1.0`、`True` 等宽松相等值。
+- 响应流使用 64 KiB 固定读取块；每次复制前根据 1 MiB remaining 检查块大小，超限立即返回 `werss_catalog_invalid`，不会将超限块追加到累计正文。
+
+### 修复 TDD 证据
+
+RED：新增严格分页类型和 guarded accumulator 负向测试后，客户端测试结果为 `6 failed, 25 passed`。失败分别证明浮点/布尔分页值被接受，以及超限块在检查前被传给 accumulator。
+
+GREEN：最小修复后执行：
+
+```text
+python -m pytest tests/test_werss_catalog_client.py tests/test_sensitive_output_guard.py -q
+```
+
+结果为 `39 passed`。

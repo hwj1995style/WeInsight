@@ -5,6 +5,7 @@ import logging
 import httpx
 import pytest
 
+import app.integrations.werss_catalog as werss_catalog
 from app.integrations.werss_catalog import (
     WeRSSCatalogClient,
     WeRSSCatalogError,
@@ -117,6 +118,28 @@ def test_response_over_one_mib_is_invalid_and_safe(caplog) -> None:
     )
 
 
+def test_oversized_stream_chunk_is_rejected_before_accumulator_retains_it(monkeypatch) -> None:
+    retained_sizes = []
+
+    class GuardedBuffer(bytearray):
+        def extend(self, value) -> None:
+            retained_sizes.append(len(value))
+            if len(self) + len(value) > 1_048_576:
+                raise AssertionError("oversized chunk was retained before validation")
+            super().extend(value)
+
+    monkeypatch.setattr(werss_catalog, "bytearray", GuardedBuffer, raising=False)
+    oversized_chunk = b"x" * (1_048_576 + 1)
+
+    assert_error(
+        client_for(lambda request: httpx.Response(200, content=oversized_chunk)),
+        "werss_catalog_invalid",
+    )
+    assert retained_sizes
+    assert max(retained_sizes) <= 65_536
+    assert sum(retained_sizes) <= 1_048_576
+
+
 @pytest.mark.parametrize(
     "item",
     [
@@ -160,6 +183,50 @@ def test_more_than_one_thousand_sources_fail_closed() -> None:
     ],
 )
 def test_malformed_envelope_is_invalid(payload) -> None:
+    assert_error(
+        client_for(lambda request: httpx.Response(200, json=payload)),
+        "werss_catalog_invalid",
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("limit", 100.0),
+        ("limit", True),
+        ("offset", 0.0),
+        ("offset", False),
+        ("total", 1.0),
+        ("total", True),
+    ],
+)
+def test_page_metadata_requires_exact_non_boolean_integers(field, value) -> None:
+    item = {"id": "MP1", "mp_name": "name", "status": 1}
+    payload = {
+        "code": 0,
+        "data": {
+            "list": [item],
+            "total": 1,
+            "page": {"limit": 100, "offset": 0, "total": 1, field: value},
+        },
+    }
+    assert_error(
+        client_for(lambda request: httpx.Response(200, json=payload)),
+        "werss_catalog_invalid",
+    )
+
+
+@pytest.mark.parametrize("total", [1.0, True])
+def test_top_level_total_requires_exact_non_boolean_integer(total) -> None:
+    item = {"id": "MP1", "mp_name": "name", "status": 1}
+    payload = {
+        "code": 0,
+        "data": {
+            "list": [item],
+            "total": total,
+            "page": {"limit": 100, "offset": 0, "total": total},
+        },
+    }
     assert_error(
         client_for(lambda request: httpx.Response(200, json=payload)),
         "werss_catalog_invalid",

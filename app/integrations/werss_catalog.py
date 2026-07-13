@@ -10,6 +10,7 @@ _CATALOG_PATH = "/api/v1/wx/mps"
 _PAGE_LIMIT = 100
 _MAX_SOURCES = 1000
 _MAX_RESPONSE_BYTES = 1_048_576
+_READ_CHUNK_BYTES = 65_536
 _VALID_ERROR_CODES = frozenset(
     {
         "werss_catalog_auth_failed",
@@ -108,10 +109,11 @@ class WeRSSCatalogClient:
                 raise WeRSSCatalogError("werss_catalog_unavailable")
 
             body = bytearray()
-            for chunk in response.iter_bytes():
-                body.extend(chunk)
-                if len(body) > _MAX_RESPONSE_BYTES:
+            for chunk in response.iter_bytes(chunk_size=_READ_CHUNK_BYTES):
+                remaining = _MAX_RESPONSE_BYTES - len(body)
+                if len(chunk) > remaining:
                     raise WeRSSCatalogError("werss_catalog_invalid")
+                body.extend(chunk)
         try:
             return httpx.Response(200, content=bytes(body)).json()
         except ValueError:
@@ -131,21 +133,30 @@ class WeRSSCatalogClient:
         raw_items = data.get("list")
         total = data.get("total")
         page = data.get("page")
+        page_limit = page.get("limit") if isinstance(page, dict) else None
+        page_offset = page.get("offset") if isinstance(page, dict) else None
+        page_total = page.get("total") if isinstance(page, dict) else None
         if (
             not isinstance(raw_items, list)
             or len(raw_items) > _PAGE_LIMIT
-            or isinstance(total, bool)
-            or not isinstance(total, int)
+            or not WeRSSCatalogClient._is_exact_int(total)
             or total < 0
             or not isinstance(page, dict)
-            or page.get("limit") != _PAGE_LIMIT
-            or page.get("offset") != offset
-            or page.get("total") != total
+            or not WeRSSCatalogClient._is_exact_int(page_limit)
+            or page_limit != _PAGE_LIMIT
+            or not WeRSSCatalogClient._is_exact_int(page_offset)
+            or page_offset != offset
+            or not WeRSSCatalogClient._is_exact_int(page_total)
+            or page_total != total
         ):
             raise WeRSSCatalogError("werss_catalog_invalid")
         if expected_total is not None and total != expected_total:
             raise WeRSSCatalogError("werss_catalog_incomplete")
         return raw_items, total
+
+    @staticmethod
+    def _is_exact_int(value: Any) -> bool:
+        return type(value) is int
 
     @staticmethod
     def _convert_item(raw_item: Any) -> WeRSSCatalogItem:
