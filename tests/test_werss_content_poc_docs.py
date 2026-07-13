@@ -57,10 +57,13 @@ def test_poc_record_invalidates_old_window_after_catalog_architecture_change() -
         "增量流水线健康",
         "桌面截图",
         "窄屏截图",
-        "待 controller 执行",
+        "20260713_004_system_article_job_singleton.sql",
+        "run 206",
+        "2026-07-14 18:39:32 +08:00",
     ):
         assert required in content
-    assert "当前有效连续 24 小时窗口开始" not in content
+    assert "待 controller 执行" not in content
+    assert "24 小时观察：通过" not in content
 
 
 def test_poc_record_marks_observation_as_in_progress_with_explicit_window() -> None:
