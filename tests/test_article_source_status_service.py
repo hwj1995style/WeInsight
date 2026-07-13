@@ -78,6 +78,18 @@ def test_status_query_aggregates_each_many_side_before_joining():
     assert "LEFT JOIN raw_stats" in sql and "LEFT JOIN task_stats" in sql and "LEFT JOIN log_latest" in sql
 
 
+def test_status_query_filters_to_current_werss_sources_before_pagination():
+    sql = str(_LIST_STATUS_SQL)
+    werss_filter = "config.werss_source_id IS NOT NULL"
+    status_filter = "config.upstream_status IN ('active', 'disabled')"
+    order_by = "ORDER BY config.account_name, config.id"
+
+    assert werss_filter in sql
+    assert status_filter in sql
+    assert sql.index(werss_filter) < sql.index(order_by)
+    assert sql.index(status_filter) < sql.index(order_by)
+
+
 def test_status_updated_at_uses_latest_failure_log_time():
     latest = NOW - timedelta(minutes=1)
     row = ArticleSourceStatusService(FakeRepo(), 10).to_status(

@@ -91,6 +91,8 @@ FROM wechat_public_account_config config
 LEFT JOIN raw_stats ON raw_stats.account_name = config.account_name
 LEFT JOIN task_stats ON task_stats.account_name = config.account_name
 LEFT JOIN log_latest ON log_latest.account_name = config.account_name
+WHERE config.werss_source_id IS NOT NULL
+  AND config.upstream_status IN ('active', 'disabled')
 ORDER BY config.account_name, config.id
 LIMIT :limit OFFSET :offset
 """)

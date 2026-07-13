@@ -33,6 +33,8 @@ def test_read_only_status_query_matches_independent_mysql_aggregates():
     repo = MysqlArticleSourceStatusRepo(engine)
     rows = repo.list_status_page(limit=101, offset=0)
     assert len({row.account_name for row in rows}) == len(rows)
+    assert all(row.werss_source_id is not None for row in rows)
+    assert all(row.upstream_status in {"active", "disabled"} for row in rows)
     with engine.connect() as connection:
         for row in rows:
             expected = connection.execute(text("""
