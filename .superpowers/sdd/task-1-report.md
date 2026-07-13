@@ -117,3 +117,29 @@ python -m pytest tests/test_config.py -q
 ```
 
 最小生产修改仅将首尾空格禁令替换为全空白拒绝；无 YAML、旧 RPA 或其他运行逻辑变更。无遗留 concerns。
+
+## Review fix 3：凭据长度契约最终字面对齐
+
+reviewer 最终确认 brief 的“非空”仅指字符串长度不为 0，不授权拒绝全空格字符串。本轮把全空格凭据改为正向构造用例，并继续验证首尾空格原样保留；生产校验仅保留 `str` 类型、长度非零和无 Unicode `C*` 控制类字符三项。
+
+### Review fix 3 RED
+
+```text
+python -m pytest tests/test_config.py -q
+................FF...................................................... [ 92%]
+......                                                                   [100%]
+2 failed, 76 passed in 1.11s
+```
+
+两个失败分别为全空格 access key 与 secret key 被旧的 `not value.strip()` 条件拒绝，符合预期 RED。
+
+### Review fix 3 GREEN
+
+```text
+python -m pytest tests/test_config.py -q
+........................................................................ [ 92%]
+......                                                                   [100%]
+78 passed in 0.96s
+```
+
+最小生产修改仅删除 `not value.strip()`；无 YAML、旧 RPA 或其他运行逻辑变更。无遗留 concerns。
