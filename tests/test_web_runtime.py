@@ -183,6 +183,10 @@ class FakeRuntimeMonitorService:
         self.calls.append(("list_events", filters, page, page_size))
         return self.event_page
 
+    def to_event_view(self, event):
+        from app.services.runtime_monitor_service import RuntimeMonitorService
+        return RuntimeMonitorService.to_event_view(self, event)
+
     def get_workers(self, now):
         self.calls.append(("get_workers", now))
         return self.workers
@@ -298,6 +302,7 @@ def test_run_detail_shows_local_path_as_text_only(
     assert "download=" not in response.text.lower()
     assert "file://" not in response.text.lower()
     assert "最近事件" in response.text
+    assert "ERROR · 目标处理完成" in response.text
 
 
 def test_article_run_detail_shows_rss_metrics_without_rpa_presentation(

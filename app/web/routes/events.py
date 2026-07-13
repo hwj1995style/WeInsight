@@ -23,6 +23,7 @@ from app.services.runtime_monitor_service import (
     EventListFilter,
     RunNotFoundError,
     RunOutsideVisibilityError,
+    runtime_event_summary,
 )
 from app.storage.collection_event_repo import CollectionEvent, sanitize_output
 
@@ -233,6 +234,7 @@ def _format_sse_event(event: CollectionEvent) -> str:
             "run_id": event.run_id,
             "target_run_id": event.target_run_id,
             "create_time": event.create_time.isoformat(),
+            "summary": runtime_event_summary(event.event_type, event.level),
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -272,7 +274,10 @@ def _event_list_response(
         name="events/index.html",
         context={
             "section": "events",
-            "events": result.items,
+            "events": tuple(
+                request.app.state.runtime_monitor_service.to_event_view(event)
+                for event in result.items
+            ),
             "page": result,
             "values": values,
             "error": error,

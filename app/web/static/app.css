@@ -227,7 +227,14 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .event-list time { color: var(--color-muted); font-variant-numeric: tabular-nums; }
 .event-list span { overflow-wrap: anywhere; }
 .event-filters { grid-template-columns: repeat(4, minmax(9rem, 1fr)); }
-.event-table { min-width: 1180px; }
+.event-table { min-width: 980px; }
+.event-level-warning strong { color: var(--color-warning); }
+.event-level-error strong { color: var(--color-danger); }
+.event-metric { display: inline-flex; gap: .25rem; margin: .15rem .5rem .15rem 0; padding: .25rem .45rem; border-radius: var(--radius-control); background: var(--color-workspace); font-variant-numeric: tabular-nums; }
+.event-metric small { color: var(--color-muted); }
+.event-technical { min-width: 20rem; margin: .75rem 0 0; }
+.event-technical dt { color: var(--color-muted); font-size: .75rem; }
+.event-technical dd { margin: .15rem 0 .6rem; overflow-wrap: anywhere; }
 .monitor-grid, .job-history-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; }
 .monitor-grid h2 { margin-top: 0; font-size: 1.15rem; }
 .monitor-list { margin: 0; }

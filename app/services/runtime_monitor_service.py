@@ -133,6 +133,21 @@ class RuntimeEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeMetricItem:
+    label: str
+    value: str
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeEventView:
+    event: RuntimeEvent
+    summary: str
+    subject: str
+    metric_items: tuple[RuntimeMetricItem, ...]
+    technical_metrics: str
+
+
+@dataclass(frozen=True, slots=True)
 class WorkerHeartbeatView:
     worker_id: str
     worker_type: str
@@ -386,6 +401,11 @@ class RuntimeMonitorService:
             total_count=result.total_count,
         )
 
+    def to_event_view(self, event: RuntimeEvent) -> RuntimeEventView:
+        if not isinstance(event, RuntimeEvent):
+            raise TypeError("event must be RuntimeEvent")
+        return _event_view(event)
+
     def get_workers(self, now: datetime) -> WorkerMonitorSnapshot:
         ensure_schedule_datetime(now, field_name="now")
         snapshot = self.repo.get_worker_snapshot(
@@ -447,6 +467,12 @@ class RuntimeMonitorService:
         )
 
 
+def runtime_event_summary(event_type: str, level: str) -> str:
+    summary = _EVENT_SUMMARIES.get(event_type, "未分类事件")
+    alert = {"warning": "WARN", "error": "ERROR"}.get(level)
+    return f"{alert} · {summary}" if alert else summary
+
+
 def _validate_run_filters(filters: object) -> None:
     if not isinstance(filters, RunListFilter):
         raise TypeError("filters must be RunListFilter")
@@ -495,6 +521,66 @@ def _safe_event(event: RuntimeEvent) -> RuntimeEvent:
         metrics_summary=_safe_metrics_summary(event.metrics_summary),
         actor_type=_safe_structured(event.actor_type, maximum=20),
         actor_name=_safe_label(event.actor_name, maximum=100),
+    )
+
+
+_EVENT_SUMMARIES = {
+    "collection_run_started": "开始执行采集任务",
+    "collection_run_finished": "本轮采集完成",
+    "collection_target_started": "开始处理目标",
+    "collection_target_finished": "目标处理完成",
+    "pipeline_stage_failed": "后处理失败",
+}
+_METRIC_FIELDS = (
+    (("executed_target_count", "target_total_count"), "目标"),
+    (("target_success_count",), "成功"),
+    (("target_failed_count", "failed_count"), "失败"),
+    (("insert_count",), "新增"),
+    (("duplicate_count",), "重复"),
+    (("skipped_count",), "跳过"),
+    (("read_count",), "读取"),
+)
+
+
+def _event_view(event: RuntimeEvent) -> RuntimeEventView:
+    summary = runtime_event_summary(event.event_type, event.level)
+    subjects = tuple(
+        f"{label} #{value}"
+        for label, value in (
+            ("任务", event.job_id), ("运行", event.run_id),
+            ("目标", event.target_run_id),
+        )
+        if value is not None
+    )
+    technical_metrics = event.metrics_summary
+    try:
+        metrics = json.loads(technical_metrics)
+        if not isinstance(metrics, dict):
+            raise ValueError
+    except (TypeError, ValueError, json.JSONDecodeError):
+        metrics = {}
+        technical_metrics = (
+            technical_metrics if technical_metrics == "指标过大已截断" else "指标不可用"
+        )
+    items = []
+    for keys, label in _METRIC_FIELDS:
+        for key in keys:
+            value = metrics.get(key)
+            if _is_primary_metric(value):
+                rendered = str(value).lower() if isinstance(value, bool) else str(value)
+                items.append(RuntimeMetricItem(label, rendered))
+                break
+    return RuntimeEventView(
+        event, summary, " · ".join(subjects) or "系统事件", tuple(items),
+        technical_metrics,
+    )
+
+
+def _is_primary_metric(value: object) -> bool:
+    return (
+        isinstance(value, bool)
+        or isinstance(value, int) and value >= 0
+        or isinstance(value, float) and math.isfinite(value) and value >= 0
     )
 
 

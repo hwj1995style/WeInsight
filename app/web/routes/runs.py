@@ -102,9 +102,12 @@ async def run_detail(request: Request, run_id: int) -> Response:
         return _detail_error_response(request, "该记录已超出可查看范围")
     except (RunNotFoundError, TypeError, ValueError):
         return _detail_error_response(request, "运行实例不存在。")
-    initial_events = tuple(reversed(events.items))
+    initial_events = tuple(
+        request.app.state.runtime_monitor_service.to_event_view(event)
+        for event in reversed(events.items)
+    )
     initial_event_id = max(
-        (event.id for event in initial_events),
+        (view.event.id for view in initial_events),
         default=None,
     )
     return templates.TemplateResponse(

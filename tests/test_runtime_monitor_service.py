@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from pathlib import Path
+import json
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -353,3 +354,72 @@ def test_event_and_worker_control_labels_are_sanitized_on_read(tmp_path: Path) -
     ):
         assert value is not None
         assert "<" not in value and ">" not in value
+
+
+@pytest.mark.parametrize(
+    ("event_type", "summary"),
+    [
+        ("collection_run_started", "开始执行采集任务"),
+        ("collection_run_finished", "本轮采集完成"),
+        ("collection_target_started", "开始处理目标"),
+        ("collection_target_finished", "目标处理完成"),
+        ("pipeline_stage_failed", "后处理失败"),
+        ("something_new", "未分类事件"),
+    ],
+)
+def test_event_view_maps_known_and_unknown_summaries(
+    tmp_path: Path, event_type: str, summary: str
+) -> None:
+    service = RuntimeMonitorService(Repo(), tmp_path, heartbeat_ttl_seconds=30)
+    event = RuntimeEvent(1, 7, 11, 13, PipelineType.GROUP, "w-1", "info",
+        event_type, "collect", "safe", "{}", "worker", "actor", NOW)
+
+    view = service.to_event_view(event)
+
+    assert view.summary == summary
+    assert view.subject == "任务 #7 · 运行 #11 · 目标 #13"
+
+
+@pytest.mark.parametrize(("level", "text"), [("warning", "WARN"), ("error", "ERROR")])
+def test_event_view_preserves_alert_level_in_summary(
+    tmp_path: Path, level: str, text: str
+) -> None:
+    service = RuntimeMonitorService(Repo(), tmp_path, heartbeat_ttl_seconds=30)
+    event = RuntimeEvent(1, None, None, None, None, None, level,
+        "pipeline_stage_failed", None, "safe", "{}", "worker", "actor", NOW)
+
+    view = service.to_event_view(event)
+
+    assert text in view.summary
+    assert view.subject == "系统事件"
+
+
+def test_event_view_whitelists_ordered_scalar_metrics(tmp_path: Path) -> None:
+    service = RuntimeMonitorService(Repo(), tmp_path, heartbeat_ttl_seconds=30)
+    metrics = json.dumps({
+        "target_total_count": 9, "executed_target_count": 8,
+        "target_success_count": 7, "target_failed_count": -1, "failed_count": 2,
+        "insert_count": 1.5, "duplicate_count": True, "skipped_count": "3",
+        "read_count": float("nan"), "unknown": {"secret": 1},
+    })
+    event = RuntimeEvent(1, None, None, None, None, None, "info",
+        "collection_run_finished", None, "safe", metrics, "worker", "actor", NOW)
+
+    view = service.to_event_view(event)
+
+    assert [(item.label, item.value) for item in view.metric_items] == [
+        ("目标", "8"), ("成功", "7"), ("失败", "2"),
+        ("新增", "1.5"), ("重复", "true"),
+    ]
+    assert "unknown" in view.technical_metrics
+
+
+def test_event_view_handles_unavailable_metrics(tmp_path: Path) -> None:
+    service = RuntimeMonitorService(Repo(), tmp_path, heartbeat_ttl_seconds=30)
+    event = RuntimeEvent(1, None, None, None, None, None, "info",
+        "collection_run_started", None, "safe", "指标无效", "worker", "actor", NOW)
+
+    view = service.to_event_view(event)
+
+    assert view.metric_items == ()
+    assert view.technical_metrics == "指标不可用"

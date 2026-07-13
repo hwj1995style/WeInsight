@@ -8,7 +8,7 @@ from typing import Iterator
 from zoneinfo import ZoneInfo
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
@@ -69,6 +69,10 @@ class RuntimeService:
         boundary = datetime(2026, 4, 13, 12, 30, tzinfo=ZONE)
         self.calls.append(("visible_since", boundary))
         return boundary
+
+    def to_event_view(self, event):
+        from app.services.runtime_monitor_service import RuntimeMonitorService
+        return RuntimeMonitorService.to_event_view(self, event)
 
 
 def _collection_event(event_id=101, message="safe event") -> CollectionEvent:
@@ -152,6 +156,11 @@ def test_events_page_strict_filters_and_safe_output(
     assert response.status_code == 200
     assert "safe event" in response.text
     assert "运行 #31" in response.text
+    for heading in ("时间", "结果摘要", "关联对象", "关键指标", "操作"):
+        assert heading in response.text
+    assert "WARN · 目标处理完成" in response.text
+    assert "<summary>技术详情</summary>" in response.text
+    assert "安全消息" in response.text
     assert "仅展示最近 3 个月" in response.text
     filters = runtime_service.calls[-1][0]
     assert filters.target_run_id == 51
@@ -268,7 +277,7 @@ def test_sse_expired_run_is_rejected_before_stream_creation(app: FastAPI, runtim
     def expired(run_id):
         raise RunOutsideVisibilityError("expired")
     runtime_service.get_run = expired
-    with pytest.raises(Exception) as caught:
+    with pytest.raises(HTTPException) as caught:
         asyncio.run(events.event_stream(_request(app=app, query=b"run_id=31")))
     assert caught.value.status_code == 404
     assert caught.value.detail == "该记录已超出可查看范围"
@@ -326,6 +335,7 @@ def test_sse_resumes_caps_batch_and_does_not_hold_connection_across_yield(
     data_line = next(line for line in payload.splitlines() if line.startswith("data: "))
     decoded = json.loads(data_line.removeprefix("data: "))
     assert decoded["level"] == "WARNING"
+    assert decoded["summary"] == "WARN · 目标处理完成"
     assert "13812345678" not in decoded["message"]
     assert "https://" not in decoded["message"]
     assert "\n" not in data_line
