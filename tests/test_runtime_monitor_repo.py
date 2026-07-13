@@ -21,10 +21,13 @@ def test_run_filter_sql_uses_fixed_conditions_and_bound_values() -> None:
             run_date=date(2026, 7, 10),
             job_id=7,
             job_name="50%_蛋",
-        )
+        ),
+        NOW - timedelta(days=1),
     )
 
     assert "job.pipeline_type = :pipeline_type" in where
+    assert "run.scheduled_at >= :visible_since" in where
+    assert params["visible_since"] == datetime(2026, 7, 9, 12, 30)
     assert "run.status = :status" in where
     assert "run.scheduled_at >= :date_start" in where
     assert "run.job_id = :job_id" in where
@@ -47,7 +50,8 @@ def test_event_filter_sql_uses_only_allowlisted_bound_conditions() -> None:
             level="error",
             start_at=NOW - timedelta(hours=1),
             end_at=NOW,
-        )
+        ),
+        NOW - timedelta(days=1),
     )
 
     for condition in (
@@ -58,11 +62,70 @@ def test_event_filter_sql_uses_only_allowlisted_bound_conditions() -> None:
         "event.level = :level",
         "event.create_time >= :start_at",
         "event.create_time <= :end_at",
+        "event.create_time >= :visible_since",
     ):
         assert condition in where
     assert params["pipeline_type"] == "group"
     assert params["level"] == "error"
     assert params["start_at"] == datetime(2026, 7, 10, 11, 30)
+    assert params["visible_since"] == datetime(2026, 7, 9, 12, 30)
+
+
+def test_list_sql_applies_visibility_to_count_and_data_before_pagination() -> None:
+    executed = []
+
+    class Result:
+        def scalar_one(self):
+            return 0
+
+        def mappings(self):
+            return self
+
+        def all(self):
+            return []
+
+    class Connection:
+        def execute(self, statement, params=None):
+            executed.append((" ".join(str(statement).split()), params))
+            return Result()
+
+    class Context:
+        def __enter__(self):
+            return Connection()
+
+        def __exit__(self, *args):
+            return False
+
+    class Engine:
+        def begin(self):
+            return Context()
+
+    repo = runtime_monitor_repo.MysqlRuntimeMonitorRepo(Engine())
+    visible_since = datetime(2026, 4, 13, 12, 30, tzinfo=ZONE)
+    repo.list_runs(RunListFilter(), 2, 20, visible_since)
+    repo.list_events(EventListFilter(), 2, 50, visible_since)
+
+    assert len(executed) == 4
+    for sql, params in executed[:2]:
+        assert "run.scheduled_at >= :visible_since" in sql
+        assert params["visible_since"] == datetime(2026, 4, 13, 12, 30)
+        if "ORDER BY" in sql:
+            assert (
+                sql.index("run.scheduled_at >= :visible_since")
+                < sql.index("ORDER BY")
+                < sql.index("LIMIT")
+                < sql.index("OFFSET")
+            )
+    for sql, params in executed[2:]:
+        assert "event.create_time >= :visible_since" in sql
+        assert params["visible_since"] == datetime(2026, 4, 13, 12, 30)
+        if "ORDER BY" in sql:
+            assert (
+                sql.index("event.create_time >= :visible_since")
+                < sql.index("ORDER BY")
+                < sql.index("LIMIT")
+                < sql.index("OFFSET")
+            )
 
 
 def test_fill_trend_produces_24_shanghai_buckets_and_terminal_conservation() -> None:

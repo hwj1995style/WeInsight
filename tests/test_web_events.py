@@ -144,6 +144,7 @@ def test_events_page_strict_filters_and_safe_output(
     assert response.status_code == 200
     assert "safe event" in response.text
     assert "运行 #31" in response.text
+    assert "仅展示最近 3 个月" in response.text
     filters = runtime_service.calls[-1][0]
     assert filters.target_run_id == 51
     assert filters.pipeline_type is PipelineType.GROUP

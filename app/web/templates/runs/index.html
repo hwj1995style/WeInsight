@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}运行实例 · WeInsight{% endblock %}
 {% block content %}
-  <div class="page-heading"><div><h1>运行实例</h1><p>查看采集任务每次运行及目标完成情况。</p></div></div>
+  <div class="page-heading"><div><h1>运行实例</h1><p>查看采集任务每次运行及目标完成情况，仅展示最近 3 个月。</p></div></div>
   {% if error %}<p class="notice error" role="alert">{{ error }}</p>{% endif %}
   <form class="filter-panel runtime-filters" method="get" action="/runs">
     <div><label for="pipeline">链路</label><select id="pipeline" name="pipeline"><option value="">全部</option><option value="group" {% if values.pipeline == "group" %}selected{% endif %}>微信群</option><option value="article" {% if values.pipeline == "article" %}selected{% endif %}>公众号</option></select></div>

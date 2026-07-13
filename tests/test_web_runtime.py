@@ -242,6 +242,7 @@ def test_runs_list_strict_filters_and_pagination(
     assert response.status_code == 200
     assert "晨间群采集" in response.text
     assert "查看运行" in response.text
+    assert "仅展示最近 3 个月" in response.text
     call = runtime_service.calls[-1]
     assert call[0] == "list_runs"
     assert call[1].pipeline_type is PipelineType.GROUP

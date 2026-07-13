@@ -51,8 +51,9 @@ class MysqlRuntimeMonitorRepo:
         filters: RunListFilter,
         page: int,
         page_size: int,
+        visible_since: datetime,
     ) -> PagedResult[RunSummary]:
-        where, params = _run_filter_clause(filters)
+        where, params = _run_filter_clause(filters, visible_since)
         count_statement = text(
             f"""
             SELECT COUNT(*)
@@ -119,8 +120,9 @@ class MysqlRuntimeMonitorRepo:
         filters: EventListFilter,
         page: int,
         page_size: int,
+        visible_since: datetime,
     ) -> PagedResult[RuntimeEvent]:
-        where, params = _event_filter_clause(filters)
+        where, params = _event_filter_clause(filters, visible_since)
         count_statement = text(
             f"""
             SELECT COUNT(*)
@@ -239,11 +241,13 @@ class MysqlRuntimeMonitorRepo:
             RunListFilter(job_id=job_id),
             page=1,
             page_size=limit,
+            visible_since=datetime(1000, 1, 1, tzinfo=_ZONE),
         )
         events = self.list_events(
             EventListFilter(job_id=job_id),
             page=1,
             page_size=limit,
+            visible_since=datetime(1000, 1, 1, tzinfo=_ZONE),
         )
         return JobRuntimeHistory(
             runs=tuple(runs.items),
@@ -253,9 +257,10 @@ class MysqlRuntimeMonitorRepo:
 
 def _run_filter_clause(
     filters: RunListFilter,
+    visible_since: datetime,
 ) -> tuple[str, dict[str, object]]:
-    conditions: list[str] = []
-    params: dict[str, object] = {}
+    conditions = ["run.scheduled_at >= :visible_since"]
+    params: dict[str, object] = {"visible_since": _to_db_datetime(visible_since)}
     if filters.pipeline_type is not None:
         conditions.append("job.pipeline_type = :pipeline_type")
         params["pipeline_type"] = filters.pipeline_type.value
@@ -285,9 +290,10 @@ def _run_filter_clause(
 
 def _event_filter_clause(
     filters: EventListFilter,
+    visible_since: datetime,
 ) -> tuple[str, dict[str, object]]:
-    conditions: list[str] = []
-    params: dict[str, object] = {}
+    conditions = ["event.create_time >= :visible_since"]
+    params: dict[str, object] = {"visible_since": _to_db_datetime(visible_since)}
     for field in ("job_id", "run_id", "target_run_id"):
         value = getattr(filters, field)
         if value is not None:

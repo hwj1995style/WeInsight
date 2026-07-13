@@ -14,6 +14,7 @@ from app.services.runtime_monitor_service import (
     RuntimeDashboardSnapshot,
     RuntimeEvent,
     RuntimeMonitorService,
+    runtime_visibility_start,
     TargetRunDetail,
     UiLockView,
     WechatHealthView,
@@ -40,17 +41,79 @@ class Repo:
         self.event_page = PagedResult([], 1, 50, 0)
         self.detail = None
 
-    def list_runs(self, filters, page, page_size):
-        self.calls.append(("list_runs", filters, page, page_size))
+    def list_runs(self, filters, page, page_size, visible_since):
+        self.calls.append(("list_runs", filters, page, page_size, visible_since))
         return self.run_page
 
-    def list_events(self, filters, page, page_size):
-        self.calls.append(("list_events", filters, page, page_size))
+    def list_events(self, filters, page, page_size, visible_since):
+        self.calls.append(("list_events", filters, page, page_size, visible_since))
         return self.event_page
 
     def get_run(self, run_id):
         self.calls.append(("get_run", run_id))
         return self.detail
+
+
+@pytest.mark.parametrize(
+    ("now", "expected"),
+    [
+        (
+            datetime(2026, 7, 13, 12, 34, 56, 789, tzinfo=ZONE),
+            datetime(2026, 4, 13, 12, 34, 56, 789, tzinfo=ZONE),
+        ),
+        (
+            datetime(2026, 5, 31, 8, 9, tzinfo=ZONE),
+            datetime(2026, 2, 28, 8, 9, tzinfo=ZONE),
+        ),
+        (
+            datetime(2024, 5, 31, 8, 9, tzinfo=ZONE),
+            datetime(2024, 2, 29, 8, 9, tzinfo=ZONE),
+        ),
+    ],
+)
+def test_runtime_visibility_start_rolls_back_three_calendar_months(now, expected) -> None:
+    assert runtime_visibility_start(now) == expected
+
+
+def test_runtime_visibility_start_rejects_naive_now() -> None:
+    with pytest.raises(ValueError):
+        runtime_visibility_start(datetime(2026, 7, 13, 12, 0))
+
+
+def test_runtime_monitor_service_rejects_noncallable_clock(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match="now_provider"):
+        RuntimeMonitorService(
+            Repo(), tmp_path, heartbeat_ttl_seconds=30, now_provider=NOW
+        )
+
+
+def test_list_calls_read_clock_once_and_apply_visibility_boundary(tmp_path: Path) -> None:
+    repo = Repo()
+    calls = 0
+
+    def now_provider():
+        nonlocal calls
+        calls += 1
+        return datetime(2026, 7, 13, 12, 0, tzinfo=ZONE)
+
+    service = RuntimeMonitorService(
+        repo, tmp_path, heartbeat_ttl_seconds=30, now_provider=now_provider
+    )
+    service.list_runs(RunListFilter(), 1, 20)
+    assert calls == 1
+    assert repo.calls[-1][-1] == datetime(2026, 4, 13, 12, 0, tzinfo=ZONE)
+
+    service.list_events(
+        EventListFilter(start_at=datetime(2026, 1, 1, tzinfo=ZONE)), 1, 50
+    )
+    assert calls == 2
+    assert repo.calls[-1][1].start_at == datetime(2026, 4, 13, 12, 0, tzinfo=ZONE)
+    assert repo.calls[-1][-1] == datetime(2026, 4, 13, 12, 0, tzinfo=ZONE)
+
+    later = datetime(2026, 6, 1, tzinfo=ZONE)
+    service.list_events(EventListFilter(start_at=later, end_at=NOW), 1, 50)
+    assert repo.calls[-1][1].start_at == later
+    assert repo.calls[-1][1].end_at == NOW
 
 
 def test_run_and_event_filters_validate_allowlisted_types(tmp_path: Path) -> None:

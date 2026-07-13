@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import calendar
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import re
 import json
 import math
-from typing import Protocol
+from typing import Callable, Protocol
+from zoneinfo import ZoneInfo
 
 from app.domain.admin_results import PagedResult
 from app.domain.collection_jobs import (
@@ -32,6 +34,15 @@ EVENT_LEVELS = frozenset({"debug", "info", "warning", "error"})
 ACTIVE_WORKER_STATUSES = frozenset(
     {"starting", "running", "degraded", "stopping"}
 )
+
+
+def runtime_visibility_start(now: datetime) -> datetime:
+    ensure_schedule_datetime(now, field_name="now")
+    month_index = now.year * 12 + now.month - 1 - 3
+    year, zero_based_month = divmod(month_index, 12)
+    month = zero_based_month + 1
+    day = min(now.day, calendar.monthrange(year, month)[1])
+    return now.replace(year=year, month=month, day=day)
 
 
 @dataclass(frozen=True, slots=True)
@@ -263,13 +274,21 @@ class JobRuntimeHistory:
 
 class RuntimeMonitorRepo(Protocol):
     def list_runs(
-        self, filters: RunListFilter, page: int, page_size: int
+        self,
+        filters: RunListFilter,
+        page: int,
+        page_size: int,
+        visible_since: datetime,
     ) -> PagedResult[RunSummary]: ...
 
     def get_run(self, run_id: int) -> RunDetail | None: ...
 
     def list_events(
-        self, filters: EventListFilter, page: int, page_size: int
+        self,
+        filters: EventListFilter,
+        page: int,
+        page_size: int,
+        visible_since: datetime,
     ) -> PagedResult[RuntimeEvent]: ...
 
     def get_worker_snapshot(
@@ -294,13 +313,19 @@ class RuntimeMonitorService:
         screenshot_root: Path,
         *,
         heartbeat_ttl_seconds: int,
+        now_provider: Callable[[], datetime] | None = None,
     ) -> None:
         if not isinstance(screenshot_root, Path):
             raise TypeError("screenshot_root must be Path")
         _positive_integer(heartbeat_ttl_seconds, "heartbeat_ttl_seconds")
+        if now_provider is not None and not callable(now_provider):
+            raise TypeError("now_provider must be callable or None")
         self.repo = repo
         self.screenshot_root = screenshot_root.resolve(strict=False)
         self.heartbeat_ttl_seconds = heartbeat_ttl_seconds
+        self.now_provider = now_provider or (
+            lambda: datetime.now(ZoneInfo(APPLICATION_TIMEZONE))
+        )
 
     def list_runs(
         self,
@@ -310,7 +335,8 @@ class RuntimeMonitorService:
     ) -> PagedResult[RunSummary]:
         _validate_run_filters(filters)
         _page(page, page_size, maximum=100)
-        return self.repo.list_runs(filters, page, page_size)
+        visible_since = runtime_visibility_start(self.now_provider())
+        return self.repo.list_runs(filters, page, page_size, visible_since)
 
     def get_run(self, run_id: int) -> RunDetail:
         _positive_integer(run_id, "run_id")
@@ -331,7 +357,19 @@ class RuntimeMonitorService:
     ) -> PagedResult[RuntimeEvent]:
         _validate_event_filters(filters)
         _page(page, page_size, maximum=200)
-        result = self.repo.list_events(filters, page, page_size)
+        visible_since = runtime_visibility_start(self.now_provider())
+        effective_filters = replace(
+            filters,
+            start_at=(
+                max(filters.start_at, visible_since)
+                if filters.start_at
+                else visible_since
+            ),
+        )
+        _validate_event_filters(effective_filters)
+        result = self.repo.list_events(
+            effective_filters, page, page_size, visible_since
+        )
         return PagedResult(
             items=[_safe_event(item) for item in result.items],
             page=result.page,
