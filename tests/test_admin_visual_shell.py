@@ -74,7 +74,6 @@ def test_account_and_editor_pages_use_shared_heading_and_actions():
     paths = (
         "app/web/templates/home.html",
         "app/web/templates/sources/group_form.html",
-        "app/web/templates/sources/article_form.html",
         "app/web/templates/jobs/form.html",
     )
     for path in paths:

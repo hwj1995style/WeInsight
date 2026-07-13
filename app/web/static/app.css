@@ -298,3 +298,10 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+.article-status-table { min-width: 1280px; }
+.source-name-cell { min-width: 12rem; max-width: 22rem; overflow-wrap: anywhere; }
+.error-cell { min-width: 10rem; max-width: 22rem; overflow-wrap: anywhere; }
+.status-waiting_first_run { color: #64748b; }
+.status-collect_error, .status-missing, .status-excluded { color: #b42318; }
+.status-stale, .status-disabled { color: #a15c00; }

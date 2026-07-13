@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import Config
 from app.security.passwords import PasswordHasher
 from app.services.auth_service import AuthService
+from app.services.article_source_status_service import ArticleSourceStatusService
 from app.services.dashboard_service import DashboardService
 from app.services.collection_job_service import CollectionJobService
 from app.services.result_query_service import ResultQueryService
@@ -18,6 +19,7 @@ from app.services.source_management_service import SourceManagementService
 from app.services.report_generation_service import ReportGenerationService
 from app.storage.admin_auth_repo import MysqlAdminAuthRepo
 from app.storage.article_config_repo import MysqlArticleAccountConfigRepo
+from app.storage.article_source_status_repo import MysqlArticleSourceStatusRepo
 from app.storage.article_daily_report_query_repo import MysqlArticleDailyReportQueryRepo
 from app.storage.db import create_mysql_engine
 from app.storage.dashboard_repo import MysqlDashboardRepo
@@ -71,6 +73,7 @@ def create_app(
     config: Config,
     auth_service: AuthService | None = None,
     source_service: SourceManagementService | None = None,
+    article_status_service: ArticleSourceStatusService | None = None,
     result_service: ResultQueryService | None = None,
     group_report_service: GroupDailyReportQueryService | None = None,
     article_report_service: ArticleDailyReportQueryService | None = None,
@@ -95,6 +98,7 @@ def create_app(
         for service in (
             auth_service,
             source_service,
+            article_status_service,
             result_service,
             group_report_service,
             article_report_service,
@@ -110,6 +114,9 @@ def create_app(
         engine = create_mysql_engine(config.mysql)
     app.state.auth_service = auth_service or _build_auth_service(config, engine)
     app.state.source_service = source_service or _build_source_service(engine)
+    app.state.article_status_service = article_status_service or ArticleSourceStatusService(
+        MysqlArticleSourceStatusRepo(engine), config.pipelines.article.sync_interval_minutes
+    )
     app.state.result_service = result_service or ResultQueryService(
         MysqlSafeResultQueryRepo(engine)
     )

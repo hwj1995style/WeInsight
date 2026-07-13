@@ -22,6 +22,7 @@ from app.services.source_management_service import (
     SourceMustBeDisabledError,
     SourceNotFoundError,
 )
+from app.services.article_source_status_service import ArticleSourceStatusPage, ArticleSourceStatusRow
 from app.storage.article_config_repo import ArticleAccountConfigRecord
 from app.storage.group_repo import GroupConfigRecord
 from app.web.app import create_app
@@ -203,6 +204,27 @@ class FakeSourceService:
         self.calls.append(("delete_article", source_id))
 
 
+class FakeArticleStatusService:
+    sync_interval_minutes = 10
+
+    def __init__(self) -> None:
+        self.calls = []
+        self.error = None
+
+    def list_page(self, page, page_size, now):
+        if self.error is not None:
+            raise self.error
+        self.calls.append((page, page_size, now))
+        row = ArticleSourceStatusRow(
+            account_name="行业观察<script>", werss_source_id="MP1", upstream_status="active",
+            display_status="normal", last_article_time=datetime(2026, 7, 11, 8, 0),
+            last_success_collect_time=datetime(2026, 7, 11, 8, 30), article_count=2,
+            pending_parse_count=1, pending_analyze_count=0, failed_count=0,
+            last_error=None, updated_at=datetime(2026, 7, 11, 8, 30),
+        )
+        return ArticleSourceStatusPage((row,), page, page_size, page > 1, False)
+
+
 @pytest.fixture
 def config() -> Config:
     return load_config(Path("config/config.dev.yaml"))
@@ -219,15 +241,22 @@ def source_service() -> FakeSourceService:
 
 
 @pytest.fixture
+def article_status_service() -> FakeArticleStatusService:
+    return FakeArticleStatusService()
+
+
+@pytest.fixture
 def app(
     config: Config,
     auth_service: FakeAuthService,
     source_service: FakeSourceService,
+    article_status_service: FakeArticleStatusService,
 ) -> FastAPI:
     return create_app(
         config,
         auth_service=auth_service,
         source_service=source_service,
+        article_status_service=article_status_service,
     )
 
 
@@ -255,6 +284,31 @@ def test_group_list_requires_authentication(raw_client: TestClient) -> None:
     assert response.headers["location"] == "/login"
 
 
+@pytest.mark.parametrize("path", ["/sources/articles/new", "/sources/articles/7/edit"])
+def test_old_article_forms_are_not_available(authenticated_client, path):
+    assert authenticated_client.get(path, follow_redirects=False).status_code in {303, 404}
+
+
+def test_article_page_is_read_only_and_refreshes_with_get(authenticated_client):
+    response = authenticated_client.get("/sources/articles")
+    assert response.status_code == 200
+    assert "公众号状态" in response.text
+    assert "每 10 分钟" in response.text
+    assert 'href="/sources/articles"' in response.text
+    assert "行业观察&lt;script&gt;" in response.text
+    for text in ("新增公众号", "编辑公众号", 'action="/sources/articles', ">删除<"):
+        assert text not in response.text
+
+
+@pytest.mark.parametrize("path", [
+    "/sources/articles", "/sources/articles/9", "/sources/articles/9/enable",
+    "/sources/articles/9/disable", "/sources/articles/9/delete",
+])
+def test_article_write_routes_are_removed(authenticated_client, path):
+    response = authenticated_client.post(path, data={"csrf_token": "csrf-token"}, follow_redirects=False)
+    assert response.status_code in {404, 405}
+
+
 def test_group_list_has_independent_navigation_and_safe_actions(
     authenticated_client: TestClient,
 ) -> None:
@@ -274,6 +328,7 @@ def test_group_list_has_independent_navigation_and_safe_actions(
     assert "admin123456" not in response.text
 
 
+@pytest.mark.skip(reason="旧公众号配置操作已由只读页面测试替代")
 def test_article_list_uses_stable_ids_and_escapes_names(
     authenticated_client: TestClient,
     source_service: FakeSourceService,
@@ -291,6 +346,7 @@ def test_article_list_uses_stable_ids_and_escapes_names(
     assert 'action="/sources/articles/10/delete"' in response.text
 
 
+@pytest.mark.skip(reason="公众号表单已删除")
 def test_article_form_contains_rss_fields(
     authenticated_client: TestClient,
 ) -> None:
@@ -304,6 +360,7 @@ def test_article_form_contains_rss_fields(
     assert 'name="max_articles_per_round"' not in html
 
 
+@pytest.mark.skip(reason="旧配置字段已从只读状态页删除")
 def test_article_list_shows_feed_health_without_network_call(
     authenticated_client: TestClient,
     source_service: FakeSourceService,
@@ -370,8 +427,6 @@ def test_group_edit_form_posts_to_stable_id_and_preserves_values(
     ("path", "expected_action"),
     [
         ("/sources/groups/new", "/sources/groups"),
-        ("/sources/articles/new", "/sources/articles"),
-        ("/sources/articles/9/edit", "/sources/articles/9"),
     ],
 )
 def test_source_forms_have_explicit_post_actions_and_csrf(
@@ -409,6 +464,7 @@ def test_update_group_posts_complete_command_to_stable_id(
     assert source_service.calls[0][2].is_core_group is False
 
 
+@pytest.mark.skip(reason="公众号写路由已删除")
 def test_create_and_update_article_use_complete_commands(
     authenticated_client: TestClient,
     source_service: FakeSourceService,
@@ -468,9 +524,6 @@ def test_mutation_routes_do_not_accept_get(
         ("/sources/groups/7/disable", ("set_group_enabled", 7, False)),
         ("/sources/groups/7/enable", ("set_group_enabled", 7, True)),
         ("/sources/groups/8/delete", ("delete_group", 8)),
-        ("/sources/articles/9/disable", ("set_article_enabled", 9, False)),
-        ("/sources/articles/9/enable", ("set_article_enabled", 9, True)),
-        ("/sources/articles/10/delete", ("delete_article", 10)),
     ],
 )
 def test_source_actions_use_post_and_redirect(
@@ -489,6 +542,7 @@ def test_source_actions_use_post_and_redirect(
     assert source_service.calls == [expected_call]
 
 
+@pytest.mark.skip(reason="公众号级周期表单已删除")
 def test_article_nine_minute_interval_is_rejected_and_echoed(
     authenticated_client: TestClient,
     source_service: FakeSourceService,
@@ -674,16 +728,10 @@ class SourceFormParser(HTMLParser):
         ),
         (
             "/sources/articles",
-            {
-                "/sources/articles/9/disable",
-                "/sources/articles/10/enable",
-                "/sources/articles/10/delete",
-            },
+            set(),
         ),
         ("/sources/groups/new", {"/sources/groups"}),
         ("/sources/groups/7/edit", {"/sources/groups/7"}),
-        ("/sources/articles/new", {"/sources/articles"}),
-        ("/sources/articles/9/edit", {"/sources/articles/9"}),
     ],
 )
 def test_each_source_write_form_is_post_with_exactly_one_csrf(
@@ -731,15 +779,16 @@ def test_group_list_paginates_and_preserves_page_size(
 
 def test_invalid_page_boundaries_return_safe_422(
     authenticated_client: TestClient,
-    source_service: FakeSourceService,
+    article_status_service: FakeArticleStatusService,
 ) -> None:
-    source_service.error = ValueError("page_size must be between 1 and 100")
+    article_status_service.error = ValueError("page_size must be between 1 and 100")
     response = authenticated_client.get("/sources/articles?page=1&page_size=101")
 
     assert response.status_code == 422
     assert "请检查表单字段" in response.text
 
 
+@pytest.mark.skip(reason="旧公众号写服务调用已删除；只读查询在线程池中单独覆盖")
 def test_all_source_service_calls_run_in_threadpool(
     authenticated_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
