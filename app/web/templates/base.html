@@ -7,9 +7,13 @@
     <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
   </head>
   <body>
-    <header class="topbar">
-      <a class="brand" href="/">WeInsight</a>
-      <nav class="primary-nav" aria-label="主要导航">
+    <div class="app-shell" data-sidebar-state="expanded">
+      <aside class="sidebar" id="app-sidebar">
+        <div class="sidebar-brand">
+          <a class="brand" href="/dashboard"><span class="brand-mark">W</span><span class="brand-label">WeInsight</span></a>
+          <button id="sidebar-toggle" class="icon-button sidebar-toggle" type="button" aria-label="折叠侧栏" aria-expanded="true" aria-controls="app-sidebar"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+        </div>
+        <nav class="primary-nav" aria-label="主要导航">
         <a href="/dashboard" {% if section == "dashboard" %}aria-current="page"{% endif %}>总览</a>
         <a href="/sources/groups" {% if section == "groups" %}aria-current="page"{% endif %}>微信群</a>
         <a href="/sources/articles" {% if section == "articles" %}aria-current="page"{% endif %}>公众号</a>
@@ -19,17 +23,20 @@
         <a href="/workers" {% if section == "workers" %}aria-current="page"{% endif %}>Worker</a>
         <a href="/results/groups" {% if section == "results" %}aria-current="page"{% endif %}>结果</a>
         <a href="/reports" {% if section == "reports" %}aria-current="page"{% endif %}>日报</a>
-      </nav>
-      <div class="account-actions">
-        <span>{{ request.state.admin.username }}</span>
-        <a href="/account/password">账户设置</a>
-        <form method="post" action="/logout">
-          <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-          <button class="text-button" type="submit">退出</button>
-        </form>
+        </nav>
+        <div class="sidebar-account"><span>{{ request.state.admin.username }}</span><a href="/account/password">账户设置</a><form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button type="submit">退出</button></form></div>
+      </aside>
+      <div id="nav-backdrop" class="nav-backdrop" hidden></div>
+      <div class="app-main">
+        <header class="top-toolbar">
+          <button id="mobile-nav-toggle" class="icon-button mobile-nav-toggle" type="button" aria-label="打开导航" aria-expanded="false" aria-controls="app-sidebar"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+          <span class="toolbar-title">{% block page_title %}WeInsight{% endblock %}</span>
+          <div class="toolbar-account">{{ request.state.admin.username }}</div>
+        </header>
+        <main class="page-shell">{% block content %}{% endblock %}</main>
       </div>
-    </header>
-    <main class="page-shell">{% block content %}{% endblock %}</main>
+    </div>
+    <script src="/static/app-shell.js" defer></script>
     {% block scripts %}{% endblock %}
   </body>
 </html>
