@@ -105,3 +105,10 @@ def test_readme_documents_sensitive_output_guard_command() -> None:
 
 def test_werss_content_poc_doc_is_covered_by_sensitive_output_guard() -> None:
     assert "docs/operations/WeRSS正文按需读取POC记录.md" in USER_FACING_DOC_PATHS
+
+
+def test_werss_catalog_client_does_not_log_credentials_or_response_bodies() -> None:
+    source = Path("app/integrations/werss_catalog.py").read_text(encoding="utf-8")
+
+    assert "logger." not in source
+    assert "response.text" not in source
