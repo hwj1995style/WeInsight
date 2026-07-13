@@ -75,6 +75,10 @@ class ArticlePipelineConfig:
     egg_price_extraction_enabled: bool
     price_items_json_preview_limit: int
     image_quote_note_enabled: bool
+    sync_interval_minutes: int
+    werss_catalog_base_url: str
+    werss_access_key: str
+    werss_secret_key: str
     rss_max_concurrency: int = 4
     rss_max_response_bytes: int = 5_242_880
     rss_allowed_private_hosts: tuple[str, ...] = ("127.0.0.1:8001",)
@@ -84,6 +88,22 @@ class ArticlePipelineConfig:
     content_mode: str = "web"
 
     def __post_init__(self) -> None:
+        if (
+            isinstance(self.sync_interval_minutes, bool)
+            or not isinstance(self.sync_interval_minutes, int)
+            or self.sync_interval_minutes < 10
+        ):
+            raise ValueError("sync_interval_minutes must be an integer of at least 10")
+        if self.werss_catalog_base_url != "http://127.0.0.1:8001":
+            raise ValueError("werss_catalog_base_url must be http://127.0.0.1:8001")
+        for field in ("werss_access_key", "werss_secret_key"):
+            value = getattr(self, field)
+            if (
+                not isinstance(value, str)
+                or not value
+                or any(category(character).startswith("C") for character in value)
+            ):
+                raise ValueError(f"{field} must be a non-empty string without control characters")
         if self.content_mode not in {"web", "shadow", "werss_first"}:
             raise ValueError("content_mode must be web, shadow or werss_first")
         parsed = urlsplit(self.content_base_url)

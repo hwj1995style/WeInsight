@@ -64,6 +64,10 @@ pipelines:
     egg_price_extraction_enabled: true
     price_items_json_preview_limit: 20
     image_quote_note_enabled: true
+    sync_interval_minutes: 10
+    werss_catalog_base_url: http://127.0.0.1:8001
+    werss_access_key: ${WEINSIGHT_WERSS_ACCESS_KEY}
+    werss_secret_key: ${WEINSIGHT_WERSS_SECRET_KEY}
     rss_max_concurrency: 4
     rss_max_response_bytes: 5242880
     rss_allowed_private_hosts:

@@ -1,12 +1,44 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 import yaml
 
-from app.core.config import load_config
+from app.core.config import ArticlePipelineConfig, load_config
+
+
+@pytest.fixture
+def config_path() -> Path:
+    return Path("config/config.dev.yaml")
+
+
+@pytest.fixture(autouse=True)
+def werss_credentials(monkeypatch) -> None:
+    monkeypatch.setenv("WEINSIGHT_WERSS_ACCESS_KEY", "WK-test-default")
+    monkeypatch.setenv("WEINSIGHT_WERSS_SECRET_KEY", "secret-test-default")
+
+
+def valid_article_config() -> ArticlePipelineConfig:
+    return load_config(Path("config/config.dev.yaml")).pipelines.article
+
+
+def test_article_catalog_defaults_and_secrets(config_path, monkeypatch):
+    monkeypatch.setenv("WEINSIGHT_WERSS_ACCESS_KEY", "WK-test")
+    monkeypatch.setenv("WEINSIGHT_WERSS_SECRET_KEY", "secret-test")
+    config = load_config(config_path)
+    assert config.pipelines.article.sync_interval_minutes == 10
+    assert config.pipelines.article.werss_catalog_base_url == "http://127.0.0.1:8001"
+    assert config.pipelines.article.werss_access_key == "WK-test"
+    assert config.pipelines.article.werss_secret_key == "secret-test"
+
+
+@pytest.mark.parametrize("minutes", [0, 9, True])
+def test_article_catalog_interval_rejects_values_below_ten(minutes):
+    with pytest.raises(ValueError, match="sync_interval_minutes"):
+        replace(valid_article_config(), sync_interval_minutes=minutes)
 
 
 def test_load_config_expands_mysql_password() -> None:
