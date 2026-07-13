@@ -82,7 +82,6 @@ def plan_catalog_sync(
     excluded_items: tuple[WeRSSCatalogItem, ...],
     now: datetime,
 ) -> CatalogSyncPlan:
-    audit_digest = _catalog_state_digest(rows, items, excluded_items)
     by_id = {row.werss_source_id: row for row in rows if row.werss_source_id}
     by_feed = {row.feed_url: row for row in rows if row.feed_url}
     by_name: dict[str, list[CatalogRow]] = {}
@@ -94,6 +93,7 @@ def plan_catalog_sync(
     inserts: list[CatalogInsert] = []
     summary = CatalogSyncSummary(excluded=len(excluded_items))
     audit_required = False
+    conflict_source_ids: list[str] = []
 
     for item in items:
         normalized_name = normalize_werss_source_name(item.name)
@@ -106,6 +106,7 @@ def plan_catalog_sync(
             if len(name_candidates) > 1:
                 summary = replace(summary, conflicts=summary.conflicts + 1)
                 audit_required = True
+                conflict_source_ids.append(item.source_id)
                 continue
             candidate = name_candidates[0] if name_candidates else None
         if candidate is not None and (
@@ -114,6 +115,7 @@ def plan_catalog_sync(
         ):
             summary = replace(summary, conflicts=summary.conflicts + 1)
             audit_required = True
+            conflict_source_ids.append(item.source_id)
             continue
         status = "active" if item.enabled else "disabled"
         if candidate is None:
@@ -153,6 +155,7 @@ def plan_catalog_sync(
             if len(name_candidates) > 1:
                 summary = replace(summary, conflicts=summary.conflicts + 1)
                 audit_required = True
+                conflict_source_ids.append(item.source_id)
                 continue
             candidate = name_candidates[0] if name_candidates else None
         if candidate is None:
@@ -160,6 +163,7 @@ def plan_catalog_sync(
         if candidate.id in claimed or candidate.werss_source_id not in (None, item.source_id):
             summary = replace(summary, conflicts=summary.conflicts + 1)
             audit_required = True
+            conflict_source_ids.append(item.source_id)
             continue
         claimed.add(candidate.id)
         if (
@@ -207,31 +211,54 @@ def plan_catalog_sync(
             audit_required = True
 
     changes.sort(key=lambda change: change.row_id)
+    audit_digest = _planned_final_state_digest(
+        rows,
+        tuple(changes),
+        tuple(inserts),
+        tuple(conflict_source_ids),
+    )
     return CatalogSyncPlan(
         tuple(changes), tuple(inserts), summary, audit_required, audit_digest
     )
 
 
-def _catalog_state_digest(
+def _planned_final_state_digest(
     rows: tuple[CatalogRow, ...],
-    items: tuple[WeRSSCatalogItem, ...],
-    excluded_items: tuple[WeRSSCatalogItem, ...],
+    changes: tuple[CatalogChange, ...],
+    inserts: tuple[CatalogInsert, ...],
+    conflict_source_ids: tuple[str, ...],
 ) -> str:
+    changes_by_id = {change.row_id: change for change in changes}
+    final_rows: list[list[object]] = []
+    for row in rows:
+        change = changes_by_id.get(row.id)
+        source_id = row.werss_source_id if change is None else change.source_id
+        missing_at = (
+            row.upstream_missing_at if change is None else change.missing_at
+        )
+        final_rows.append([
+            source_id or f"legacy:{row.id}",
+            normalize_werss_source_name(
+                row.account_name if change is None else change.name
+            ),
+            row.feed_url if change is None else change.feed_url,
+            row.upstream_status if change is None else change.status,
+            None if missing_at is None else missing_at.isoformat(),
+        ])
+    for insert in inserts:
+        final_rows.append([
+            insert.source_id,
+            normalize_werss_source_name(insert.name),
+            insert.feed_url,
+            insert.status,
+            None,
+        ])
     payload = {
-        "rows": [
-            [row.id, row.account_name, row.feed_url, row.werss_source_id,
-             row.upstream_status,
-             None if row.upstream_missing_at is None else row.upstream_missing_at.isoformat()]
-            for row in sorted(rows, key=lambda value: value.id)
-        ],
-        "items": [
-            [item.source_id, normalize_werss_source_name(item.name), item.enabled]
-            for item in items
-        ],
-        "excluded": [
-            [item.source_id, normalize_werss_source_name(item.name), item.enabled]
-            for item in excluded_items
-        ],
+        "final_rows": sorted(
+            final_rows,
+            key=lambda value: tuple(str(item) for item in value),
+        ),
+        "conflict_source_ids": sorted(set(conflict_source_ids)),
     }
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -376,8 +403,13 @@ class MysqlWeRSSCatalogSyncRepo:
             LIMIT 1
             FOR UPDATE
         """)).mappings().first()
-        if previous is not None and previous.get("metrics_json") == metrics_json:
-            return
+        if previous is not None:
+            try:
+                previous_metrics = json.loads(previous.get("metrics_json") or "")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                previous_metrics = {}
+            if previous_metrics.get("catalog_digest") == catalog_digest:
+                return
         connection.execute(text("""
             INSERT INTO wechat_collection_job_event (
                 job_id, run_id, target_run_id, worker_id, level, event_type,

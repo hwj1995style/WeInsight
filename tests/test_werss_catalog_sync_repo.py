@@ -122,7 +122,9 @@ class Result:
 class Connection:
     def __init__(self, lock=1, fail_on_insert=False, fail_on_release=False, rows=()):
         self.lock, self.fail_on_insert = lock, fail_on_insert
-        self.fail_on_release, self.rows, self.executions = fail_on_release, rows, []
+        self.fail_on_release = fail_on_release
+        self.rows = [dict(item) for item in rows]
+        self.executions = []
         self.audit_metrics = None
         self.invalidated = False
     def invalidate(self): self.invalidated = True
@@ -138,6 +140,26 @@ class Connection:
         if self.fail_on_insert and "INSERT INTO" in sql: raise RuntimeError("boom")
         if "INSERT INTO wechat_collection_job_event" in sql:
             self.audit_metrics = params["metrics_json"]
+        elif "UPDATE wechat_public_account_config" in sql:
+            target = next(item for item in self.rows if item["id"] == params["id"])
+            target.update({
+                "account_name": params["account_name"],
+                "feed_url": params["feed_url"],
+                "werss_source_id": params["werss_source_id"],
+                "upstream_status": params["upstream_status"],
+                "upstream_last_seen_at": params["upstream_last_seen_at"],
+                "upstream_missing_at": params["upstream_missing_at"],
+            })
+        elif "INSERT INTO wechat_public_account_config" in sql:
+            self.rows.append({
+                "id": max((item["id"] for item in self.rows), default=0) + 1,
+                "account_name": params["account_name"],
+                "feed_url": params["feed_url"],
+                "werss_source_id": params["werss_source_id"],
+                "upstream_status": params["upstream_status"],
+                "upstream_last_seen_at": params["upstream_last_seen_at"],
+                "upstream_missing_at": None,
+            })
         return Result()
 
 
@@ -270,11 +292,41 @@ def test_repo_deduplicates_identical_conflict_audit():
         "upstream_last_seen_at": NOW, "upstream_missing_at": NOW,
     },))
     repo = MysqlWeRSSCatalogSyncRepo(Engine(connection))
-    items = (WeRSSCatalogItem("MP1", "甲", True), WeRSSCatalogItem("OTHER", "甲旧", True))
+    items = (WeRSSCatalogItem("MP1", "甲", True), WeRSSCatalogItem("OTHER", "甲", True))
 
     repo.sync_catalog(items, (), NOW)
     repo.sync_catalog(items, (), NOW)
 
+    audit_inserts = [sql for sql, _ in connection.executions if "INSERT INTO wechat_collection_job_event" in sql]
+    assert len(audit_inserts) == 1
+
+
+def test_repo_deduplicates_conflict_audit_after_first_round_restores_and_renames():
+    connection = Connection(rows=(
+        {
+            "id": 1, "account_name": "旧名", "feed_url": "http://old",
+            "werss_source_id": "MP1", "upstream_status": "missing",
+            "upstream_last_seen_at": NOW, "upstream_missing_at": NOW,
+        },
+        {
+            "id": 2, "account_name": "冲突名", "feed_url": "http://other",
+            "werss_source_id": "OTHER", "upstream_status": "active",
+            "upstream_last_seen_at": NOW, "upstream_missing_at": None,
+        },
+    ))
+    repo = MysqlWeRSSCatalogSyncRepo(Engine(connection))
+    items = (
+        WeRSSCatalogItem("MPX", "冲突名", True),
+        WeRSSCatalogItem("MP1", "新名", True),
+        WeRSSCatalogItem("OTHER", "冲突名", True),
+    )
+
+    summaries = [repo.sync_catalog(items, (), NOW) for _ in range(3)]
+
+    assert (summaries[0].restored, summaries[0].conflicts) == (1, 1)
+    assert [(item.restored, item.updated, item.conflicts) for item in summaries[1:]] == [
+        (0, 0, 1), (0, 0, 1)
+    ]
     audit_inserts = [sql for sql, _ in connection.executions if "INSERT INTO wechat_collection_job_event" in sql]
     assert len(audit_inserts) == 1
 
