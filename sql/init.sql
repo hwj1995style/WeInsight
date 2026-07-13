@@ -144,6 +144,10 @@ CREATE TABLE IF NOT EXISTS wechat_public_account_config (
     feed_url TEXT NULL COMMENT '标准 RSS 或 Atom 订阅地址',
     feed_url_hash BINARY(32) GENERATED ALWAYS AS (UNHEX(SHA2(feed_url, 256))) STORED COMMENT 'Feed URL 完整 SHA-256',
     source_type VARCHAR(20) NOT NULL DEFAULT 'rss' COMMENT '文章来源类型，首期固定 rss',
+    werss_source_id VARCHAR(200) NULL COMMENT 'WeRSS 来源稳定标识，历史记录允许为空',
+    upstream_status VARCHAR(20) NOT NULL DEFAULT 'unknown' COMMENT 'WeRSS 上游状态，由应用校验允许值',
+    upstream_last_seen_at DATETIME NULL COMMENT '最近一次在 WeRSS 来源目录中出现的时间',
+    upstream_missing_at DATETIME NULL COMMENT '首次确认 WeRSS 来源目录缺失的时间',
     enabled TINYINT DEFAULT 1 COMMENT '是否启用',
     downstream_clean_enabled TINYINT NOT NULL DEFAULT 0 COMMENT '是否允许进入文章清洗分析下游，默认拒绝',
     priority INT DEFAULT 5 COMMENT '优先级，数字越小优先级越高',
@@ -163,6 +167,7 @@ CREATE TABLE IF NOT EXISTS wechat_public_account_config (
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_public_account_name (account_name),
     UNIQUE KEY uk_public_account_feed_url_hash (feed_url_hash),
+    UNIQUE KEY uk_public_account_werss_source_id (werss_source_id),
     KEY idx_public_account_due (enabled, priority, last_success_collect_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

@@ -26,6 +26,10 @@ class ArticleAccountConfigRecord:
     last_feed_etag: str | None = None
     last_feed_modified: str | None = None
     last_error_code: str | None = None
+    werss_source_id: str | None = None
+    upstream_status: str = "unknown"
+    upstream_last_seen_at: datetime | None = None
+    upstream_missing_at: datetime | None = None
     remark: str | None = None
     id: int | None = None
 
@@ -237,6 +241,10 @@ class MysqlArticleAccountConfigRepo:
                 last_feed_etag,
                 last_feed_modified,
                 last_error_code,
+                werss_source_id,
+                upstream_status,
+                upstream_last_seen_at,
+                upstream_missing_at,
                 remark
             FROM wechat_public_account_config
             ORDER BY priority ASC, account_name ASC
@@ -270,6 +278,10 @@ class MysqlArticleAccountConfigRepo:
                 last_feed_etag,
                 last_feed_modified,
                 last_error_code,
+                werss_source_id,
+                upstream_status,
+                upstream_last_seen_at,
+                upstream_missing_at,
                 remark
             FROM wechat_public_account_config
             ORDER BY priority ASC, account_name ASC
@@ -308,6 +320,10 @@ class MysqlArticleAccountConfigRepo:
                 last_feed_etag,
                 last_feed_modified,
                 last_error_code,
+                werss_source_id,
+                upstream_status,
+                upstream_last_seen_at,
+                upstream_missing_at,
                 remark
             FROM wechat_public_account_config
             WHERE enabled = 1
@@ -343,6 +359,10 @@ class MysqlArticleAccountConfigRepo:
                 last_feed_etag,
                 last_feed_modified,
                 last_error_code,
+                werss_source_id,
+                upstream_status,
+                upstream_last_seen_at,
+                upstream_missing_at,
                 remark
             FROM wechat_public_account_config
             WHERE id = :source_id
@@ -455,6 +475,10 @@ class MysqlArticleAccountConfigRepo:
                 last_feed_etag,
                 last_feed_modified,
                 last_error_code,
+                werss_source_id,
+                upstream_status,
+                upstream_last_seen_at,
+                upstream_missing_at,
                 remark
             FROM wechat_public_account_config
             WHERE enabled = 1
@@ -519,6 +543,10 @@ class MysqlArticleAccountConfigRepo:
             last_feed_etag=row.get("last_feed_etag"),
             last_feed_modified=row.get("last_feed_modified"),
             last_error_code=row.get("last_error_code"),
+            werss_source_id=row.get("werss_source_id"),
+            upstream_status=str(row.get("upstream_status", "unknown")),
+            upstream_last_seen_at=row.get("upstream_last_seen_at"),
+            upstream_missing_at=row.get("upstream_missing_at"),
             remark=row["remark"],
             id=None if row.get("id") is None else int(row["id"]),
         )

@@ -48,6 +48,47 @@ class FakeEngine:
         return self.connection
 
 
+def test_record_maps_werss_state() -> None:
+    now = datetime(2026, 7, 13, 9, 0)
+    engine = FakeEngine(
+        rows=[
+            {
+                "id": 9,
+                "account_name": "行业观察",
+                "account_type": "subscription",
+                "enabled": 1,
+                "priority": 2,
+                "poll_interval_minutes": 60,
+                "daily_window_start": "07:30:00",
+                "daily_window_end": "19:30:00",
+                "max_articles_per_round": 5,
+                "collect_today_only": 1,
+                "dedup_key": "article_hash",
+                "last_success_collect_time": None,
+                "remark": None,
+                "werss_source_id": "MP_WXS_1",
+                "upstream_status": "active",
+                "upstream_last_seen_at": now,
+                "upstream_missing_at": None,
+            }
+        ]
+    )
+
+    record = MysqlArticleAccountConfigRepo(engine).list_accounts()[0]
+
+    assert (record.werss_source_id, record.upstream_status) == ("MP_WXS_1", "active")
+    assert record.upstream_last_seen_at == now
+    assert record.upstream_missing_at is None
+    sql, _ = engine.connection.executions[0]
+    for column in (
+        "werss_source_id",
+        "upstream_status",
+        "upstream_last_seen_at",
+        "upstream_missing_at",
+    ):
+        assert column in sql
+
+
 def test_mysql_article_account_config_repo_upserts_account_config() -> None:
     engine = FakeEngine()
     repo = MysqlArticleAccountConfigRepo(engine)

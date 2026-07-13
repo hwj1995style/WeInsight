@@ -51,3 +51,22 @@ def test_readme_documents_database_init_and_upgrade_order() -> None:
     assert "sql/migrations/" in readme
     assert "YYYYMMDD_NNN" in readme
     assert "按文件名顺序执行" in readme
+
+
+def test_werss_catalog_migration_is_idempotent_and_preserves_history() -> None:
+    sql = Path("sql/migrations/20260713_001_add_werss_catalog_state.sql").read_text(
+        encoding="utf-8"
+    )
+
+    assert sql.count("information_schema.COLUMNS") == 4
+    assert "information_schema.STATISTICS" in sql
+    for column in (
+        "werss_source_id",
+        "upstream_status",
+        "upstream_last_seen_at",
+        "upstream_missing_at",
+    ):
+        assert f"COLUMN_NAME = '{column}'" in sql
+    assert "INDEX_NAME = 'uk_public_account_werss_source_id'" in sql
+    for destructive in ("DROP TABLE", "TRUNCATE TABLE", "DELETE FROM"):
+        assert destructive not in sql.upper()
