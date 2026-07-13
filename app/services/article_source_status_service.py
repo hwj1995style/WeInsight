@@ -25,7 +25,7 @@ class ArticleSourceStatusRow:
     pending_analyze_count: int
     failed_count: int
     last_error: str | None
-    updated_at: datetime | None
+    status_updated_at: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +61,16 @@ class ArticleSourceStatusService:
             last_success_collect_time=record.last_success_collect_time,
             article_count=record.article_count, pending_parse_count=record.pending_parse_count,
             pending_analyze_count=record.pending_analyze_count, failed_count=record.failed_count,
-            last_error=error, updated_at=record.updated_at,
+            last_error=error,
+            status_updated_at=max(
+                value for value in (
+                    record.updated_at, record.upstream_last_seen_at,
+                    record.last_success_collect_time, record.latest_collect_log_time,
+                ) if value is not None
+            ) if any(value is not None for value in (
+                record.updated_at, record.upstream_last_seen_at,
+                record.last_success_collect_time, record.latest_collect_log_time,
+            )) else None,
         )
 
     def _display_status(self, record: ArticleSourceStatusRecord, now: datetime) -> str:

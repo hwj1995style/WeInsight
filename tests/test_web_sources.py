@@ -220,7 +220,7 @@ class FakeArticleStatusService:
             display_status="normal", last_article_time=datetime(2026, 7, 11, 8, 0),
             last_success_collect_time=datetime(2026, 7, 11, 8, 30), article_count=2,
             pending_parse_count=1, pending_analyze_count=0, failed_count=0,
-            last_error=None, updated_at=datetime(2026, 7, 11, 8, 30),
+            last_error=None, status_updated_at=datetime(2026, 7, 11, 8, 30),
         )
         return ArticleSourceStatusPage((row,), page, page_size, page > 1, False)
 
@@ -328,51 +328,31 @@ def test_group_list_has_independent_navigation_and_safe_actions(
     assert "admin123456" not in response.text
 
 
-@pytest.mark.skip(reason="旧公众号配置操作已由只读页面测试替代")
 def test_article_list_uses_stable_ids_and_escapes_names(
     authenticated_client: TestClient,
-    source_service: FakeSourceService,
 ) -> None:
-    source_service.articles[0] = replace(
-        source_service.articles[0], account_name='<script>alert("x")</script>'
-    )
-
     response = authenticated_client.get("/sources/articles")
-
     assert response.status_code == 200
     assert "<script>" not in response.text
     assert "&lt;script&gt;" in response.text
-    assert 'href="/sources/articles/9/edit"' in response.text
-    assert 'action="/sources/articles/10/delete"' in response.text
+    assert 'action="/sources/articles' not in response.text
 
 
-@pytest.mark.skip(reason="公众号表单已删除")
-def test_article_form_contains_rss_fields(
+def test_removed_article_new_path_is_unavailable(
     authenticated_client: TestClient,
 ) -> None:
-    html = authenticated_client.get("/sources/articles/new").text
-
-    assert 'name="feed_url"' in html
-    assert 'name="request_timeout_seconds"' in html
-    assert 'min="5"' in html
-    assert 'max="120"' in html
-    assert "每轮文章上限" not in html
-    assert 'name="max_articles_per_round"' not in html
+    response = authenticated_client.get("/sources/articles/new", follow_redirects=False)
+    assert response.status_code in {303, 404}
 
 
-@pytest.mark.skip(reason="旧配置字段已从只读状态页删除")
 def test_article_list_shows_feed_health_without_network_call(
     authenticated_client: TestClient,
-    source_service: FakeSourceService,
+    article_status_service: FakeArticleStatusService,
 ) -> None:
     html = authenticated_client.get("/sources/articles").text
-
-    assert "RSS 地址" in html
-    assert "最近成功" in html
+    assert "最近成功采集" in html
     assert "最近错误" in html
-    assert "https://example.com/industry.xml" in html
-    assert "RSS_HTTP_ERROR" in html
-    assert source_service.calls == [("list_articles_page", 1, 20)]
+    assert article_status_service.calls and article_status_service.calls[0][:2] == (1, 20)
 
 
 def test_create_group_uses_complete_command_and_redirects(
@@ -464,7 +444,6 @@ def test_update_group_posts_complete_command_to_stable_id(
     assert source_service.calls[0][2].is_core_group is False
 
 
-@pytest.mark.skip(reason="公众号写路由已删除")
 def test_create_and_update_article_use_complete_commands(
     authenticated_client: TestClient,
     source_service: FakeSourceService,
@@ -489,25 +468,9 @@ def test_create_and_update_article_use_complete_commands(
         "/sources/articles/9", data=values, follow_redirects=False
     )
 
-    assert created.status_code == 303
-    assert updated.status_code == 303
-    assert source_service.calls[0] == (
-        "create_article",
-        ArticleSourceCommand(
-            account_name="蛋价早报",
-            account_type="official",
-            feed_url="https://example.com/egg.xml",
-            request_timeout_seconds=30,
-            priority=3,
-            poll_interval_minutes=15,
-            daily_window_start="06:00",
-            daily_window_end="20:00",
-            max_articles_per_round=5,
-            collect_today_only=True,
-            remark="价格信息",
-        ),
-    )
-    assert source_service.calls[1][0:2] == ("update_article", 9)
+    assert created.status_code in {404, 405}
+    assert updated.status_code in {404, 405}
+    assert source_service.calls == []
 
 
 def test_mutation_routes_do_not_accept_get(
@@ -542,7 +505,6 @@ def test_source_actions_use_post_and_redirect(
     assert source_service.calls == [expected_call]
 
 
-@pytest.mark.skip(reason="公众号级周期表单已删除")
 def test_article_nine_minute_interval_is_rejected_and_echoed(
     authenticated_client: TestClient,
     source_service: FakeSourceService,
@@ -565,9 +527,7 @@ def test_article_nine_minute_interval_is_rejected_and_echoed(
         ),
     )
 
-    assert response.status_code == 422
-    assert "公众号采集间隔不能少于 10 分钟" in response.text
-    assert 'value="九分钟公众号"' in response.text
+    assert response.status_code in {404, 405}
     assert source_service.calls == []
 
 
@@ -788,7 +748,6 @@ def test_invalid_page_boundaries_return_safe_422(
     assert "请检查表单字段" in response.text
 
 
-@pytest.mark.skip(reason="旧公众号写服务调用已删除；只读查询在线程池中单独覆盖")
 def test_all_source_service_calls_run_in_threadpool(
     authenticated_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -800,68 +759,9 @@ def test_all_source_service_calls_run_in_threadpool(
         return function(*args, **kwargs)
 
     monkeypatch.setattr(source_routes, "run_in_threadpool", recording_threadpool)
-    group_values = _csrf_data(
-        group_name="线程群",
-        priority="1",
-        poll_interval_seconds="30",
-        backtrack_pages="1",
-        extra_backtrack_pages="3",
-        remark="",
-    )
-    article_values = _csrf_data(
-        account_name="线程公众号",
-        account_type="subscription",
-        feed_url="https://example.com/thread.xml",
-        request_timeout_seconds="30",
-        priority="1",
-        poll_interval_minutes="10",
-        daily_window_start="07:00",
-        daily_window_end="19:00",
-        max_articles_per_round="5",
-        remark="",
-    )
-
-    requests = (
-        ("get", "/sources/groups", None),
-        ("get", "/sources/articles", None),
-        ("get", "/sources/groups/7/edit", None),
-        ("get", "/sources/articles/9/edit", None),
-        ("post", "/sources/groups", group_values),
-        ("post", "/sources/articles", article_values),
-        ("post", "/sources/groups/7", group_values),
-        ("post", "/sources/articles/9", article_values),
-        ("post", "/sources/groups/7/enable", _csrf_data()),
-        ("post", "/sources/groups/7/disable", _csrf_data()),
-        ("post", "/sources/groups/8/delete", _csrf_data()),
-        ("post", "/sources/articles/9/enable", _csrf_data()),
-        ("post", "/sources/articles/9/disable", _csrf_data()),
-        ("post", "/sources/articles/10/delete", _csrf_data()),
-    )
-    for method, path, data in requests:
-        if method == "get":
-            response = authenticated_client.get(path, follow_redirects=False)
-        else:
-            response = authenticated_client.post(
-                path, data=data, follow_redirects=False
-            )
-        assert response.status_code in {200, 303}
-
-    assert calls == [
-        "list_groups_page",
-        "list_articles_page",
-        "get_group",
-        "get_article",
-        "create_group",
-        "create_article",
-        "update_group",
-        "update_article",
-        "set_group_enabled",
-        "set_group_enabled",
-        "delete_group",
-        "set_article_enabled",
-        "set_article_enabled",
-        "delete_article",
-    ]
+    response = authenticated_client.get("/sources/articles")
+    assert response.status_code == 200
+    assert calls == ["list_page"]
 
 
 @pytest.mark.parametrize(

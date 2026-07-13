@@ -12,6 +12,7 @@ class ArticleSourceStatusRecord:
     account_name: str
     werss_source_id: str | None
     upstream_status: str
+    upstream_last_seen_at: datetime | None
     last_article_time: datetime | None
     last_success_collect_time: datetime | None
     article_count: int
@@ -21,6 +22,7 @@ class ArticleSourceStatusRecord:
     last_collect_status: str | None
     last_error: str | None
     updated_at: datetime | None
+    latest_collect_log_time: datetime | None
 
 
 class MysqlArticleSourceStatusRepo:
@@ -34,6 +36,7 @@ class MysqlArticleSourceStatusRepo:
             account_name=str(row["account_name"]),
             werss_source_id=row["werss_source_id"],
             upstream_status=str(row["upstream_status"]),
+            upstream_last_seen_at=row["upstream_last_seen_at"],
             last_article_time=row["last_article_time"],
             last_success_collect_time=row["last_success_collect_time"],
             article_count=int(row["article_count"] or 0),
@@ -43,6 +46,7 @@ class MysqlArticleSourceStatusRepo:
             last_collect_status=row["last_collect_status"],
             last_error=row["last_error"],
             updated_at=row["updated_at"],
+            latest_collect_log_time=row["latest_collect_log_time"],
         ) for row in rows]
 
 
@@ -70,17 +74,19 @@ WITH raw_stats AS (
 ), log_latest AS (
     SELECT account_name, status AS last_collect_status,
            COALESCE(error_code, error_msg) AS last_error,
+           COALESCE(end_time, start_time) AS latest_collect_log_time,
            last_success_collect_time
     FROM log_ranked WHERE row_num = 1
 )
 SELECT config.account_name, config.werss_source_id, config.upstream_status,
+       config.upstream_last_seen_at,
        raw_stats.last_article_time, log_latest.last_success_collect_time,
        COALESCE(raw_stats.article_count, 0) AS article_count,
        COALESCE(task_stats.pending_parse_count, 0) AS pending_parse_count,
        COALESCE(task_stats.pending_analyze_count, 0) AS pending_analyze_count,
        COALESCE(task_stats.failed_count, 0) AS failed_count,
        log_latest.last_collect_status, log_latest.last_error,
-       GREATEST(config.update_time, COALESCE(log_latest.last_success_collect_time, config.update_time)) AS updated_at
+       config.update_time AS updated_at, log_latest.latest_collect_log_time
 FROM wechat_public_account_config config
 LEFT JOIN raw_stats ON raw_stats.account_name = config.account_name
 LEFT JOIN task_stats ON task_stats.account_name = config.account_name

@@ -51,7 +51,7 @@ def test_admin_pages_use_shared_direction_a_shell(authenticated_client, path):
     ("path", "page_title"),
     (
         ("/dashboard", "基础总览"), ("/sources/groups", "微信群名单"),
-        ("/sources/articles", "公众号名单"), ("/jobs", "采集任务"),
+        ("/sources/articles", "公众号状态"), ("/jobs", "采集任务"),
         ("/runs", "运行实例"), ("/events", "结构化日志"),
         ("/workers", "Worker 与微信状态"), ("/results/groups", "微信群结果"),
         ("/reports", "日报"),

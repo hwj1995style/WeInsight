@@ -22,10 +22,12 @@ class FakeRepo:
 def record(**changes):
     values = dict(
         account_name="测试公众号", werss_source_id="MP1", upstream_status="active",
+        upstream_last_seen_at=NOW - timedelta(minutes=8),
         last_article_time=NOW - timedelta(minutes=5),
         last_success_collect_time=NOW - timedelta(minutes=5), article_count=1,
         pending_parse_count=0, pending_analyze_count=0, failed_count=0,
         last_collect_status="success", last_error=None, updated_at=NOW,
+        latest_collect_log_time=NOW - timedelta(minutes=3),
     )
     values.update(changes)
     return ArticleSourceStatusRecord(**values)
@@ -73,3 +75,11 @@ def test_status_query_aggregates_each_many_side_before_joining():
     assert "task_stats AS" in sql and "GROUP BY raw.account_name" in sql
     assert "ROW_NUMBER() OVER (PARTITION BY account_name" in sql
     assert "LEFT JOIN raw_stats" in sql and "LEFT JOIN task_stats" in sql and "LEFT JOIN log_latest" in sql
+
+
+def test_status_updated_at_uses_latest_failure_log_time():
+    latest = NOW - timedelta(minutes=1)
+    row = ArticleSourceStatusService(FakeRepo(), 10).to_status(
+        record(updated_at=NOW - timedelta(minutes=9), latest_collect_log_time=latest), NOW
+    )
+    assert row.status_updated_at == latest

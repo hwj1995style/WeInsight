@@ -25,3 +25,5 @@
 
 - 本工作树未提供可用的开发 MySQL 密码，因此 3 个既有 dashboard 认证测试无法完成数据库型验证；该问题在 Task 6 修改前基线已复现。
 - 真实 MySQL 8 上的 CTE/窗口函数查询仍应在集成环境执行一次 EXPLAIN 与结果抽查。
+
+> 本文件名与历史交付存在碰撞。Task 6 最终完整证据请以 `.superpowers/sdd/task-6-werss-status-report.md` 为准。
