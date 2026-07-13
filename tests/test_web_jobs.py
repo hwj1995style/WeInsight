@@ -844,7 +844,8 @@ def test_detail_explains_cross_midnight_and_history_retention(
     assert 'href="/runs?job_id=11"' in response.text
     assert "最近操作事件" in response.text
     assert 'href="/events?job_id=11"' in response.text
-    assert "当前仍使用默认密码 admin123456" in response.text
+    assert "当前仍使用默认密码" not in response.text
+    assert "admin123456" not in response.text
 
 
 def test_create_app_accepts_injected_job_service(

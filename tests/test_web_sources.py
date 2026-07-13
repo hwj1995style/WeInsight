@@ -270,7 +270,8 @@ def test_group_list_has_independent_navigation_and_safe_actions(
     assert 'action="/sources/groups/8/delete"' in response.text
     assert "只删除配置，不删除历史采集结果" in response.text
     assert 'name="csrf_token" value="csrf-token"' in response.text
-    assert "当前仍使用默认密码 admin123456" in response.text
+    assert "当前仍使用默认密码" not in response.text
+    assert "admin123456" not in response.text
 
 
 def test_article_list_uses_stable_ids_and_escapes_names(

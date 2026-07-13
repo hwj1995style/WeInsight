@@ -1,6 +1,7 @@
 :root {
   --color-sidebar: #0b2340;
   --color-sidebar-hover: #12365e;
+  --color-sidebar-border: #28435f;
   --color-workspace: #f3f6fa;
   --color-surface: #ffffff;
   --color-text: #172033;
@@ -51,8 +52,8 @@ form button { margin-top: 1.25rem; }
 .notice.success { color: #17643c; background: #eaf8f0; }
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: var(--sidebar-expanded) minmax(0, 1fr); transition: grid-template-columns .2s ease; }
 .app-shell[data-sidebar-state="collapsed"] { grid-template-columns: var(--sidebar-collapsed) minmax(0, 1fr); }
-.sidebar { position: sticky; top: 0; z-index: 20; height: 100vh; display: flex; flex-direction: column; overflow: hidden; color: #fff; background: var(--color-sidebar); border-right: 1px solid var(--color-sidebar); }
-.sidebar-brand { min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .75rem; border-bottom: 1px solid var(--color-border); }
+.sidebar { position: sticky; top: 0; z-index: 20; height: 100vh; display: flex; flex-direction: column; overflow: hidden; color: #fff; background: var(--color-sidebar); border-right: 1px solid var(--color-sidebar-border); }
+.sidebar-brand { min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .75rem; border-bottom: 1px solid var(--color-sidebar-border); }
 .sidebar-brand .brand { display: flex; align-items: center; gap: .65rem; min-width: 0; color: #fff; }
 .brand-mark { flex: 0 0 36px; display: grid; place-items: center; width: 36px; height: 36px; color: #fff; background: var(--color-accent); border-radius: 9px; }
 .icon-button { display: grid; place-items: center; flex: 0 0 36px; width: 36px; height: 36px; padding: 0; }
@@ -61,7 +62,7 @@ form button { margin-top: 1.25rem; }
 .primary-nav a { display: flex; align-items: center; min-height: 40px; padding: 0 .8rem; color: #c8d5e5; font-size: .9rem; font-weight: 620; border-left: 2px solid transparent; white-space: nowrap; }
 .primary-nav a:hover { color: #fff; background: var(--color-sidebar-hover); text-decoration: none; }
 .primary-nav a[aria-current="page"] { color: #fff; background: var(--color-sidebar-hover); border-left-color: #6eaeff; }
-.sidebar-account { display: grid; gap: .55rem; padding: 1rem; border-top: 1px solid var(--color-border); font-size: .85rem; }
+.sidebar-account { display: grid; gap: .55rem; padding: 1rem; border-top: 1px solid var(--color-sidebar-border); font-size: .85rem; }
 .sidebar-account form, .sidebar-account form button { margin: 0; }
 .sidebar-account button { padding: 0; color: var(--color-accent); background: transparent; text-align: left; font-weight: 500; }
 .app-main { min-width: 0; }
@@ -130,7 +131,7 @@ form button { margin-top: 1.25rem; }
 .section-tabs a[aria-current="page"] { color: var(--color-accent); border-bottom-color: var(--color-accent); font-weight: 680; }
 .filter-panel { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: end; gap: .8rem; margin-bottom: 1.25rem; padding: 1rem; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-panel); box-shadow: var(--shadow-panel); }
 .filter-panel label { margin-top: 0; }
-.filter-panel button { min-height: 44px; margin: 0; }
+.filter-panel button { min-height: 40px; margin: 0; }
 .result-panel { padding: 0; overflow: hidden; }
 .results-table { min-width: 1050px; }
 .content-cell { min-width: 16rem; max-width: 28rem; white-space: normal; overflow-wrap: anywhere; }
@@ -139,7 +140,7 @@ form button { margin-top: 1.25rem; }
 .report-request-panel h2 { margin: 0 0 .45rem; font-size: 1.2rem; }
 .report-request-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; align-items: end; gap: .75rem; }
 .report-request-form label { margin-top: 0; }
-.report-request-form button { min-height: 44px; margin: 0; white-space: nowrap; }
+.report-request-form button { min-height: 40px; margin: 0; white-space: nowrap; }
 .report-download-bar { display: flex; justify-content: flex-end; margin: 0 0 1rem; }
 .report-version, .request-status { display: inline-flex; align-items: center; min-height: 28px; padding: .24rem .58rem; border-radius: 999px; font-size: .78rem; font-weight: 720; white-space: nowrap; }
 .report-version-provisional, .request-status-pending, .request-status-running { color: #855b00; background: #fff5cf; }

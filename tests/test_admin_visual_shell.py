@@ -6,12 +6,27 @@ def test_direction_a_tokens_and_components_are_declared():
     css = Path("app/web/static/app.css").read_text("utf-8")
     for token in (
         "--color-sidebar:", "--color-workspace:", "--color-surface:",
+        "--color-sidebar-border:",
         "--color-accent:", "--color-success:", "--color-warning:",
         "--color-danger:", "--radius-panel:", "--shadow-panel:",
     ):
         assert token in css
     assert "linear-gradient" not in css
     assert "backdrop-filter" not in css
+
+
+def test_direction_a_shared_components_and_control_sizes_are_declared():
+    css = Path("app/web/static/app.css").read_text("utf-8")
+    for selector in (
+        ".content-panel {", ".kpi-card {", ".data-table {",
+        ".filter-panel {", ".notice {", ".job-status {",
+    ):
+        assert selector in css
+    assert "button, .button { min-height: 40px;" in css
+    assert 'input:not([type="hidden"]) { width: 100%; min-height: 42px;' in css
+    assert ".data-table th, .data-table td { height: 46px;" in css
+    assert ".filter-panel button { min-height: 40px;" in css
+    assert ".report-request-form button { min-height: 40px;" in css
 
 
 def test_base_template_contains_professional_sidebar_shell():
