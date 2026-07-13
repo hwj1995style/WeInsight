@@ -2,6 +2,18 @@ from pathlib import Path
 import subprocess
 
 
+def test_direction_a_tokens_and_components_are_declared():
+    css = Path("app/web/static/app.css").read_text("utf-8")
+    for token in (
+        "--color-sidebar:", "--color-workspace:", "--color-surface:",
+        "--color-accent:", "--color-success:", "--color-warning:",
+        "--color-danger:", "--radius-panel:", "--shadow-panel:",
+    ):
+        assert token in css
+    assert "linear-gradient" not in css
+    assert "backdrop-filter" not in css
+
+
 def test_base_template_contains_professional_sidebar_shell():
     text = Path("app/web/templates/base.html").read_text("utf-8")
     for fragment in (
