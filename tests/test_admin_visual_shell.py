@@ -27,6 +27,7 @@ def test_direction_a_shared_components_and_control_sizes_are_declared():
     assert ".data-table th, .data-table td { height: 46px;" in css
     assert ".filter-panel button { min-height: 40px;" in css
     assert ".report-request-form button { min-height: 40px;" in css
+    assert ".button.compact, button.compact { min-height: 40px;" in css
 
 
 def test_base_template_contains_professional_sidebar_shell():

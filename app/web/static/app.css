@@ -104,7 +104,7 @@ form button { margin-top: 1.25rem; }
 .status-text.disabled { color: var(--color-muted); }
 .row-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; min-width: 14rem; }
 .row-actions form, .row-actions form button { margin: 0; }
-.button.compact, button.compact { min-height: 36px; padding: .48rem .7rem; border-radius: 7px; font-size: .82rem; }
+.button.compact, button.compact { min-height: 40px; padding: .48rem .7rem; border-radius: 7px; font-size: .82rem; }
 .secondary-action { color: var(--color-accent); background: #eaf0fb; }
 .secondary-action:hover { color: #fff; }
 .danger-action { color: var(--color-danger); background: #fff1f1; }
