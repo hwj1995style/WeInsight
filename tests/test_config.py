@@ -108,7 +108,7 @@ def test_pipeline_capacity_defaults_match_design() -> None:
     assert config.pipelines.article.crawl_time == "07:30"
     assert config.pipelines.article.account_poll_interval_minutes == 60
     assert config.pipelines.article.rss_max_concurrency == 4
-    assert config.pipelines.article.rss_max_response_bytes == 5_242_880
+    assert config.pipelines.article.rss_max_response_bytes == 10_485_760
     assert config.pipelines.article.rss_allowed_private_hosts == ("127.0.0.1:8001",)
     assert config.pipelines.article.content_base_url == "http://127.0.0.1:8001"
     assert config.pipelines.article.content_timeout_seconds == 30

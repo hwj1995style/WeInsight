@@ -5,7 +5,7 @@
 - 公众号后台仅保留 `GET /sources/articles`；旧新增、编辑、创建、更新、启用、停用和删除入口均返回 404/405，且不调用公众号写服务。
 - 群管理路由、表单和写能力保持不变。
 - 页面刷新为普通 GET，只执行注入的 `ArticleSourceStatusService.list_page` 查询。
-- 状态优先级固定为 `excluded > missing > disabled > collect_error > stale > normal`；active 且无成功记录显示“等待首轮”。陈旧阈值为两倍全局周期。
+- 状态优先级固定为 `excluded > missing > disabled > unknown > collect_error > stale > normal`；active 且无成功记录显示“等待首轮”。陈旧阈值为两倍全局周期。
 - raw、process task、collect log 均先收敛到公众号粒度再 JOIN；错误使用既有输出脱敏。
 - 综合状态更新时间取配置更新时间、上游最近确认时间、最近成功采集时间和最新采集日志时间的最大值，因此最新失败也会推进页面时间。
 
