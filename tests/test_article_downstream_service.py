@@ -92,6 +92,19 @@ def test_backfill_rejects_invalid_commands_before_repo(changes, message):
     assert repo.calls == []
 
 
+@pytest.mark.parametrize("field, value", [
+    ("scope", []), ("scope", {}), ("scope", 1), ("scope", None),
+    ("mode", []), ("mode", {}), ("mode", 1), ("mode", None),
+])
+def test_backfill_rejects_non_string_scope_and_mode_as_stable_validation_error(field, value):
+    repo = Repo()
+    with pytest.raises(ArticleDownstreamValidationError, match=field):
+        ArticleDownstreamService(repo).backfill(
+            command(**{field: value}), datetime(2026, 7, 14, 12)
+        )
+    assert repo.calls == []
+
+
 def test_backfill_accepts_inclusive_31_day_boundary_and_only_orchestrates_repo():
     repo = Repo()
     cmd = command(start_date=date(2026, 6, 14), end_date=date(2026, 7, 14))

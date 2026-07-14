@@ -73,7 +73,9 @@ class ArticleDownstreamService:
     def _validate_command(
         cls, command: ArticleBackfillCommand, business_date: date
     ) -> None:
-        if command.scope not in {"single", "enabled"}:
+        if not isinstance(command.scope, str) or command.scope not in {
+            "single", "enabled"
+        }:
             raise ArticleDownstreamValidationError("scope must be single or enabled")
         if command.scope == "single":
             cls._validate_source_id(command.source_id)
@@ -81,7 +83,9 @@ class ArticleDownstreamService:
             raise ArticleDownstreamValidationError(
                 "source_id must be omitted for enabled scope"
             )
-        if command.mode not in {"missing_only", "force_analyze"}:
+        if not isinstance(command.mode, str) or command.mode not in {
+            "missing_only", "force_analyze"
+        }:
             raise ArticleDownstreamValidationError(
                 "mode must be missing_only or force_analyze"
             )
