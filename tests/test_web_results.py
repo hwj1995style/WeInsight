@@ -270,6 +270,17 @@ def test_price_matrix_empty_state(
     assert "暂无可展示的公众号报价" in response.text
 
 
+@pytest.mark.parametrize("query", ["account_name=x", "page=1", "region=x"])
+def test_price_matrix_rejects_unknown_query_parameters(
+    authenticated_client: TestClient,
+    query: str,
+) -> None:
+    response = authenticated_client.get(f"/results/prices?{query}")
+
+    assert response.status_code == 422
+    assert "查询条件无效" in response.text
+
+
 def test_result_templates_autoescape_untrusted_safe_dto_text(
     authenticated_client: TestClient,
     result_service: FakeResultService,

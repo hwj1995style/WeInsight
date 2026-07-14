@@ -86,6 +86,8 @@ async def article_results(request: Request) -> Response:
 async def price_results(request: Request) -> Response:
     try:
         values = _query_values(request)
+        if values.keys() - {"quote_date"}:
+            raise ValueError("unsupported query parameter")
         requested_date = _optional_date(values, "quote_date")
         matrix = await run_in_threadpool(
             request.app.state.result_service.get_price_matrix,
