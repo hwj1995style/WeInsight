@@ -335,6 +335,19 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 }
 
 .article-status-table { min-width: 1280px; }
+.article-downstream .downstream-panel { margin-bottom: 1.25rem; }
+.article-downstream .downstream-intro h2 { margin: 0 0 .4rem; font-size: 1.25rem; }
+.article-downstream .downstream-intro p { margin: 0; color: var(--color-text-muted); }
+.article-downstream .downstream-form { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1rem; margin-top: 1.25rem; align-items: end; }
+.article-downstream .downstream-form label { display: grid; gap: .45rem; font-weight: 650; }
+.article-downstream .downstream-form small { color: var(--color-text-muted); font-weight: 400; line-height: 1.4; }
+.article-downstream .force-confirm { grid-column: 1 / -2; grid-template-columns: auto 1fr; align-items: center; }
+.article-downstream .downstream-summary { display: flex; flex-wrap: wrap; gap: .55rem 1rem; margin-top: 1rem; padding: .9rem 1rem; border-radius: .75rem; background: #eaf3ff; }
+.article-downstream .processing-state { display: grid; gap: .45rem; min-width: 9rem; }
+.article-downstream .processing-state form { margin: 0; }
+.article-downstream .button.compact { padding: .4rem .7rem; font-size: .82rem; }
+@media (max-width: 1100px) { .article-downstream .downstream-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } .article-downstream .force-confirm { grid-column: 1 / -1; } }
+@media (max-width: 640px) { .article-downstream .downstream-form { grid-template-columns: 1fr; } .article-downstream .downstream-form .button { width: 100%; } }
 .source-name-cell { min-width: 12rem; max-width: 22rem; overflow-wrap: anywhere; }
 .error-cell { min-width: 10rem; max-width: 22rem; overflow-wrap: anywhere; }
 .status-waiting_first_run, .status-unknown { color: #64748b; }

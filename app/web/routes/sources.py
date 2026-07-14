@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
+from urllib.parse import urlencode
 from pathlib import Path
 
 from fastapi import APIRouter, Request
@@ -15,6 +16,11 @@ from app.services.source_management_service import (
     SourceMustBeDisabledError,
     SourceNotFoundError,
     SourceRenameBlockedError,
+)
+from app.domain.article_downstream import ArticleBackfillCommand
+from app.services.article_downstream_service import (
+    ArticleDownstreamSourceUnavailableError,
+    ArticleDownstreamValidationError,
 )
 
 
@@ -164,6 +170,8 @@ async def article_list(
         )
     except ValueError as exc:
         return _source_error_response(request, exc, "/sources/articles")
+    start_date, end_date = request.app.state.article_downstream_service.default_backfill_dates(datetime.now())
+    summary = _summary_from_query(request)
     return templates.TemplateResponse(
         request=request,
         name="sources/articles.html",
@@ -172,8 +180,57 @@ async def article_list(
             "articles": result.items,
             "page": result,
             "sync_interval_minutes": request.app.state.article_status_service.sync_interval_minutes,
+            "backfill_start_date": start_date.isoformat(),
+            "backfill_end_date": end_date.isoformat(),
+            "backfill_summary": summary,
         },
     )
+
+
+@router.post("/articles/{source_id}/downstream-processing", response_class=HTMLResponse)
+async def article_downstream_processing(request: Request, source_id: int) -> Response:
+    try:
+        values = await _strict_form_values(request, {"enabled"})
+        if values.get("enabled") not in {"0", "1"}:
+            raise ValueError("invalid enabled")
+        await run_in_threadpool(
+            request.app.state.article_downstream_service.set_processing_enabled,
+            source_id,
+            values["enabled"] == "1",
+        )
+    except (ValueError, ArticleDownstreamValidationError) as exc:
+        return _downstream_error(request, exc, 422)
+    except ArticleDownstreamSourceUnavailableError as exc:
+        return _downstream_error(request, exc, 404)
+    return RedirectResponse("/sources/articles", status_code=303)
+
+
+@router.post("/articles/downstream-processing/backfill", response_class=HTMLResponse)
+async def article_downstream_backfill(request: Request) -> Response:
+    try:
+        values = await _strict_form_values(
+            request, {"scope", "source_id", "start_date", "end_date", "mode", "confirm_force"}
+        )
+        scope = values.get("scope", "")
+        source_id = _positive_optional_integer(values.get("source_id", "")) if scope == "single" else None
+        command = ArticleBackfillCommand(
+            scope=scope, source_id=source_id,
+            start_date=date.fromisoformat(values.get("start_date", "")),
+            end_date=date.fromisoformat(values.get("end_date", "")),
+            mode=values.get("mode", ""),
+            force_confirmed=_strict_checkbox(values, "confirm_force"),
+        )
+        if command.mode == "force_analyze" and not command.force_confirmed:
+            raise ArticleDownstreamValidationError("force_analyze requires explicit confirmation")
+        summary = await run_in_threadpool(
+            request.app.state.article_downstream_service.backfill, command, datetime.now()
+        )
+    except (ValueError, ArticleDownstreamValidationError) as exc:
+        return _downstream_error(request, exc, 422)
+    except ArticleDownstreamSourceUnavailableError as exc:
+        return _downstream_error(request, exc, 404)
+    query = urlencode({name: getattr(summary, name) for name in _SUMMARY_FIELDS})
+    return RedirectResponse(f"/sources/articles?{query}", status_code=303)
 
 
 async def _set_enabled(
@@ -251,6 +308,62 @@ async def _form_values(request: Request) -> dict[str, str]:
             raise ValueError("invalid form field")
         values[key] = value
     return values
+
+
+async def _strict_form_values(request: Request, allowed: set[str]) -> dict[str, str]:
+    values = await _form_values(request)
+    if set(values) - allowed:
+        raise ValueError("unknown form field")
+    return values
+
+
+def _positive_optional_integer(value: str) -> int:
+    if not value or value.strip() != value:
+        raise ValueError("invalid source_id")
+    parsed = int(value)
+    if parsed < 1:
+        raise ValueError("invalid source_id")
+    return parsed
+
+
+def _strict_checkbox(values: dict[str, str], field: str) -> bool:
+    if field not in values:
+        return False
+    if values[field] != "1":
+        raise ValueError("invalid checkbox")
+    return True
+
+
+_SUMMARY_FIELDS = (
+    "matched_article_count", "clean_task_created_count", "clean_task_recovered_count",
+    "analyze_task_created_count", "analyze_task_recovered_count",
+    "existing_result_skipped_count", "running_task_skipped_count", "out_of_scope_skipped_count",
+)
+
+
+def _summary_from_query(request: Request) -> dict[str, int] | None:
+    if not any(name in request.query_params for name in _SUMMARY_FIELDS):
+        return None
+    if set(request.query_params) - {"page", "page_size", *_SUMMARY_FIELDS}:
+        return None
+    summary: dict[str, int] = {}
+    for name in _SUMMARY_FIELDS:
+        values = request.query_params.getlist(name)
+        if len(values) != 1 or not values[0].isdigit():
+            return None
+        summary[name] = min(int(values[0]), 1_000_000_000)
+    return summary
+
+
+def _downstream_error(request: Request, exc: Exception, status_code: int) -> Response:
+    message = "公众号不可用于下游处理。" if status_code == 404 else "请检查下游处理表单字段后重试。"
+    if "confirmation" in str(exc):
+        message = "强制重新分析前必须确认风险。"
+    return templates.TemplateResponse(
+        request=request, name="sources/error.html",
+        context={"section": "articles", "message": message, "job_names": (), "return_url": "/sources/articles"},
+        status_code=status_code,
+    )
 
 
 def _group_command(values: dict[str, str]) -> GroupSourceCommand:

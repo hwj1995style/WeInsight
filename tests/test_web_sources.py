@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime
+from datetime import date, datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.core.config import Config, load_config
+from app.domain.article_downstream import ArticleBackfillSummary
 from app.services.auth_service import AuthenticatedAdmin
 from app.services.source_management_service import (
     ArticleSourceCommand,
@@ -221,8 +222,27 @@ class FakeArticleStatusService:
             last_success_collect_time=datetime(2026, 7, 11, 8, 30), article_count=2,
             pending_parse_count=1, pending_analyze_count=0, failed_count=0,
             last_error=None, status_updated_at=datetime(2026, 7, 11, 8, 30),
+            source_id=7, collection_enabled=True,
+            downstream_processing_enabled=False,
+            downstream_processing_mutable=True,
         )
         return ArticleSourceStatusPage((row,), page, page_size, page > 1, False)
+
+
+class FakeArticleDownstreamService:
+    def __init__(self) -> None:
+        self.calls = []
+
+    @staticmethod
+    def default_backfill_dates(now):
+        return date(2026, 7, 8), date(2026, 7, 14)
+
+    def set_processing_enabled(self, source_id, enabled):
+        self.calls.append(("set", source_id, enabled))
+
+    def backfill(self, command, now):
+        self.calls.append(("backfill", command, now))
+        return ArticleBackfillSummary(9, 1, 2, 3, 4, 5, 6, 7)
 
 
 @pytest.fixture
@@ -246,17 +266,24 @@ def article_status_service() -> FakeArticleStatusService:
 
 
 @pytest.fixture
+def article_downstream_service() -> FakeArticleDownstreamService:
+    return FakeArticleDownstreamService()
+
+
+@pytest.fixture
 def app(
     config: Config,
     auth_service: FakeAuthService,
     source_service: FakeSourceService,
     article_status_service: FakeArticleStatusService,
+    article_downstream_service: FakeArticleDownstreamService,
 ) -> FastAPI:
     return create_app(
         config,
         auth_service=auth_service,
         source_service=source_service,
         article_status_service=article_status_service,
+        article_downstream_service=article_downstream_service,
     )
 
 
@@ -296,7 +323,7 @@ def test_article_page_is_read_only_and_refreshes_with_get(authenticated_client):
     assert "每 10 分钟" in response.text
     assert 'href="/sources/articles"' in response.text
     assert "行业观察&lt;script&gt;" in response.text
-    for text in ("新增公众号", "编辑公众号", 'action="/sources/articles', ">删除<"):
+    for text in ("新增公众号", "编辑公众号", ">删除<"):
         assert text not in response.text
 
 
@@ -352,7 +379,7 @@ def test_article_list_uses_stable_ids_and_escapes_names(
     assert response.status_code == 200
     assert "<script>" not in response.text
     assert "&lt;script&gt;" in response.text
-    assert 'action="/sources/articles' not in response.text
+    assert 'action="/sources/articles/7/downstream-processing"' in response.text
 
 
 def test_removed_article_new_path_is_unavailable(
@@ -705,7 +732,10 @@ class SourceFormParser(HTMLParser):
         ),
         (
             "/sources/articles",
-            set(),
+            {
+                "/sources/articles/7/downstream-processing",
+                "/sources/articles/downstream-processing/backfill",
+            },
         ),
         ("/sources/groups/new", {"/sources/groups"}),
         ("/sources/groups/7/edit", {"/sources/groups/7"}),
@@ -822,6 +852,64 @@ def test_duplicate_business_field_is_rejected_without_service_call(
     assert response.status_code == 422
     assert "重复字段" in response.text
     assert source_service.calls == []
+
+
+def test_downstream_switch_is_strict_and_uses_prg(authenticated_client, article_downstream_service):
+    response = authenticated_client.post(
+        "/sources/articles/7/downstream-processing",
+        data=_csrf_data(enabled="1"), follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/sources/articles"
+    assert article_downstream_service.calls == [("set", 7, True)]
+
+
+@pytest.mark.parametrize("body", ["enabled=2", "enabled=1&enabled=0", "enabled=1&private=x"])
+def test_downstream_switch_rejects_illegal_duplicate_and_unknown_fields(
+    authenticated_client, article_downstream_service, body
+):
+    response = authenticated_client.post(
+        "/sources/articles/7/downstream-processing",
+        content=body, headers={"Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": "csrf-token"},
+    )
+    assert response.status_code == 422
+    assert article_downstream_service.calls == []
+    assert "private" not in response.text
+
+
+def test_downstream_posts_require_authentication_and_csrf(raw_client, authenticated_client, article_downstream_service):
+    unauthenticated = raw_client.post(
+        "/sources/articles/7/downstream-processing", data={"enabled": "1"}, follow_redirects=False
+    )
+    assert unauthenticated.status_code in {303, 403}
+    authenticated_client.cookies.set("weinsight_session", "session-token")
+    missing_csrf = authenticated_client.post(
+        "/sources/articles/7/downstream-processing", data={"enabled": "1"}
+    )
+    assert missing_csrf.status_code == 403
+    assert article_downstream_service.calls == []
+
+
+def test_backfill_force_requires_confirmation(authenticated_client, article_downstream_service):
+    response = authenticated_client.post(
+        "/sources/articles/downstream-processing/backfill",
+        data=_csrf_data(scope="single", source_id="7", start_date="2026-07-08", end_date="2026-07-14", mode="force_analyze"),
+    )
+    assert response.status_code == 422
+    assert "必须确认风险" in response.text
+    assert article_downstream_service.calls == []
+
+
+def test_backfill_uses_prg_with_count_only_summary(authenticated_client, article_downstream_service):
+    response = authenticated_client.post(
+        "/sources/articles/downstream-processing/backfill",
+        data=_csrf_data(scope="single", source_id="7", start_date="2026-07-08", end_date="2026-07-14", mode="missing_only"),
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "matched_article_count=9" in response.headers["location"]
+    page = authenticated_client.get(response.headers["location"])
+    assert "命中文章 9" in page.text
 
 
 @pytest.mark.parametrize("checkbox_value", ["yes", "off", "TRUE", "2"])
