@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from types import MappingProxyType
 from collections import defaultdict
 from typing import Literal, Mapping, Sequence
@@ -16,6 +16,7 @@ CellSource = Literal["observed", "extrapolated", "empty"]
 class AccountMatrixRule:
     account_name: str
     unit: str
+    description: str = ""
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,13 @@ class PriceMatrixCell:
     value: Decimal | None
     source: CellSource
     explanation: str | None = None
+
+    @property
+    def display_value(self) -> str:
+        if self.value is None:
+            return ""
+        rounded = self.value.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+        return format(rounded, "f").rstrip("0").rstrip(".")
 
 
 @dataclass(frozen=True)
@@ -74,17 +82,17 @@ class PriceMatrixSourceRow:
 
 
 ACCOUNT_MATRIX_RULES = tuple(
-    AccountMatrixRule(account_name=account_name, unit=unit)
-    for account_name, unit in (
-        ("家美鲜鸡蛋 佳美鲜", "元/箱"),
-        ("河北馆陶鸡蛋报价", "元/箱"),
-        ("河南金咕咕蛋品", "元/斤"),
-        ("贵阳鸡蛋价格", "元/箱"),
-        ("蓝天禽蛋联盟", "元/箱"),
-        ("湖南三尖农牧公司", "元/箱"),
-        ("成都鸡蛋价格", "元/箱"),
-        ("河北辛集城方蛋品", "元/箱"),
-        ("江西九江褐壳蛋", "元/箱"),
+    AccountMatrixRule(account_name=account_name, unit=unit, description=description)
+    for account_name, unit, description in (
+        ("家美鲜鸡蛋 佳美鲜", "元/箱", "按元/箱展示；精确码数或重量区间展开；价格存在上下限时拆分低价、高价列。"),
+        ("河北馆陶鸡蛋报价", "元/箱", "按元/箱展示；净重区间内各码使用同一报价；价格存在上下限时拆分低价、高价列。"),
+        ("河南金咕咕蛋品", "元/斤", "按元/斤展示；规格区间展开；区间边界重复时取较高价格；价格存在上下限时拆分低价、高价列。"),
+        ("贵阳鸡蛋价格", "元/箱", "按元/箱展示；明确拆分低价、高价列；重量区间展开。"),
+        ("蓝天禽蛋联盟", "元/箱", "按元/箱展示；只纳入配置指定的目标市场；重量区间内各码使用同一报价。"),
+        ("湖南三尖农牧公司", "元/箱", "按元/箱展示；精确码数或重量区间展开；价格存在上下限时拆分低价、高价列。"),
+        ("成都鸡蛋价格", "元/箱", "按元/箱展示；净重区间内各码使用同一报价；价格区间拆低价、高价列。"),
+        ("河北辛集城方蛋品", "元/箱", "按元/箱展示；精确码数或重量区间展开；价格存在上下限时拆分低价、高价列。"),
+        ("江西九江褐壳蛋", "元/箱", "按元/箱展示；精确码数或重量区间展开；价格存在上下限时拆分低价、高价列。"),
     )
 )
 

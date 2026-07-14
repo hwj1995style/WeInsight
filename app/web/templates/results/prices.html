@@ -32,14 +32,14 @@
                 <th scope="row">{{ row.size }}码</th>
                 {% for column in matrix.columns %}
                   {% set cell = row.cells[column.key] %}
-                  <td class="price-cell{% if cell.source == 'extrapolated' %} price-cell-extrapolated{% endif %}" data-price-source="{{ cell.source }}"{% if cell.explanation %} title="{{ cell.explanation }}"{% endif %}>{% if cell.value is not none %}{{ cell.value }}{% endif %}{% if cell.source == 'extrapolated' %}<span class="price-cell-note">推算</span>{% endif %}</td>
+                  <td class="price-cell{% if cell.source == 'extrapolated' %} price-cell-extrapolated{% endif %}" data-price-source="{{ cell.source }}"{% if cell.explanation %} title="{{ cell.explanation }}"{% endif %}>{{ cell.display_value }}{% if cell.source == 'extrapolated' %}<span class="price-cell-note">推算</span>{% endif %}</td>
                 {% endfor %}
               </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
-      <section class="price-matrix-rules" aria-labelledby="price-matrix-rules"><h2 id="price-matrix-rules">取数规则</h2><div class="price-matrix-rule-grid">{% for rule in matrix.rules %}<article><h3>{{ rule.account_name }}</h3><p>报价按{{ rule.unit }}展示；缺码推算值以提示说明为准。</p></article>{% endfor %}</div></section>
+      <section class="price-matrix-rules" aria-labelledby="price-matrix-rules"><h2 id="price-matrix-rules">取数规则</h2><p class="price-matrix-rule-note">缺码采用最近一组已知价差推算，具体依据可悬停查看。</p><div class="price-matrix-rule-grid">{% for rule in matrix.rules %}<article><h3>{{ rule.account_name }}</h3><p>{{ rule.description or ('报价按' ~ rule.unit ~ '展示。') }}</p></article>{% endfor %}</div></section>
     {% else %}
       <div class="empty-state"><h2>暂无可展示的公众号报价</h2><p>请选择其他报价日期后重试。</p></div>
     {% endif %}

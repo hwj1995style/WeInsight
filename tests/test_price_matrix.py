@@ -82,6 +82,27 @@ def test_matrix_rules_cover_nine_accounts_in_fixed_order_and_units() -> None:
     )
 
 
+def test_matrix_rules_expose_complete_account_specific_copy() -> None:
+    expected_phrases = {
+        "家美鲜鸡蛋 佳美鲜": "精确码数或重量区间展开",
+        "河北馆陶鸡蛋报价": "净重区间内各码使用同一报价",
+        "河南金咕咕蛋品": "区间边界重复时取较高价格",
+        "贵阳鸡蛋价格": "明确拆分低价、高价列",
+        "蓝天禽蛋联盟": "只纳入配置指定的目标市场",
+        "湖南三尖农牧公司": "精确码数或重量区间展开",
+        "成都鸡蛋价格": "价格区间拆低价、高价列",
+        "河北辛集城方蛋品": "精确码数或重量区间展开",
+        "江西九江褐壳蛋": "精确码数或重量区间展开",
+    }
+
+    assert {
+        rule.account_name: rule.description for rule in ACCOUNT_MATRIX_RULES
+    }.keys() == expected_phrases.keys()
+    for rule in ACCOUNT_MATRIX_RULES:
+        assert expected_phrases[rule.account_name] in rule.description
+        assert rule.unit in rule.description
+
+
 def test_matrix_always_contains_sizes_50_down_to_30() -> None:
     matrix = build_price_matrix([], date(2026, 7, 14))
 
@@ -99,6 +120,14 @@ def test_matrix_row_copies_cells_into_a_read_only_mapping() -> None:
     assert row.cells["example"].value == Decimal("1.00")
     with pytest.raises(TypeError):
         row.cells["example"] = PriceMatrixCell(value=None, source="empty")
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(None, ""), (Decimal("216.000"), "216"), (Decimal("4.950"), "4.95"), (Decimal("188.333333333333"), "188.333")],
+)
+def test_matrix_cell_formats_values_compactly(value, expected: str) -> None:
+    assert PriceMatrixCell(value=value, source="observed").display_value == expected
 
 
 def test_latest_article_wins_and_observed_value_is_not_overwritten() -> None:

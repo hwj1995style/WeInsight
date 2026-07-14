@@ -240,6 +240,28 @@ def test_price_results_render_matrix_groups_units_and_extrapolation(
     assert "取数规则" in response.text
 
 
+def test_price_matrix_renders_account_specific_rule_copy(
+    authenticated_client: TestClient,
+    result_service: FakeResultService,
+) -> None:
+    result_service.matrix = PriceMatrix(
+        **{
+            **result_service.matrix.__dict__,
+            "rules": (
+                AccountMatrixRule(
+                    "河南金咕咕蛋品",
+                    "元/斤",
+                    "按元/斤展示；规格区间展开；区间边界重复时取较高价格。",
+                ),
+            ),
+        }
+    )
+
+    response = authenticated_client.get("/results/prices")
+
+    assert "规格区间展开；区间边界重复时取较高价格" in response.text
+
+
 def test_price_matrix_has_scroll_and_accessibility_hooks(
     authenticated_client: TestClient,
 ) -> None:
