@@ -5,6 +5,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Generic, TypeVar
 
+from app.domain.price_matrix import PriceMatrix as PriceMatrix
+
 
 T = TypeVar("T")
 
