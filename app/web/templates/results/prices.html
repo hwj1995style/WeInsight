@@ -1,18 +1,47 @@
 {% extends "base.html" %}
-{% block title %}报价结果 · WeInsight{% endblock %}
+{% block title %}公众号报价矩阵 · WeInsight{% endblock %}
 {% block content %}
-  <div class="page-heading"><div><h1>统一报价明细</h1><p>核对原始报价文本、标准化价格与换算置信度。</p></div></div>
+  <div class="page-heading"><div><h1>公众号报价矩阵</h1><p>横向对比同日报价；推算值均标明计算依据。</p></div></div>
   <nav class="section-tabs" aria-label="结果类型"><a href="/results/groups">群消息</a><a href="/results/articles">文章</a><a href="/results/prices" aria-current="page">报价</a></nav>
   <form class="filter-panel" method="get" action="/results/prices">
-    <div><label for="account_name">公众号</label><input id="account_name" name="account_name" value="{{ values.get('account_name', '') }}"></div>
-    <div><label for="quote_date">报价日期</label><input id="quote_date" type="date" name="quote_date" value="{{ values.get('quote_date', '') }}"></div>
-    <div><label for="region">地区</label><input id="region" name="region" value="{{ values.get('region', '') }}"></div>
-    <div><label for="product_family">产品族</label><select id="product_family" name="product_family"><option value="">全部</option>{% for value in ['chicken_egg','duck_egg','quail_egg','preserved_egg','salted_egg','other_egg'] %}<option value="{{ value }}" {% if values.get('product_family') == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></div>
-    <div><label for="page_size">每页</label><select id="page_size" name="page_size">{% for size in [20, 50, 100] %}<option value="{{ size }}" {% if page.page_size == size %}selected{% endif %}>{{ size }}</option>{% endfor %}</select></div>
+    <div><label for="quote_date">报价日期</label><input id="quote_date" type="date" name="quote_date" value="{{ quote_date or '' }}"></div>
     <button type="submit">查询</button>
   </form>
   <section class="content-panel result-panel">
-    {% if prices %}<div class="table-scroll" tabindex="0" aria-label="报价结果明细"><table class="data-table results-table"><thead><tr><th scope="col">公众号 / 日期</th><th scope="col">地区 / 市场</th><th scope="col">产品 / 规格</th><th scope="col">原始报价</th><th scope="col">标准价格</th><th scope="col">涨跌</th><th scope="col">换算 / 置信度</th></tr></thead><tbody>{% for row in prices %}<tr><th scope="row">{{ row.account_name }}<br>{{ row.quote_date or '-' }}</th><td>{{ row.region or '-' }} / {{ row.market_name or '-' }}</td><td>{{ row.product_family }} / {{ row.product_name or '-' }} / {{ row.spec_text or '-' }}</td><td>{{ row.price_text or '-' }}<br>{{ row.price_low or '-' }}–{{ row.price_high or '-' }} {{ row.price_unit_text or '' }}</td><td>{{ row.standard_price_low or '-' }}–{{ row.standard_price_high or '-' }} {{ row.standard_price_unit }}</td><td>{{ row.change_text or '-' }} / {{ row.change_value or '-' }} / {{ row.trend }}</td><td>{{ row.conversion_method }} / {{ row.conversion_confidence }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state"><h2>暂无符合条件的报价明细</h2><p>调整筛选条件后重试。</p></div>{% endif %}
+    {% if matrix and matrix.columns %}
+      <p>报价日期：{{ matrix.quote_date }}{% if matrix.updated_at %} · 最近更新：{{ matrix.updated_at }}{% endif %} · 来源 {{ matrix.source_count }} 条</p>
+      <div class="table-scroll" tabindex="0" aria-label="公众号报价矩阵">
+        <table class="data-table results-table">
+          <thead>
+            <tr>
+              <th scope="col" rowspan="2">码数</th>
+              {% set header = namespace(account_name='') %}
+              {% for column in matrix.columns %}
+                {% if column.account_name != header.account_name %}
+                  {% set account_columns = matrix.columns | selectattr('account_name', 'equalto', column.account_name) | list %}
+                  <th scope="colgroup" colspan="{{ account_columns | length }}">{{ column.account_name | replace('蛋品', '') | replace('价格', '') }}（{{ column.unit }}）</th>
+                  {% set header.account_name = column.account_name %}
+                {% endif %}
+              {% endfor %}
+            </tr>
+            <tr>{% for column in matrix.columns %}<th scope="col">{{ column.label }}</th>{% endfor %}</tr>
+          </thead>
+          <tbody>
+            {% for row in matrix.rows %}
+              <tr>
+                <th scope="row">{{ row.size }}码</th>
+                {% for column in matrix.columns %}
+                  {% set cell = row.cells[column.key] %}
+                  <td data-price-source="{{ cell.source }}"{% if cell.explanation %} title="{{ cell.explanation }}"{% endif %}>{% if cell.value is not none %}{{ cell.value }}{% endif %}</td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <section aria-labelledby="price-matrix-rules"><h2 id="price-matrix-rules">取数规则</h2><div>{% for rule in matrix.rules %}<article><h3>{{ rule.account_name }}</h3><p>报价按{{ rule.unit }}展示；缺码推算值以提示说明为准。</p></article>{% endfor %}</div></section>
+    {% else %}
+      <div class="empty-state"><h2>暂无可展示的公众号报价</h2><p>请选择其他报价日期后重试。</p></div>
+    {% endif %}
   </section>
-  {% include "results/pagination.html" %}
 {% endblock %}

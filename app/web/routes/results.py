@@ -13,7 +13,6 @@ from fastapi.templating import Jinja2Templates
 from app.domain.admin_results import (
     ArticleDetailFilter,
     GroupDetailFilter,
-    PriceDetailFilter,
 )
 
 
@@ -87,27 +86,21 @@ async def article_results(request: Request) -> Response:
 async def price_results(request: Request) -> Response:
     try:
         values = _query_values(request)
-        page, page_size = _pagination(values)
-        filters = PriceDetailFilter(
-            account_name=_optional(values, "account_name"),
-            quote_date=_optional_date(values, "quote_date"),
-            region=_optional(values, "region"),
-            product_family=_optional(values, "product_family"),
-        )
-        result = await run_in_threadpool(
-            request.app.state.result_service.list_price_details,
-            filters,
-            page,
-            page_size,
+        requested_date = _optional_date(values, "quote_date")
+        matrix = await run_in_threadpool(
+            request.app.state.result_service.get_price_matrix,
+            requested_date,
         )
     except (TypeError, ValueError):
         return _error_response(request, "/results/prices")
-    return _results_response(
-        request,
-        "results/prices.html",
-        result,
-        values,
-        prices=result.items,
+    return templates.TemplateResponse(
+        request=request,
+        name="results/prices.html",
+        context={
+            "section": "results",
+            "matrix": matrix,
+            "quote_date": matrix.quote_date if matrix is not None else requested_date,
+        },
     )
 
 

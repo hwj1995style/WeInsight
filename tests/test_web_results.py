@@ -16,6 +16,13 @@ from app.domain.admin_results import (
     GroupDetailRow,
     PagedResult,
 )
+from app.domain.price_matrix import (
+    AccountMatrixRule,
+    PriceMatrix,
+    PriceMatrixCell,
+    PriceMatrixColumn,
+    PriceMatrixRow,
+)
 from app.services.auth_service import AuthenticatedAdmin
 from app.web.app import create_app
 from app.web.routes import results as result_routes
@@ -31,6 +38,38 @@ class FakeAuthService:
 class FakeResultService:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
+        columns = (
+            PriceMatrixColumn("henan:low", "河南金咕咕蛋品", "低价", "元/斤", "low"),
+            PriceMatrixColumn("henan:high", "河南金咕咕蛋品", "高价", "元/斤", "high"),
+            PriceMatrixColumn("guiyang:single", "贵阳鸡蛋价格", "报价", "元/箱", "single"),
+        )
+        self.matrix: PriceMatrix | None = PriceMatrix(
+            quote_date=date(2026, 7, 14),
+            updated_at=datetime(2026, 7, 14, 9, 30),
+            source_count=3,
+            columns=columns,
+            rows=tuple(
+                PriceMatrixRow(
+                    size=size,
+                    cells={
+                        "henan:low": PriceMatrixCell(Decimal("4.80"), "observed"),
+                        "henan:high": PriceMatrixCell(Decimal("5.00"), "observed"),
+                        "guiyang:single": PriceMatrixCell(
+                            Decimal("236") if size == 50 else Decimal("216"),
+                            "extrapolated" if size == 50 else "observed",
+                            "依据 39码 214 与 40码 216，按每码 +2 向高码推算"
+                            if size == 50
+                            else None,
+                        ),
+                    },
+                )
+                for size in range(50, 29, -1)
+            ),
+            rules=(
+                AccountMatrixRule("河南金咕咕蛋品", "元/斤"),
+                AccountMatrixRule("贵阳鸡蛋价格", "元/箱"),
+            ),
+        )
 
     def list_group_details(self, filters, page: int, page_size: int):
         self.calls.append(("group", filters, page, page_size))
@@ -108,6 +147,10 @@ class FakeResultService:
             total_count=1,
         )
 
+    def get_price_matrix(self, quote_date):
+        self.calls.append(("price_matrix", quote_date))
+        return self.matrix
+
 
 @pytest.fixture
 def config() -> Config:
@@ -182,18 +225,49 @@ def test_article_results_do_not_render_original_or_hidden_fields(
         assert forbidden.lower() not in response.text.lower()
 
 
-def test_price_results_show_normalized_values_without_raw_payload(
+def test_price_results_render_matrix_groups_units_and_extrapolation(
     authenticated_client: TestClient,
 ) -> None:
-    response = authenticated_client.get(
-        "/results/prices?quote_date=2026-07-10&region=%E5%8D%8E%E4%B8%9C"
-    )
+    response = authenticated_client.get("/results/prices?quote_date=2026-07-14")
 
     assert response.status_code == 200
-    assert "3.10" in response.text
-    assert "CNY/500g" in response.text
-    assert "raw_json" not in response.text
-    assert "article_url" not in response.text
+    assert "公众号报价矩阵" in response.text
+    assert "河南金咕咕（元/斤）" in response.text
+    assert "贵阳鸡蛋" in response.text
+    assert "低价" in response.text and "高价" in response.text
+    assert 'data-price-source="extrapolated"' in response.text
+    assert "依据 39码 214 与 40码 216" in response.text
+    assert "取数规则" in response.text
+
+
+def test_price_matrix_uses_service_default_date_and_never_renders_sensitive_fields(
+    authenticated_client: TestClient,
+    result_service: FakeResultService,
+) -> None:
+    response = authenticated_client.get("/results/prices")
+
+    assert response.status_code == 200
+    assert 'name="quote_date" value="2026-07-14"' in response.text
+    assert result_service.calls[-1] == ("price_matrix", None)
+    for forbidden in (
+        "article_url",
+        "raw_row_json",
+        "runtime_content",
+        "https://mp.weixin.qq.com",
+    ):
+        assert forbidden not in response.text
+
+
+def test_price_matrix_empty_state(
+    authenticated_client: TestClient,
+    result_service: FakeResultService,
+) -> None:
+    result_service.matrix = None
+
+    response = authenticated_client.get("/results/prices")
+
+    assert response.status_code == 200
+    assert "暂无可展示的公众号报价" in response.text
 
 
 def test_result_templates_autoescape_untrusted_safe_dto_text(
@@ -278,7 +352,7 @@ def test_result_service_calls_run_in_threadpool(
     assert calls == [
         "list_group_details",
         "list_article_details",
-        "list_price_details",
+        "get_price_matrix",
     ]
 
 
