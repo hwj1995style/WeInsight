@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from urllib.parse import urlencode
 from pathlib import Path
 
 from fastapi import APIRouter, Request
@@ -171,7 +170,7 @@ async def article_list(
     except ValueError as exc:
         return _source_error_response(request, exc, "/sources/articles")
     start_date, end_date = request.app.state.article_downstream_service.default_backfill_dates(datetime.now())
-    summary = _summary_from_query(request)
+    summary = _take_downstream_flash(request)
     return templates.TemplateResponse(
         request=request,
         name="sources/articles.html",
@@ -229,8 +228,8 @@ async def article_downstream_backfill(request: Request) -> Response:
         return _downstream_error(request, exc, 422)
     except ArticleDownstreamSourceUnavailableError as exc:
         return _downstream_error(request, exc, 404)
-    query = urlencode({name: getattr(summary, name) for name in _SUMMARY_FIELDS})
-    return RedirectResponse(f"/sources/articles?{query}", status_code=303)
+    _set_downstream_flash(request, summary)
+    return RedirectResponse("/sources/articles", status_code=303)
 
 
 async def _set_enabled(
@@ -300,13 +299,12 @@ async def _form_values(request: Request) -> dict[str, str]:
     form = await request.form()
     values: dict[str, str] = {}
     for key, value in form.multi_items():
-        if key == "csrf_token":
-            continue
         if key in values:
             raise ValueError("duplicate form field")
         if not isinstance(value, str):
             raise ValueError("invalid form field")
         values[key] = value
+    values.pop("csrf_token", None)
     return values
 
 
@@ -341,18 +339,24 @@ _SUMMARY_FIELDS = (
 )
 
 
-def _summary_from_query(request: Request) -> dict[str, int] | None:
-    if not any(name in request.query_params for name in _SUMMARY_FIELDS):
+def _flash_key(request: Request) -> str | None:
+    return request.cookies.get(request.app.state.config.auth.session_cookie_name)
+
+
+def _set_downstream_flash(request: Request, summary: object) -> None:
+    key = _flash_key(request)
+    if key:
+        request.app.state.article_downstream_flashes[key] = {
+            name: min(max(int(getattr(summary, name)), 0), 1_000_000_000)
+            for name in _SUMMARY_FIELDS
+        }
+
+
+def _take_downstream_flash(request: Request) -> dict[str, int] | None:
+    key = _flash_key(request)
+    if not key:
         return None
-    if set(request.query_params) - {"page", "page_size", *_SUMMARY_FIELDS}:
-        return None
-    summary: dict[str, int] = {}
-    for name in _SUMMARY_FIELDS:
-        values = request.query_params.getlist(name)
-        if len(values) != 1 or not values[0].isdigit():
-            return None
-        summary[name] = min(int(values[0]), 1_000_000_000)
-    return summary
+    return request.app.state.article_downstream_flashes.pop(key, None)
 
 
 def _downstream_error(request: Request, exc: Exception, status_code: int) -> Response:

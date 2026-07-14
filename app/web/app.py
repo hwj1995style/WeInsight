@@ -95,6 +95,7 @@ def create_app(
         lifespan=_lifespan,
     )
     app.state.config = config
+    app.state.article_downstream_flashes = {}
     engine = None
     if any(
         service is None

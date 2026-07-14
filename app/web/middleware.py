@@ -15,6 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+_INVALID_CSRF_FORM = "\0invalid-csrf-form"
 
 
 class AdminSessionMiddleware(BaseHTTPMiddleware):
@@ -46,6 +47,8 @@ class AdminSessionMiddleware(BaseHTTPMiddleware):
         request.state.csrf_token = csrf_cookie
         if request.method in UNSAFE_METHODS:
             request_token = await _request_csrf_token(request)
+            if request_token == _INVALID_CSRF_FORM:
+                return Response("Invalid form fields", status_code=422)
             if (
                 not csrf_cookie
                 or not request_token
@@ -84,8 +87,6 @@ def _unauthenticated_response(request: Request) -> Response:
 
 async def _request_csrf_token(request: Request) -> str | None:
     header_token = request.headers.get("x-csrf-token")
-    if header_token:
-        return header_token
     content_type = request.headers.get("content-type", "").lower()
     if "application/x-www-form-urlencoded" in content_type:
         body = await request.body()
@@ -95,7 +96,12 @@ async def _request_csrf_token(request: Request) -> str | None:
             return None
         values = parse_qs(decoded_body, keep_blank_values=True)
         tokens = values.get("csrf_token")
-        return tokens[0] if tokens else None
+        if tokens and len(tokens) != 1:
+            return _INVALID_CSRF_FORM
+        body_token = tokens[0] if tokens else None
+        if header_token and body_token and not secrets.compare_digest(header_token, body_token):
+            return _INVALID_CSRF_FORM
+        return header_token or body_token
     if "multipart/form-data" in content_type:
         try:
             await request.body()
@@ -106,9 +112,14 @@ async def _request_csrf_token(request: Request) -> str | None:
             raise
         except (MultiPartException, ValueError):
             return None
-        value = form.get("csrf_token")
-        return value if isinstance(value, str) else None
-    return None
+        values = form.getlist("csrf_token")
+        if len(values) > 1 or any(not isinstance(value, str) for value in values):
+            return _INVALID_CSRF_FORM
+        body_token = values[0] if values else None
+        if header_token and body_token and not secrets.compare_digest(header_token, body_token):
+            return _INVALID_CSRF_FORM
+        return header_token or body_token
+    return header_token
 
 
 def _now(timezone_name: str) -> datetime:

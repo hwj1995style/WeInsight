@@ -377,7 +377,7 @@ def test_article_list_uses_stable_ids_and_escapes_names(
 ) -> None:
     response = authenticated_client.get("/sources/articles")
     assert response.status_code == 200
-    assert "<script>" not in response.text
+    assert "行业观察<script>" not in response.text
     assert "&lt;script&gt;" in response.text
     assert 'action="/sources/articles/7/downstream-processing"' in response.text
 
@@ -907,9 +907,40 @@ def test_backfill_uses_prg_with_count_only_summary(authenticated_client, article
         follow_redirects=False,
     )
     assert response.status_code == 303
-    assert "matched_article_count=9" in response.headers["location"]
+    assert response.headers["location"] == "/sources/articles"
     page = authenticated_client.get(response.headers["location"])
     assert "命中文章 9" in page.text
+    assert "命中文章 9" not in authenticated_client.get("/sources/articles").text
+
+
+def test_forged_backfill_summary_query_is_ignored(authenticated_client):
+    query = "&".join(f"{name}=999" for name in (
+        "matched_article_count", "clean_task_created_count", "clean_task_recovered_count",
+        "analyze_task_created_count", "analyze_task_recovered_count",
+        "existing_result_skipped_count", "running_task_skipped_count", "out_of_scope_skipped_count",
+    ))
+    assert "补处理任务已提交" not in authenticated_client.get(f"/sources/articles?{query}").text
+
+
+def test_duplicate_csrf_is_rejected_before_downstream_service(authenticated_client, article_downstream_service):
+    response = authenticated_client.post(
+        "/sources/articles/7/downstream-processing",
+        content="csrf_token=csrf-token&csrf_token=csrf-token&enabled=1",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert response.status_code == 422
+    assert article_downstream_service.calls == []
+
+
+def test_downstream_form_exposes_accessible_scope_mode_and_confirmation_linkage(authenticated_client):
+    html = authenticated_client.get("/sources/articles").text
+    assert 'id="downstream-scope"' in html
+    assert 'id="downstream-source"' in html
+    assert 'id="downstream-mode"' in html
+    assert 'id="force-confirm"' in html
+    assert 'onsubmit="return confirm(' in html
+    assert "downstream-scope" in html and "sourceSelect.required = single" in html
+    assert "forceConfirm.required = force" in html
 
 
 @pytest.mark.parametrize("checkbox_value", ["yes", "off", "TRUE", "2"])
