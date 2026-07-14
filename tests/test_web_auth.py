@@ -210,6 +210,15 @@ def test_public_get_routes_and_static_files_bypass_authentication(
     assert auth_service.authenticate_calls == []
 
 
+def test_login_stylesheet_url_is_versioned_to_bust_browser_cache(
+    raw_client: TestClient,
+) -> None:
+    response = raw_client.get("/login")
+
+    assert response.status_code == 200
+    assert '/static/app.css?v=' in response.text
+
+
 def test_favicon_request_does_not_rotate_login_csrf_cookie(
     raw_client: TestClient,
 ) -> None:
