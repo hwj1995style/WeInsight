@@ -271,6 +271,9 @@ def test_price_matrix_has_scroll_and_accessibility_hooks(
     assert 'aria-label="公众号报价矩阵，可横向滚动"' in response.text
     assert 'scope="row"' in response.text
     assert 'class="price-cell price-cell-extrapolated"' in response.text
+    assert 'tabindex="0"' in response.text
+    assert 'aria-label="236，推算；依据 39码 214 与 40码 216，按每码 +2 向高码推算"' in response.text
+    assert 'data-price-source="observed" tabindex="0"' not in response.text
 
 
 def test_price_matrix_uses_service_default_date_and_never_renders_sensitive_fields(

@@ -25,6 +25,8 @@ def source_row(
     weight_high: int | str | Decimal | None = 40,
     price_low: str | Decimal | None = "216",
     price_high: str | Decimal | None = None,
+    market_name: str | None = None,
+    spec_text: str | None = None,
 ) -> PriceMatrixSourceRow:
     decimal_or_none = lambda value: None if value is None else Decimal(value)
     return PriceMatrixSourceRow(
@@ -35,10 +37,10 @@ def source_row(
         publish_time=publish_time,
         analyze_time=publish_time,
         region=None,
-        market_name=None,
+        market_name=market_name,
         product_family=product_family,
         include_in_egg_price=include_in_egg_price,
-        spec_text=None,
+        spec_text=spec_text,
         weight_low=decimal_or_none(weight_low),
         weight_high=decimal_or_none(weight_high),
         price_low=decimal_or_none(price_low),
@@ -103,6 +105,19 @@ def test_matrix_rules_expose_complete_account_specific_copy() -> None:
         assert rule.unit in rule.description
 
 
+def test_lantian_rule_without_verified_target_market_fails_closed() -> None:
+    rule = next(rule for rule in ACCOUNT_MATRIX_RULES if rule.account_name == "蓝天禽蛋联盟")
+    assert rule.target_market is None
+
+    matrix = build_price_matrix(
+        [source_row(account_name="蓝天禽蛋联盟", market_name="任意市场")],
+        date(2026, 7, 14),
+    )
+
+    assert matrix.columns == ()
+    assert matrix.source_count == 0
+
+
 def test_matrix_always_contains_sizes_50_down_to_30() -> None:
     matrix = build_price_matrix([], date(2026, 7, 14))
 
@@ -160,6 +175,60 @@ def test_weight_range_expands_and_price_range_splits_columns() -> None:
 
     assert cell_value(matrix, 39, "guiyang:low") == Decimal("214")
     assert cell_value(matrix, 40, "guiyang:high") == Decimal("219")
+
+
+@pytest.mark.parametrize(
+    ("spec_text", "sizes"),
+    [
+        ("40码", (40,)),
+        ("40斤", (40,)),
+        ("40-41码", (40, 41)),
+        ("40-41斤", (40, 41)),
+        ("40至41码", (40, 41)),
+        ("40至41斤", (40, 41)),
+    ],
+)
+def test_spec_text_falls_back_to_exact_or_range_when_weights_are_missing(
+    spec_text: str, sizes: tuple[int, ...]
+) -> None:
+    matrix = build_price_matrix(
+        [source_row(weight_low=None, weight_high=None, spec_text=spec_text)],
+        date(2026, 7, 14),
+    )
+
+    assert tuple(
+        row.size
+        for row in matrix.rows
+        if row.cells["jiameixian:single"].source == "observed"
+    ) == tuple(reversed(sizes))
+
+
+def test_unresolved_non_henan_conflict_is_not_known_and_may_be_extrapolated() -> None:
+    matrix = build_price_matrix(
+        [
+            source_row(row_id=1, weight_low=39, weight_high=39, price_low="210"),
+            source_row(row_id=2, weight_low=39, weight_high=39, price_low="212"),
+            source_row(row_id=3, weight_low=40, weight_high=40, price_low="214"),
+            source_row(row_id=4, weight_low=41, weight_high=41, price_low="216"),
+        ],
+        date(2026, 7, 14),
+    )
+
+    conflicted = cell(matrix, 39, "jiameixian:single")
+    assert conflicted.source == "extrapolated"
+    assert conflicted.value == Decimal("212")
+    assert "原始报价冲突" in (conflicted.explanation or "")
+
+
+def test_identical_non_henan_candidates_merge_as_observed() -> None:
+    matrix = build_price_matrix(
+        [source_row(row_id=1), source_row(row_id=2)],
+        date(2026, 7, 14),
+    )
+
+    assert cell(matrix, 40, "jiameixian:single") == PriceMatrixCell(
+        Decimal("216"), "observed"
+    )
 
 
 def test_henan_boundary_collision_uses_higher_price() -> None:

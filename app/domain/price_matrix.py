@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
+import re
 from types import MappingProxyType
 from collections import defaultdict
 from typing import Literal, Mapping, Sequence
@@ -17,6 +18,7 @@ class AccountMatrixRule:
     account_name: str
     unit: str
     description: str = ""
+    target_market: str | None = None
 
 
 @dataclass(frozen=True)
@@ -112,14 +114,21 @@ _ACCOUNT_KEYS = {
 def select_latest_article_rows(
     rows: Sequence[PriceMatrixSourceRow], quote_date: date
 ) -> tuple[PriceMatrixSourceRow, ...]:
-    eligible = [
-        row
-        for row in rows
-        if row.quote_date == quote_date
-        and row.account_name in _ACCOUNT_KEYS
-        and row.include_in_egg_price
-        and row.product_family == "chicken_egg"
-    ]
+    rules_by_account = {rule.account_name: rule for rule in ACCOUNT_MATRIX_RULES}
+    eligible = []
+    for row in rows:
+        rule = rules_by_account.get(row.account_name)
+        if (
+            rule is None
+            or row.quote_date != quote_date
+            or not row.include_in_egg_price
+            or row.product_family != "chicken_egg"
+        ):
+            continue
+        if row.account_name == "蓝天禽蛋联盟":
+            if rule.target_market is None or row.market_name != rule.target_market:
+                continue
+        eligible.append(row)
     by_account_and_article: dict[
         tuple[str, str], list[PriceMatrixSourceRow]
     ] = defaultdict(list)
@@ -183,12 +192,10 @@ def map_observed_cells(
         column.key: {} for column in columns
     }
     for row in rows:
-        if row.weight_low is None or row.weight_high is None or row.price_low is None:
+        size_range = _row_size_range(row)
+        if size_range is None or row.price_low is None:
             continue
-        low_size = max(30, int(row.weight_low))
-        high_size = min(50, int(row.weight_high))
-        if low_size > high_size:
-            continue
+        low_size, high_size = size_range
         has_split_columns = (row.account_name, "low") in column_by_account_and_side
         prices: tuple[tuple[PriceSide, Decimal | None], ...] = (
             (("low", row.price_low), ("high", row.price_high))
@@ -201,13 +208,41 @@ def map_observed_cells(
                 continue
             for size in range(low_size, high_size + 1):
                 existing = observed[column.key].get(size)
-                if existing is None or (
-                    row.account_name == "河南金咕咕蛋品"
-                    and existing.value is not None
-                    and price > existing.value
-                ):
+                if existing is None:
                     observed[column.key][size] = PriceMatrixCell(price, "observed")
+                elif existing.value == price:
+                    continue
+                elif row.account_name == "河南金咕咕蛋品":
+                    if existing.value is None or price > existing.value:
+                        observed[column.key][size] = PriceMatrixCell(price, "observed")
+                else:
+                    observed[column.key][size] = PriceMatrixCell(
+                        None,
+                        "empty",
+                        "同一账号同一码数存在不同原始报价，按规则无法决胜，已留空",
+                    )
     return observed
+
+
+_SPEC_SIZE_PATTERN = re.compile(
+    r"(?<!\d)(3\d|4\d|50)\s*(?:[-—–~～至到]\s*(3\d|4\d|50))?\s*(?:码|斤)"
+)
+
+
+def _row_size_range(row: PriceMatrixSourceRow) -> tuple[int, int] | None:
+    if row.weight_low is not None and row.weight_high is not None:
+        low_size = max(30, int(row.weight_low))
+        high_size = min(50, int(row.weight_high))
+    else:
+        match = _SPEC_SIZE_PATTERN.search(row.spec_text or "")
+        if match is None:
+            return None
+        first = int(match.group(1))
+        second = int(match.group(2) or first)
+        low_size, high_size = sorted((first, second))
+    if low_size > high_size:
+        return None
+    return low_size, high_size
 
 
 def _format_decimal(value: Decimal) -> str:
@@ -227,7 +262,8 @@ def extrapolate_missing_cells(
         )
         pairs = list(zip(known, known[1:]))
         for target in range(30, 51):
-            if target in cells:
+            existing = cells.get(target)
+            if existing is not None and existing.source != "empty":
                 continue
             if not pairs:
                 cells[target] = PriceMatrixCell(None, "empty")
@@ -255,6 +291,8 @@ def extrapolate_missing_cells(
                 f"{high_size}码 {_format_decimal(high_price)}，"
                 f"按每码 {signed_delta} 向{direction}推算"
             )
+            if existing is not None and existing.explanation:
+                explanation = f"原始报价冲突未参与计算；{explanation}"
             cells[target] = PriceMatrixCell(value, "extrapolated", explanation)
         completed[column_key] = cells
     return completed
