@@ -67,9 +67,14 @@ class MysqlSafeResultQueryRepo:
             WHERE p.quote_date = :quote_date
               AND p.account_name IN ({placeholders})
               AND p.include_in_egg_price = 1
+              AND p.product_family = :product_family
             ORDER BY p.account_name, p.publish_time DESC, p.article_hash, p.id
         """
-        params = {"quote_date": quote_date, **account_params}
+        params = {
+            "quote_date": quote_date,
+            "product_family": "chicken_egg",
+            **account_params,
+        }
         with self.engine.begin() as connection:
             rows = connection.execute(text(sql), params).mappings().all()
         return [self._matrix_from_row(row) for row in rows]

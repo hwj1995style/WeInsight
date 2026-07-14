@@ -100,9 +100,11 @@ def test_matrix_query_is_account_scoped_and_selects_only_safe_fields() -> None:
     assert "p.quote_date = :quote_date" in normalized
     assert "p.account_name IN" in normalized
     assert "p.include_in_egg_price = 1" in normalized
+    assert "p.product_family = :product_family" in normalized
     assert "p.article_hash AS article_hash" in sql
     assert "p.weight_low AS weight_low" in sql
     assert params["quote_date"] == date(2026, 7, 14)
+    assert params["product_family"] == "chicken_egg"
     assert tuple(params[f"account_{i}"] for i in range(9)) == NINE_ACCOUNT_NAMES
     for forbidden in ("article_url", "raw_row_json", "raw_headers_json", "runtime_content"):
         assert forbidden not in sql
