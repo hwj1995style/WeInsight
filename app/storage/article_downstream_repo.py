@@ -23,7 +23,7 @@ class MysqlArticleDownstreamRepo:
                 update_time = CURRENT_TIMESTAMP
             WHERE config.id = :source_id
               AND config.werss_source_id IS NOT NULL
-              AND config.upstream_status = 'active'
+              AND config.upstream_status IN ('active', 'disabled')
               AND {_NORMALIZED_NAME_SQL} <> '一箱蛋'
             """
         )
@@ -67,7 +67,7 @@ class MysqlArticleDownstreamRepo:
              AND analyze_task.ref_id = raw.article_hash
             WHERE {scope_clause}
               AND config.werss_source_id IS NOT NULL
-              AND config.upstream_status = 'active'
+              AND config.upstream_status IN ('active', 'disabled')
               AND {_NORMALIZED_NAME_SQL} <> '一箱蛋'
               AND raw.publish_date BETWEEN :start_date AND :end_date
             ORDER BY raw.article_hash
@@ -90,7 +90,7 @@ class MysqlArticleDownstreamRepo:
                 if command.mode == "force_analyze":
                     if not has_clean:
                         out_of_scope += 1
-                    elif analyze_status == "running":
+                    elif analyze_status in {"pending", "running"}:
                         running_skipped += 1
                     else:
                         writes.append(("analyze_article", article_hash))
@@ -122,9 +122,7 @@ class MysqlArticleDownstreamRepo:
 
             for task_type, article_hash in writes:
                 connection.execute(
-                    _UPSERT_FORCE_ANALYZE_TASK_SQL
-                    if command.mode == "force_analyze"
-                    else _UPSERT_TASK_SQL,
+                    _UPSERT_TASK_SQL,
                     {"task_type": task_type, "ref_id": article_hash, "next_run_time": now},
                 )
 
@@ -147,22 +145,5 @@ _UPSERT_TASK_SQL = text(
         error_msg = IF(status IN ('pending', 'running'), error_msg, NULL),
         update_time = IF(status IN ('pending', 'running'), update_time, CURRENT_TIMESTAMP),
         status = IF(status IN ('pending', 'running'), status, 'pending')
-    """
-)
-
-
-_UPSERT_FORCE_ANALYZE_TASK_SQL = text(
-    """
-    INSERT INTO wechat_article_process_task (
-        task_type, ref_type, ref_id, status, retry_count, next_run_time, error_msg
-    ) VALUES (
-        :task_type, 'article', :ref_id, 'pending', 0, :next_run_time, NULL
-    )
-    ON DUPLICATE KEY UPDATE
-        retry_count = IF(status = 'running', retry_count, 0),
-        next_run_time = IF(status = 'running', next_run_time, VALUES(next_run_time)),
-        error_msg = IF(status = 'running', error_msg, NULL),
-        update_time = IF(status = 'running', update_time, CURRENT_TIMESTAMP),
-        status = IF(status = 'running', status, 'pending')
     """
 )
