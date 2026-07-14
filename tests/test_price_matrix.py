@@ -186,6 +186,8 @@ def test_weight_range_expands_and_price_range_splits_columns() -> None:
         ("40-41斤", (40, 41)),
         ("40至41码", (40, 41)),
         ("40至41斤", (40, 41)),
+        ("40斤-41斤", (40, 41)),
+        ("40码至41码", (40, 41)),
     ],
 )
 def test_spec_text_falls_back_to_exact_or_range_when_weights_are_missing(

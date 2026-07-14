@@ -224,9 +224,11 @@ def map_observed_cells(
     return observed
 
 
-_SPEC_SIZE_PATTERN = re.compile(
-    r"(?<!\d)(3\d|4\d|50)\s*(?:[-—–~～至到]\s*(3\d|4\d|50))?\s*(?:码|斤)"
+_SPEC_RANGE_PATTERN = re.compile(
+    r"(?<!\d)(3\d|4\d|50)\s*(?:码|斤)?\s*[-—–~～至到]\s*"
+    r"(3\d|4\d|50)\s*(?:码|斤)"
 )
+_SPEC_EXACT_PATTERN = re.compile(r"(?<!\d)(3\d|4\d|50)\s*(?:码|斤)")
 
 
 def _row_size_range(row: PriceMatrixSourceRow) -> tuple[int, int] | None:
@@ -234,11 +236,16 @@ def _row_size_range(row: PriceMatrixSourceRow) -> tuple[int, int] | None:
         low_size = max(30, int(row.weight_low))
         high_size = min(50, int(row.weight_high))
     else:
-        match = _SPEC_SIZE_PATTERN.search(row.spec_text or "")
-        if match is None:
+        text = row.spec_text or ""
+        range_match = _SPEC_RANGE_PATTERN.search(text)
+        exact_match = _SPEC_EXACT_PATTERN.search(text)
+        if range_match is not None:
+            first = int(range_match.group(1))
+            second = int(range_match.group(2))
+        elif exact_match is not None:
+            first = second = int(exact_match.group(1))
+        else:
             return None
-        first = int(match.group(1))
-        second = int(match.group(2) or first)
         low_size, high_size = sorted((first, second))
     if low_size > high_size:
         return None
