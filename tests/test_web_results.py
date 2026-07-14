@@ -240,6 +240,17 @@ def test_price_results_render_matrix_groups_units_and_extrapolation(
     assert "取数规则" in response.text
 
 
+def test_price_matrix_has_scroll_and_accessibility_hooks(
+    authenticated_client: TestClient,
+) -> None:
+    response = authenticated_client.get("/results/prices")
+
+    assert 'class="table-scroll price-matrix-scroll"' in response.text
+    assert 'aria-label="公众号报价矩阵，可横向滚动"' in response.text
+    assert 'scope="row"' in response.text
+    assert 'class="price-cell price-cell-extrapolated"' in response.text
+
+
 def test_price_matrix_uses_service_default_date_and_never_renders_sensitive_fields(
     authenticated_client: TestClient,
     result_service: FakeResultService,

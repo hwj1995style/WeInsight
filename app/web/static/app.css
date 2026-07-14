@@ -137,6 +137,27 @@ form button { margin-top: 1.25rem; }
 .filter-panel button { min-height: 40px; margin: 0; }
 .result-panel { padding: 0; overflow: hidden; }
 .results-table { min-width: 1050px; }
+.price-matrix { --price-matrix-green: #eaf6ee; --price-matrix-green-soft: #f4faf6; --price-matrix-grid: #d8e5dc; }
+.price-matrix-summary { margin: 0; padding: 1rem 1.25rem; color: var(--color-muted); font-size: .86rem; border-bottom: 1px solid var(--price-matrix-grid); }
+.price-matrix-scroll { position: relative; max-width: 100%; overscroll-behavior-inline: contain; box-shadow: inset -12px 0 12px -14px rgb(23 63 43 / 60%); }
+.price-matrix-scroll:focus-visible { outline-color: rgb(22 133 91 / 38%); outline-offset: -3px; }
+.price-matrix .price-matrix-table { min-width: 900px; table-layout: fixed; text-align: center; }
+.price-matrix .price-matrix-table th,
+.price-matrix .price-matrix-table td { min-width: 7.25rem; height: 42px; padding: .55rem .75rem; border-color: var(--price-matrix-grid); }
+.price-matrix .price-matrix-table thead th { position: sticky; z-index: 3; color: #27533b; background: var(--price-matrix-green); text-align: center; text-transform: none; }
+.price-matrix .price-matrix-table thead tr:first-child th { top: 0; }
+.price-matrix .price-matrix-table thead tr:nth-child(2) th { top: 42px; background: var(--price-matrix-green-soft); }
+.price-matrix .price-matrix-table thead th:first-child { left: 0; z-index: 5; width: 6rem; min-width: 6rem; }
+.price-matrix .price-matrix-table tbody th { position: sticky; left: 0; z-index: 2; width: 6rem; min-width: 6rem; color: #33443a; background: #fff; text-align: center; white-space: nowrap; box-shadow: 1px 0 0 var(--price-matrix-grid); }
+.price-matrix .price-cell { color: #27372e; text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.price-matrix .price-cell-extrapolated { color: #88520d; background: #fff4e5; }
+.price-matrix .price-cell-note { display: inline-block; margin-left: .35rem; padding: .08rem .28rem; color: #935c18; background: #ffe4bd; border-radius: 3px; font-size: .64rem; font-weight: 700; vertical-align: .08rem; }
+.price-matrix-rules { padding: 1.25rem; border-top: 1px solid var(--price-matrix-grid); }
+.price-matrix-rules h2 { margin: 0 0 .8rem; font-size: 1rem; }
+.price-matrix-rule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .75rem; }
+.price-matrix-rule-grid article { padding: .85rem 1rem; background: #f8faf9; border: 1px solid var(--price-matrix-grid); border-radius: 8px; }
+.price-matrix-rule-grid h3 { margin: 0 0 .35rem; font-size: .88rem; }
+.price-matrix-rule-grid p { margin: 0; color: var(--color-muted); font-size: .8rem; line-height: 1.55; }
 .content-cell { min-width: 16rem; max-width: 28rem; white-space: normal; overflow-wrap: anywhere; }
 .report-filters { grid-template-columns: repeat(4, minmax(0, 1fr)) auto; }
 .report-request-panel { display: grid; grid-template-columns: minmax(14rem, .75fr) minmax(0, 1.25fr); gap: 2rem; margin-bottom: 1.25rem; }
@@ -294,6 +315,13 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .runtime-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .run-trend-chart { height: 320px; }
   .event-list li, .compact-events li { grid-template-columns: 1fr; gap: .25rem; }
+}
+
+@media (max-width: 760px) {
+  .price-matrix-summary { padding-inline: 1rem; }
+  .price-matrix-rules { padding: 1rem; }
+  .price-matrix-rule-grid { grid-template-columns: 1fr; }
+  .price-matrix-rule-grid article { padding: .8rem .9rem; }
 }
 
 @media (max-width: 420px) {

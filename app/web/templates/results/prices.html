@@ -7,11 +7,11 @@
     <div><label for="quote_date">报价日期</label><input id="quote_date" type="date" name="quote_date" value="{{ quote_date or '' }}"></div>
     <button type="submit">查询</button>
   </form>
-  <section class="content-panel result-panel">
+  <section class="content-panel result-panel price-matrix">
     {% if matrix and matrix.columns %}
-      <p>报价日期：{{ matrix.quote_date }}{% if matrix.updated_at %} · 最近更新：{{ matrix.updated_at }}{% endif %} · 来源 {{ matrix.source_count }} 条</p>
-      <div class="table-scroll" tabindex="0" aria-label="公众号报价矩阵">
-        <table class="data-table results-table">
+      <p class="price-matrix-summary">报价日期：{{ matrix.quote_date }}{% if matrix.updated_at %} · 最近更新：{{ matrix.updated_at }}{% endif %} · 来源 {{ matrix.source_count }} 条</p>
+      <div class="table-scroll price-matrix-scroll" tabindex="0" aria-label="公众号报价矩阵，可横向滚动">
+        <table class="data-table results-table price-matrix-table">
           <thead>
             <tr>
               <th scope="col" rowspan="2">码数</th>
@@ -32,14 +32,14 @@
                 <th scope="row">{{ row.size }}码</th>
                 {% for column in matrix.columns %}
                   {% set cell = row.cells[column.key] %}
-                  <td data-price-source="{{ cell.source }}"{% if cell.explanation %} title="{{ cell.explanation }}"{% endif %}>{% if cell.value is not none %}{{ cell.value }}{% endif %}</td>
+                  <td class="price-cell{% if cell.source == 'extrapolated' %} price-cell-extrapolated{% endif %}" data-price-source="{{ cell.source }}"{% if cell.explanation %} title="{{ cell.explanation }}"{% endif %}>{% if cell.value is not none %}{{ cell.value }}{% endif %}{% if cell.source == 'extrapolated' %}<span class="price-cell-note">推算</span>{% endif %}</td>
                 {% endfor %}
               </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
-      <section aria-labelledby="price-matrix-rules"><h2 id="price-matrix-rules">取数规则</h2><div>{% for rule in matrix.rules %}<article><h3>{{ rule.account_name }}</h3><p>报价按{{ rule.unit }}展示；缺码推算值以提示说明为准。</p></article>{% endfor %}</div></section>
+      <section class="price-matrix-rules" aria-labelledby="price-matrix-rules"><h2 id="price-matrix-rules">取数规则</h2><div class="price-matrix-rule-grid">{% for rule in matrix.rules %}<article><h3>{{ rule.account_name }}</h3><p>报价按{{ rule.unit }}展示；缺码推算值以提示说明为准。</p></article>{% endfor %}</div></section>
     {% else %}
       <div class="empty-state"><h2>暂无可展示的公众号报价</h2><p>请选择其他报价日期后重试。</p></div>
     {% endif %}
