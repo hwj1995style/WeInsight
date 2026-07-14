@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from time import monotonic
 from pathlib import Path
 
 from fastapi import APIRouter, Request
@@ -337,6 +338,8 @@ _SUMMARY_FIELDS = (
     "analyze_task_created_count", "analyze_task_recovered_count",
     "existing_result_skipped_count", "running_task_skipped_count", "out_of_scope_skipped_count",
 )
+_FLASH_TTL_SECONDS = 300.0
+_FLASH_CAPACITY = 128
 
 
 def _flash_key(request: Request) -> str | None:
@@ -346,17 +349,34 @@ def _flash_key(request: Request) -> str | None:
 def _set_downstream_flash(request: Request, summary: object) -> None:
     key = _flash_key(request)
     if key:
-        request.app.state.article_downstream_flashes[key] = {
+        store = request.app.state.article_downstream_flashes
+        now = monotonic()
+        _prune_downstream_flashes(store, now)
+        store.pop(key, None)
+        store[key] = (now + _FLASH_TTL_SECONDS, {
             name: min(max(int(getattr(summary, name)), 0), 1_000_000_000)
             for name in _SUMMARY_FIELDS
-        }
+        })
+        _prune_downstream_flashes(store, now)
 
 
 def _take_downstream_flash(request: Request) -> dict[str, int] | None:
     key = _flash_key(request)
     if not key:
         return None
-    return request.app.state.article_downstream_flashes.pop(key, None)
+    store = request.app.state.article_downstream_flashes
+    now = monotonic()
+    _prune_downstream_flashes(store, now)
+    entry = store.pop(key, None)
+    return entry[1] if entry is not None else None
+
+
+def _prune_downstream_flashes(store: object, now: float) -> None:
+    expired = [key for key, (expires_at, _) in store.items() if expires_at <= now]
+    for key in expired:
+        store.pop(key, None)
+    while len(store) > _FLASH_CAPACITY:
+        store.popitem(last=False)
 
 
 def _downstream_error(request: Request, exc: Exception, status_code: int) -> Response:

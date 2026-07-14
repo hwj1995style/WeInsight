@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, AsyncIterator
@@ -95,7 +96,7 @@ def create_app(
         lifespan=_lifespan,
     )
     app.state.config = config
-    app.state.article_downstream_flashes = {}
+    app.state.article_downstream_flashes = OrderedDict()
     engine = None
     if any(
         service is None

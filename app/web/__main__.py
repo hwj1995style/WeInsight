@@ -22,6 +22,7 @@ def _validate_secure_tls(config) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="weinsight-web")
     parser.add_argument("--config", default="config/config.dev.yaml")
+    parser.add_argument("--port", type=int, default=None)
     args = parser.parse_args()
 
     config = load_config(Path(args.config))
@@ -31,7 +32,7 @@ def main() -> None:
     uvicorn.run(
         app,
         host=config.web.host,
-        port=config.web.port,
+        port=args.port if args.port is not None else config.web.port,
         ssl_certfile=config.web.tls_certfile,
         ssl_keyfile=config.web.tls_keyfile,
     )

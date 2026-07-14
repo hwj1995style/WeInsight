@@ -922,6 +922,26 @@ def test_forged_backfill_summary_query_is_ignored(authenticated_client):
     assert "补处理任务已提交" not in authenticated_client.get(f"/sources/articles?{query}").text
 
 
+def test_downstream_flash_expires(monkeypatch, authenticated_client, article_downstream_service):
+    clock = iter((100.0, 401.0))
+    monkeypatch.setattr(source_routes, "monotonic", lambda: next(clock))
+    response = authenticated_client.post(
+        "/sources/articles/downstream-processing/backfill",
+        data=_csrf_data(scope="single", source_id="7", start_date="2026-07-08", end_date="2026-07-14", mode="missing_only"),
+        follow_redirects=False,
+    )
+    assert "补处理任务已提交" not in authenticated_client.get(response.headers["location"]).text
+
+
+def test_downstream_flash_store_is_capacity_bounded(app):
+    app.state.article_downstream_flashes.update(
+        (f"session-{index}", (200.0, {"matched_article_count": index})) for index in range(140)
+    )
+    source_routes._prune_downstream_flashes(app.state.article_downstream_flashes, 100.0)
+    assert len(app.state.article_downstream_flashes) == 128
+    assert "session-0" not in app.state.article_downstream_flashes
+
+
 def test_duplicate_csrf_is_rejected_before_downstream_service(authenticated_client, article_downstream_service):
     response = authenticated_client.post(
         "/sources/articles/7/downstream-processing",

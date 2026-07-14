@@ -75,3 +75,38 @@
 - 全部 `tests/test_web_*.py`：`326 passed`
 - `git diff --check`：通过
 - 未连接或修改真实数据库。
+
+## 独立复审 f4372b7（2026-07-14）
+
+### 最终结论
+
+**批准进入 Task 5。** 先前 2 个 P1 与 3 个 P2 在实现层均已关闭；新增聚焦测试中，伪造汇总、一次性消费和重复 CSRF 确实经过请求路径验证。范围/模式联动测试仍只是源码结构断言，不能证明浏览器中的实际 DOM 状态变化，因此批准的前提是按 Task 5 计划完成真实浏览器交互验证，不能把该单元测试视为联动验收证据。
+
+复审仅运行新增问题对应的聚焦测试：
+
+```text
+pytest -q tests/test_web_sources.py -k "forged_backfill_summary_query or duplicate_csrf or downstream_form_exposes or backfill_uses_prg"
+4 passed, 57 deselected
+```
+
+未重复执行既有全量 Web 测试。
+
+### 原问题关闭情况
+
+1. **P1 `enabled` 范围无法提交：已关闭。** `syncScope()` 在 `enabled` 下禁用、取消 required 并清空 `source_id`，在 `single` 下恢复 required（`app/web/templates/sources/articles.html:36-42`）。后端仍只在 single 模式解析正整数 source ID（`app/web/routes/sources.py:214-221`），没有把安全边界交给 JavaScript。
+2. **P1 汇总可伪造：已关闭。** POST 不再把计数写入 URL，而是写入当前认证 Session 对应的服务端 flash；GET 使用 `pop` 一次性消费（`app/web/routes/sources.py:228-231,342-359`）。直接构造八项 query 的测试经过真实 GET 并证明不显示成功提示；PRG 测试同时证明首次显示、刷新消失（`tests/test_web_sources.py:907-923`）。
+3. **P2 CSRF 非严格单值：已关闭。** 中间件对 urlencoded/multipart 均拒绝重复 token，并拒绝 header/body 冲突（`app/web/middleware.py:88-122`）；路由解析也在移除 CSRF 前执行统一重复字段检查（`app/web/routes/sources.py:299-309`）。新增测试真实发送重复 token，断言 422 且服务未调用（`tests/test_web_sources.py:925-933`）。
+4. **P2 确认及模式联动：实现已关闭，浏览器证据留给 Task 5。** 开关提交有确认框与持久的无障碍说明；force checkbox 仅 force 模式显示、启用和 required，切回时清空；显式 label/id 关联成立（`app/web/templates/sources/articles.html:9-16,24-54`）。但测试 `test_downstream_form_exposes_accessible_scope_mode_and_confirmation_linkage` 仅搜索 HTML/JS 字符串（`tests/test_web_sources.py:936-943`），即使脚本运行时报错也可能通过。Task 5 必须实际验证 scope 两向切换、enabled 提交、mode 两向切换、required/disabled/hidden/checked 状态、键盘提交确认与取消路径。
+5. **P2 CSS 变量错误：已关闭。** 两处均改用已定义的 `--color-muted`，新增隐藏说明样式也限定在 `.article-downstream` 下（`app/web/static/app.css:338-350`）。
+
+### 新增非阻断风险
+
+- **P2 / 发布前建议：flash 容器没有 TTL 或容量上限。** `app.state.article_downstream_flashes = {}` 是进程内字典（`app/web/app.py:98`）；只有随后访问列表页才会删除条目。成功 POST 后不跟随重定向的会话会留下条目，且多进程部署时 POST 与 GET 落到不同进程会丢失提示。当前入口仅管理员使用、同一 Session 的后续成功操作会覆盖旧值，因此不阻断 Task 5，但发布前应确认 Web 为单进程，或改为带过期和上限的 flash store/签名一次性 token。
+
+### Task 5 必验项
+
+- 用真实浏览器证明 `enabled` 范围无需选择账号即可提交，并确认请求体不带 `source_id`。
+- 证明切回 `single` 后账号恢复可用且 required；force/missing_only 来回切换时确认框的 hidden、disabled、required、checked 均正确。
+- 用键盘触发账号开关，分别验证取消不发 POST、确认才发 POST，并确认屏幕阅读器可关联说明。
+- 刷新成功页不重复显示汇总；直接追加旧计数 query 不显示成功提示。
+- 检查窄屏布局及浏览器 console，确认内联脚本无错误。

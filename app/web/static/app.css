@@ -342,6 +342,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .article-downstream .downstream-form label { display: grid; gap: .45rem; font-weight: 650; }
 .article-downstream .downstream-form small { color: var(--color-muted); font-weight: 400; line-height: 1.4; }
 .article-downstream .force-confirm { grid-column: 1 / -2; grid-template-columns: auto 1fr; align-items: center; }
+.article-downstream .force-confirm[hidden] { display: none; }
 .article-downstream .downstream-summary { display: flex; flex-wrap: wrap; gap: .55rem 1rem; margin-top: 1rem; padding: .9rem 1rem; border-radius: .75rem; background: #eaf3ff; }
 .article-downstream .processing-state { display: grid; gap: .45rem; min-width: 9rem; }
 .article-downstream .processing-state form { margin: 0; }
