@@ -38,6 +38,9 @@ class PriceMatrixRow:
     size: int
     cells: Mapping[str, PriceMatrixCell]
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "cells", MappingProxyType(dict(self.cells)))
+
 
 @dataclass(frozen=True)
 class PriceMatrix:
