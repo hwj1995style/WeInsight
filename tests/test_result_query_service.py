@@ -15,11 +15,14 @@ from app.domain.admin_results import (
     PriceDetailFilter,
 )
 from app.services.result_query_service import ResultQueryService
+from app.domain.price_matrix import ACCOUNT_MATRIX_RULES
 
 
 class Repo:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object, int, int]] = []
+        self.latest_date = None
+        self.matrix_date = None
 
     def list_group_details(self, filters, page, page_size):
         self.calls.append(("group", filters, page, page_size))
@@ -32,6 +35,39 @@ class Repo:
     def list_price_details(self, filters, page, page_size):
         self.calls.append(("price", filters, page, page_size))
         return PagedResult([], page, page_size, 0)
+
+    def latest_price_quote_date(self, account_names):
+        self.matrix_accounts = account_names
+        return self.latest_date
+
+    def list_price_matrix_rows(self, quote_date, account_names):
+        self.matrix_date = quote_date
+        self.matrix_accounts = account_names
+        return []
+
+
+def test_get_price_matrix_defaults_to_latest_date() -> None:
+    repo = Repo()
+    repo.latest_date = date(2026, 7, 14)
+
+    matrix = ResultQueryService(repo).get_price_matrix(None)
+
+    assert matrix.quote_date == date(2026, 7, 14)
+    assert repo.matrix_date == date(2026, 7, 14)
+    assert repo.matrix_accounts == tuple(rule.account_name for rule in ACCOUNT_MATRIX_RULES)
+
+
+def test_get_price_matrix_returns_none_without_any_quote_date() -> None:
+    repo = Repo()
+    assert ResultQueryService(repo).get_price_matrix(None) is None
+    assert repo.matrix_date is None
+
+
+def test_get_price_matrix_rejects_datetime_before_repo_call() -> None:
+    repo = Repo()
+    with pytest.raises(TypeError):
+        ResultQueryService(repo).get_price_matrix(datetime(2026, 7, 14))
+    assert repo.matrix_date is None
 
 
 @pytest.mark.parametrize(

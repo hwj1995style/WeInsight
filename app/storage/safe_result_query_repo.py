@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 
@@ -17,6 +18,7 @@ from app.domain.admin_results import (
     PagedResult,
     PriceDetailFilter,
 )
+from app.domain.price_matrix import PriceMatrixSourceRow
 
 
 logger = logging.getLogger(__name__)
@@ -25,6 +27,61 @@ logger = logging.getLogger(__name__)
 class MysqlSafeResultQueryRepo:
     def __init__(self, engine: Engine) -> None:
         self.engine = engine
+
+    def latest_price_quote_date(
+        self, account_names: tuple[str, ...]
+    ) -> date | None:
+        placeholders, params = self._account_params(account_names)
+        sql = f"""
+            SELECT MAX(p.quote_date) AS quote_date
+            FROM wechat_article_egg_price_item AS p
+            WHERE p.account_name IN ({placeholders})
+              AND p.include_in_egg_price = 1
+        """
+        with self.engine.begin() as connection:
+            return connection.execute(text(sql), params).scalar_one()
+
+    def list_price_matrix_rows(
+        self, quote_date: date, account_names: tuple[str, ...]
+    ) -> list[PriceMatrixSourceRow]:
+        placeholders, account_params = self._account_params(account_names)
+        sql = f"""
+            SELECT
+                p.id AS row_id,
+                p.article_hash AS article_hash,
+                p.account_name AS account_name,
+                p.quote_date AS quote_date,
+                p.publish_time AS publish_time,
+                p.analyze_time AS analyze_time,
+                p.region AS region,
+                p.market_name AS market_name,
+                p.product_family AS product_family,
+                p.include_in_egg_price AS include_in_egg_price,
+                p.spec_text AS spec_text,
+                p.weight_low AS weight_low,
+                p.weight_high AS weight_high,
+                p.price_low AS price_low,
+                p.price_high AS price_high,
+                p.price_unit_text AS price_unit_text
+            FROM wechat_article_egg_price_item AS p
+            WHERE p.quote_date = :quote_date
+              AND p.account_name IN ({placeholders})
+              AND p.include_in_egg_price = 1
+            ORDER BY p.account_name, p.publish_time DESC, p.article_hash, p.id
+        """
+        params = {"quote_date": quote_date, **account_params}
+        with self.engine.begin() as connection:
+            rows = connection.execute(text(sql), params).mappings().all()
+        return [self._matrix_from_row(row) for row in rows]
+
+    @staticmethod
+    def _account_params(
+        account_names: tuple[str, ...]
+    ) -> tuple[str, dict[str, object]]:
+        if not account_names:
+            raise ValueError("account_names must not be empty")
+        params = {f"account_{index}": name for index, name in enumerate(account_names)}
+        return ", ".join(f":{name}" for name in params), params
 
     def list_group_details(
         self, filters: GroupDetailFilter, page: int, page_size: int
@@ -270,6 +327,27 @@ class MysqlSafeResultQueryRepo:
                 row.get("conversion_confidence")
             )
             or Decimal("0"),
+        )
+
+    @staticmethod
+    def _matrix_from_row(row: Mapping[str, Any]) -> PriceMatrixSourceRow:
+        return PriceMatrixSourceRow(
+            row_id=int(row.get("row_id") or 0),
+            article_hash=str(row.get("article_hash") or ""),
+            account_name=str(row.get("account_name") or ""),
+            quote_date=row.get("quote_date"),
+            publish_time=row.get("publish_time"),
+            analyze_time=row.get("analyze_time"),
+            region=_optional_string(row.get("region")),
+            market_name=_optional_string(row.get("market_name")),
+            product_family=str(row.get("product_family") or ""),
+            include_in_egg_price=bool(row.get("include_in_egg_price")),
+            spec_text=_optional_string(row.get("spec_text")),
+            weight_low=_optional_decimal(row.get("weight_low")),
+            weight_high=_optional_decimal(row.get("weight_high")),
+            price_low=_optional_decimal(row.get("price_low")),
+            price_high=_optional_decimal(row.get("price_high")),
+            price_unit_text=_optional_string(row.get("price_unit_text")),
         )
 
 

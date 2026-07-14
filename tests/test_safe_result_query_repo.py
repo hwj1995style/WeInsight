@@ -16,9 +16,11 @@ from app.domain.admin_results import (
     PriceDetailFilter,
 )
 from app.storage.safe_result_query_repo import MysqlSafeResultQueryRepo
+from app.domain.price_matrix import ACCOUNT_MATRIX_RULES, PriceMatrixSourceRow
 
 
 NOW = datetime(2026, 7, 10, 9, 30)
+NINE_ACCOUNT_NAMES = tuple(rule.account_name for rule in ACCOUNT_MATRIX_RULES)
 
 
 class Result:
@@ -62,6 +64,73 @@ class Engine:
     def begin(self):
         self.begin_count += 1
         return self.connection
+
+
+class SingleQueryEngine:
+    def __init__(self, result: Result) -> None:
+        self.connection = Connection([result])
+
+    def begin(self):
+        return self.connection
+
+
+def test_latest_matrix_date_is_scoped_to_safe_accounts_and_eligible_rows() -> None:
+    engine = SingleQueryEngine(Result(scalar=date(2026, 7, 14)))
+
+    result = MysqlSafeResultQueryRepo(engine).latest_price_quote_date(
+        NINE_ACCOUNT_NAMES
+    )
+
+    sql, params = engine.connection.executions[0]
+    assert result == date(2026, 7, 14)
+    assert "MAX(p.quote_date)" in sql
+    assert "p.account_name IN" in sql
+    assert "p.include_in_egg_price = 1" in sql
+    assert params == {f"account_{i}": name for i, name in enumerate(NINE_ACCOUNT_NAMES)}
+
+
+def test_matrix_query_is_account_scoped_and_selects_only_safe_fields() -> None:
+    engine = SingleQueryEngine(Result(rows=[]))
+    repo = MysqlSafeResultQueryRepo(engine)
+
+    repo.list_price_matrix_rows(date(2026, 7, 14), NINE_ACCOUNT_NAMES)
+
+    sql, params = engine.connection.executions[0]
+    normalized = " ".join(sql.split())
+    assert "p.quote_date = :quote_date" in normalized
+    assert "p.account_name IN" in normalized
+    assert "p.include_in_egg_price = 1" in normalized
+    assert "p.article_hash AS article_hash" in sql
+    assert "p.weight_low AS weight_low" in sql
+    assert params["quote_date"] == date(2026, 7, 14)
+    assert tuple(params[f"account_{i}"] for i in range(9)) == NINE_ACCOUNT_NAMES
+    for forbidden in ("article_url", "raw_row_json", "raw_headers_json", "runtime_content"):
+        assert forbidden not in sql
+
+
+def test_matrix_query_maps_safe_source_rows() -> None:
+    source = {
+        "row_id": 7, "article_hash": "hash", "account_name": NINE_ACCOUNT_NAMES[0],
+        "quote_date": date(2026, 7, 14), "publish_time": NOW, "analyze_time": NOW,
+        "region": None, "market_name": "market", "product_family": "chicken_egg",
+        "include_in_egg_price": 1, "spec_text": "45斤", "weight_low": "45",
+        "weight_high": None, "price_low": "180", "price_high": "182",
+        "price_unit_text": "元/箱", "raw_row_json": "secret",
+    }
+    engine = SingleQueryEngine(Result(rows=[source]))
+
+    rows = MysqlSafeResultQueryRepo(engine).list_price_matrix_rows(
+        date(2026, 7, 14), NINE_ACCOUNT_NAMES
+    )
+
+    assert rows == [PriceMatrixSourceRow(
+        row_id=7, article_hash="hash", account_name=NINE_ACCOUNT_NAMES[0],
+        quote_date=date(2026, 7, 14), publish_time=NOW, analyze_time=NOW,
+        region=None, market_name="market", product_family="chicken_egg",
+        include_in_egg_price=True, spec_text="45斤", weight_low=Decimal("45"),
+        weight_high=None, price_low=Decimal("180"), price_high=Decimal("182"),
+        price_unit_text="元/箱",
+    )]
 
 
 GROUP_SOURCES = (

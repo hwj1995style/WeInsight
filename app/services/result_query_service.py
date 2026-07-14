@@ -12,6 +12,12 @@ from app.domain.admin_results import (
     PagedResult,
     PriceDetailFilter,
 )
+from app.domain.price_matrix import (
+    ACCOUNT_MATRIX_RULES,
+    PriceMatrix,
+    PriceMatrixSourceRow,
+    build_price_matrix,
+)
 
 
 INTENT_TYPES = frozenset({"demand", "supply", "neutral", "empty"})
@@ -25,6 +31,7 @@ PRODUCT_FAMILIES = frozenset(
         "other_egg",
     }
 )
+NINE_ACCOUNT_NAMES = tuple(rule.account_name for rule in ACCOUNT_MATRIX_RULES)
 
 
 class SafeResultQueryRepo(Protocol):
@@ -40,10 +47,28 @@ class SafeResultQueryRepo(Protocol):
         self, filters: PriceDetailFilter, page: int, page_size: int
     ) -> PagedResult[EggPriceDetailRow]: ...
 
+    def latest_price_quote_date(
+        self, account_names: tuple[str, ...]
+    ) -> date | None: ...
+
+    def list_price_matrix_rows(
+        self, quote_date: date, account_names: tuple[str, ...]
+    ) -> list[PriceMatrixSourceRow]: ...
+
 
 class ResultQueryService:
     def __init__(self, repo: SafeResultQueryRepo) -> None:
         self.repo = repo
+
+    def get_price_matrix(self, quote_date: date | None) -> PriceMatrix | None:
+        _validate_optional_date(quote_date, "quote_date")
+        resolved = quote_date or self.repo.latest_price_quote_date(
+            NINE_ACCOUNT_NAMES
+        )
+        if resolved is None:
+            return None
+        rows = self.repo.list_price_matrix_rows(resolved, NINE_ACCOUNT_NAMES)
+        return build_price_matrix(rows, resolved)
 
     def list_group_details(
         self, filters: GroupDetailFilter, page: int, page_size: int
