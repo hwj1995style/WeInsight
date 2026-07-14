@@ -9,8 +9,11 @@ from sqlalchemy.engine import Engine
 
 @dataclass(frozen=True, slots=True)
 class ArticleSourceStatusRecord:
+    source_id: int
     account_name: str
     werss_source_id: str | None
+    collection_enabled: bool
+    downstream_processing_enabled: bool
     upstream_status: str
     upstream_last_seen_at: datetime | None
     last_article_time: datetime | None
@@ -33,8 +36,11 @@ class MysqlArticleSourceStatusRepo:
         with self.engine.begin() as connection:
             rows = connection.execute(_LIST_STATUS_SQL, {"limit": limit, "offset": offset}).mappings().all()
         return [ArticleSourceStatusRecord(
+            source_id=int(row["source_id"]),
             account_name=str(row["account_name"]),
             werss_source_id=row["werss_source_id"],
+            collection_enabled=bool(row["collection_enabled"]),
+            downstream_processing_enabled=bool(row["downstream_processing_enabled"]),
             upstream_status=str(row["upstream_status"]),
             upstream_last_seen_at=row["upstream_last_seen_at"],
             last_article_time=row["last_article_time"],
@@ -78,7 +84,10 @@ WITH raw_stats AS (
            last_success_collect_time
     FROM log_ranked WHERE row_num = 1
 )
-SELECT config.account_name, config.werss_source_id, config.upstream_status,
+SELECT config.id AS source_id, config.account_name, config.werss_source_id,
+       config.enabled AS collection_enabled,
+       config.downstream_clean_enabled AS downstream_processing_enabled,
+       config.upstream_status,
        config.upstream_last_seen_at,
        raw_stats.last_article_time, log_latest.last_success_collect_time,
        COALESCE(raw_stats.article_count, 0) AS article_count,

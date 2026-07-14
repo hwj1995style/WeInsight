@@ -21,7 +21,9 @@ class FakeRepo:
 
 def record(**changes):
     values = dict(
-        account_name="测试公众号", werss_source_id="MP1", upstream_status="active",
+        source_id=42, account_name="测试公众号", werss_source_id="MP1",
+        collection_enabled=True, downstream_processing_enabled=False,
+        upstream_status="active",
         upstream_last_seen_at=NOW - timedelta(minutes=8),
         last_article_time=NOW - timedelta(minutes=5),
         last_success_collect_time=NOW - timedelta(minutes=5), article_count=1,
@@ -88,6 +90,25 @@ def test_status_query_filters_to_current_werss_sources_before_pagination():
     assert status_filter in sql
     assert sql.index(werss_filter) < sql.index(order_by)
     assert sql.index(status_filter) < sql.index(order_by)
+
+
+def test_status_query_selects_switch_source_fields_explicitly():
+    sql = str(_LIST_STATUS_SQL)
+    assert "config.id AS source_id" in sql
+    assert "config.enabled AS collection_enabled" in sql
+    assert "config.downstream_clean_enabled AS downstream_processing_enabled" in sql
+
+
+@pytest.mark.parametrize(
+    ("account_name", "expected_mutable"),
+    [("一箱蛋", False), (" 一 箱\t蛋 ", False), ("测试公众号", True)],
+)
+def test_downstream_processing_mutability_uses_normalized_account_name(account_name, expected_mutable):
+    row = ArticleSourceStatusService(FakeRepo(), 10).to_status(record(account_name=account_name), NOW)
+    assert row.source_id == 42
+    assert row.collection_enabled is True
+    assert row.downstream_processing_enabled is False
+    assert row.downstream_processing_mutable is expected_mutable
 
 
 def test_status_updated_at_uses_latest_failure_log_time():

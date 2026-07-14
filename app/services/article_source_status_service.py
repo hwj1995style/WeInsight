@@ -26,6 +26,10 @@ class ArticleSourceStatusRow:
     failed_count: int
     last_error: str | None
     status_updated_at: datetime | None
+    source_id: int = 0
+    collection_enabled: bool = False
+    downstream_processing_enabled: bool = False
+    downstream_processing_mutable: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +59,11 @@ class ArticleSourceStatusService:
         status = self._display_status(record, now)
         error = None if record.last_error is None else sanitize_output(record.last_error, maximum=200).strip() or None
         return ArticleSourceStatusRow(
+            source_id=record.source_id,
             account_name=record.account_name, werss_source_id=record.werss_source_id,
+            collection_enabled=record.collection_enabled,
+            downstream_processing_enabled=record.downstream_processing_enabled,
+            downstream_processing_mutable="".join(record.account_name.split()) != "一箱蛋",
             upstream_status=record.upstream_status, display_status=status,
             last_article_time=record.last_article_time,
             last_success_collect_time=record.last_success_collect_time,
