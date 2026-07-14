@@ -35,11 +35,19 @@ def test_read_only_status_query_matches_independent_mysql_aggregates():
     assert len({row.account_name for row in rows}) == len(rows)
     assert all(row.werss_source_id is not None for row in rows)
     assert all(row.upstream_status in {"active", "disabled"} for row in rows)
-    assert all(isinstance(row.source_id, int) for row in rows)
-    assert all(isinstance(row.collection_enabled, bool) for row in rows)
-    assert all(isinstance(row.downstream_processing_enabled, bool) for row in rows)
     with engine.connect() as connection:
         for row in rows:
+            expected_config = connection.execute(text("""
+                SELECT id, enabled, downstream_clean_enabled
+                FROM wechat_public_account_config
+                WHERE id = :source_id AND account_name = :account_name
+            """), {
+                "source_id": row.source_id,
+                "account_name": row.account_name,
+            }).mappings().one()
+            assert row.source_id == int(expected_config["id"])
+            assert row.collection_enabled is bool(expected_config["enabled"])
+            assert row.downstream_processing_enabled is bool(expected_config["downstream_clean_enabled"])
             expected = connection.execute(text("""
                 SELECT
                   (SELECT COUNT(*) FROM wechat_article_raw r WHERE r.account_name = :name) article_count,
