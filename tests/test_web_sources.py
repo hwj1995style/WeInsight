@@ -380,6 +380,10 @@ def test_article_list_uses_stable_ids_and_escapes_names(
     assert "行业观察<script>" not in response.text
     assert "&lt;script&gt;" in response.text
     assert 'action="/sources/articles/7/downstream-processing"' in response.text
+    assert 'class="processing-toggle"' in response.text
+    assert 'role="switch" aria-checked="false"' in response.text
+    assert "processing-toggle-knob" in response.text
+    assert "WeRSS ID" not in response.text
 
 
 def test_removed_article_new_path_is_unavailable(
