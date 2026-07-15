@@ -384,6 +384,10 @@ def test_article_list_uses_stable_ids_and_escapes_names(
     assert 'role="switch" aria-checked="false"' in response.text
     assert "processing-toggle-knob" in response.text
     assert "WeRSS ID" not in response.text
+    assert "清洗与分析" in response.text
+    assert '<small>采集</small>' in response.text
+    assert "自动清洗与分析</strong>" not in response.text
+    assert ">正常</td>" in response.text
 
 
 def test_removed_article_new_path_is_unavailable(
