@@ -128,6 +128,10 @@ class MysqlRuntimeMonitorRepo:
             SELECT COUNT(*)
             FROM wechat_collection_job_event event
             LEFT JOIN wechat_collection_job job ON job.id = event.job_id
+            LEFT JOIN wechat_collection_job_target_run target_run
+                ON target_run.id = event.target_run_id
+            LEFT JOIN wechat_collection_job_target job_target
+                ON job_target.id = target_run.job_target_id
             {where}
             """
         )
@@ -135,12 +139,17 @@ class MysqlRuntimeMonitorRepo:
             f"""
             SELECT
                 event.id, event.job_id, event.run_id, event.target_run_id,
-                job.pipeline_type, event.worker_id, event.level,
+                job.pipeline_type, job_target.target_name_snapshot AS subject_name,
+                event.worker_id, event.level,
                 event.event_type, event.stage, event.message,
                 event.metrics_json, event.actor_type, event.actor_name,
                 event.create_time
             FROM wechat_collection_job_event event
             LEFT JOIN wechat_collection_job job ON job.id = event.job_id
+            LEFT JOIN wechat_collection_job_target_run target_run
+                ON target_run.id = event.target_run_id
+            LEFT JOIN wechat_collection_job_target job_target
+                ON job_target.id = target_run.job_target_id
             {where}
             ORDER BY event.id DESC
             LIMIT :limit OFFSET :offset
@@ -305,6 +314,9 @@ def _event_filter_clause(
     if filters.level is not None:
         conditions.append("event.level = :level")
         params["level"] = filters.level
+    if filters.subject_name is not None:
+        conditions.append("job_target.target_name_snapshot = :subject_name")
+        params["subject_name"] = filters.subject_name
     if filters.start_at is not None:
         conditions.append("event.create_time >= :start_at")
         params["start_at"] = _to_db_datetime(filters.start_at)
@@ -398,6 +410,7 @@ def _runtime_event(row) -> RuntimeEvent:
         run_id=_optional_int(row.get("run_id")),
         target_run_id=_optional_int(row.get("target_run_id")),
         pipeline_type=(None if pipeline is None else PipelineType(str(pipeline))),
+        subject_name=_optional_text(row.get("subject_name")),
         worker_id=_optional_text(row.get("worker_id")),
         level=str(row["level"]),
         event_type=str(row["event_type"]),

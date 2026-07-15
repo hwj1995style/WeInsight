@@ -428,7 +428,6 @@ def test_healthy_idle_tick_claims_at_most_once_without_log_flood() -> None:
 @pytest.mark.parametrize(
     ("fault", "runner_call_count"),
     [
-        ("claimed_event", 0),
         ("start_target", 0),
         ("finish_target", 1),
         ("finish_run", 1),
@@ -439,9 +438,7 @@ def test_claimed_run_repo_or_event_failure_degrades_without_retrying_rpa(
 ) -> None:
     runtime = RuntimeRepo(claimed_run())
     events = EventRepo(
-        error_on_type=(
-            "collection_run_claimed" if fault == "claimed_event" else None
-        )
+        error_on_type=None
     )
     factories = Factories()
     runner = Runner(factories.group_result)
@@ -501,13 +498,7 @@ def test_execute_run_uses_snapshot_and_stable_target_order() -> None:
         event for event in worker.event_repo.events
         if event.event_type in {"collection_target_started", "collection_target_finished"}
     ]
-    assert [event.event_type for event in target_events] == [
-        "collection_target_started",
-        "collection_target_finished",
-        "collection_target_started",
-        "collection_target_finished",
-    ]
-    assert [event.target_run_id for event in target_events] == [601, 601, 602, 602]
+    assert target_events == []
     assert all("甲群" not in event.message and "乙群" not in event.message for event in target_events)
 
 

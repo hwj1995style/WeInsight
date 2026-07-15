@@ -202,6 +202,12 @@ class WorkersConfig:
     group_analysis_batch_size: int
     article_parse_batch_size: int
     article_analysis_batch_size: int
+    event_info_retention_days: int = 14
+    event_verbose_retention_days: int = 7
+    event_warning_error_retention_months: int = 3
+    event_audit_retention_months: int = 6
+    event_cleanup_interval_hours: int = 24
+    event_cleanup_batch_size: int = 1000
 
     def __post_init__(self) -> None:
         if self.collector_mode not in {"fake", "real"}:
@@ -215,10 +221,17 @@ class WorkersConfig:
             "group_analysis_batch_size",
             "article_parse_batch_size",
             "article_analysis_batch_size",
+            "event_info_retention_days",
+            "event_verbose_retention_days",
+            "event_warning_error_retention_months",
+            "event_audit_retention_months",
+            "event_cleanup_interval_hours",
         ):
             value = getattr(self, field)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"{field} must be a positive integer")
+        if not 100 <= self.event_cleanup_batch_size <= 5000:
+            raise ValueError("event_cleanup_batch_size must be from 100 to 5000")
 
 
 @dataclass(frozen=True)

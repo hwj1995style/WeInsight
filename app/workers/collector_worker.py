@@ -213,14 +213,6 @@ class ManagedCollectorWorker:
         if run is None:
             return _tick("idle")
         try:
-            self._append_event(
-                run,
-                level="info",
-                event_type="collection_run_claimed",
-                stage="claim",
-                message="collection run claimed by managed worker",
-                metrics={"target_count": len(run.targets)},
-            )
             return self.execute_run(run, now)
         except Exception as exc:
             self._mark_degraded("claimed run processing failed", exc)
@@ -320,20 +312,17 @@ class ManagedCollectorWorker:
         target_run_id = self.runtime_repo.start_target(
             run.run_id, item.job_target_id, batch_id, now
         )
-        self._append_target_event(
-            run, target_run_id, level="info", event_type="collection_target_started",
-            message="collection target started", metrics={"job_target_id": item.job_target_id},
-        )
         outcome = self._execute_target(run, item, batch_id, target_run_id, now)
         self.runtime_repo.finish_target(target_run_id, outcome, self._current_time())
-        self._append_target_event(
-            run, target_run_id,
-            level=("error" if outcome.status == "failed" else "info"),
-            event_type="collection_target_finished",
-            message=f"collection target finished with {outcome.status}",
-            metrics={"read_count": outcome.read_count, "insert_count": outcome.insert_count,
-                     "duplicate_count": outcome.duplicate_count, "skipped_count": outcome.skipped_count},
-        )
+        if outcome.status == "failed":
+            self._append_target_event(
+                run, target_run_id,
+                level="error",
+                event_type="collection_target_finished",
+                message="collection target finished with failed",
+                metrics={"read_count": outcome.read_count, "insert_count": outcome.insert_count,
+                         "duplicate_count": outcome.duplicate_count, "skipped_count": outcome.skipped_count},
+            )
         return outcome
 
     def heartbeat(self, now: datetime) -> None:

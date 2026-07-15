@@ -61,6 +61,7 @@ class EventListFilter:
     target_run_id: int | None = None
     pipeline_type: PipelineType | None = None
     level: str | None = None
+    subject_name: str | None = None
     start_at: datetime | None = None
     end_at: datetime | None = None
 
@@ -130,6 +131,7 @@ class RuntimeEvent:
     actor_type: str
     actor_name: str
     create_time: datetime
+    subject_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -503,6 +505,7 @@ def _validate_event_filters(filters: object) -> None:
         raise ValueError("pipeline_type is invalid")
     if filters.level is not None and filters.level not in EVENT_LEVELS:
         raise ValueError("level is invalid")
+    _optional_text(filters.subject_name, "subject_name", 200)
     for field in ("start_at", "end_at"):
         value = getattr(filters, field)
         if value is not None:
@@ -525,6 +528,7 @@ def _safe_event(event: RuntimeEvent) -> RuntimeEvent:
         metrics_summary=_safe_metrics_summary(event.metrics_summary),
         actor_type=_safe_structured(event.actor_type, maximum=20),
         actor_name=_safe_label(event.actor_name, maximum=100),
+        subject_name=_safe_optional(event.subject_name),
     )
 
 
@@ -548,7 +552,7 @@ _METRIC_FIELDS = (
 
 def _event_view(event: RuntimeEvent) -> RuntimeEventView:
     summary = runtime_event_summary(event.event_type, event.level)
-    subjects = tuple(
+    id_subjects = tuple(
         f"{label} #{value}"
         for label, value in (
             ("任务", event.job_id), ("运行", event.run_id),
@@ -556,6 +560,18 @@ def _event_view(event: RuntimeEvent) -> RuntimeEventView:
         )
         if value is not None
     )
+    if event.subject_name:
+        type_label = {
+            PipelineType.GROUP: "微信群",
+            PipelineType.ARTICLE: "公众号",
+        }.get(event.pipeline_type, "对象")
+        subject = f"{type_label} · {event.subject_name}"
+    elif event.target_run_id is not None:
+        subject = " · ".join(id_subjects)
+    elif event.run_id is not None:
+        subject = "本轮全部目标"
+    else:
+        subject = "系统事件"
     technical_metrics = event.metrics_summary
     try:
         metrics = json.loads(technical_metrics)
@@ -575,7 +591,7 @@ def _event_view(event: RuntimeEvent) -> RuntimeEventView:
                 items.append(RuntimeMetricItem(label, rendered))
                 break
     return RuntimeEventView(
-        event, summary, " · ".join(subjects) or "系统事件", tuple(items),
+        event, summary, subject, tuple(items),
         technical_metrics,
     )
 

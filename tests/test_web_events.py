@@ -52,6 +52,7 @@ def _runtime_event() -> RuntimeEvent:
         actor_type="worker",
         actor_name="collector-1",
         create_time=NOW,
+        subject_name="核心群A",
     )
 
 
@@ -150,13 +151,14 @@ def test_events_page_strict_filters_and_safe_output(
     runtime_service: RuntimeService,
 ) -> None:
     response = authenticated_client.get(
-        "/events?job_id=7&run_id=31&target_id=51&pipeline=group&"
+        "/events?subject=%E6%A0%B8%E5%BF%83%E7%BE%A4A&job_id=7&run_id=31&target_id=51&pipeline=group&"
         "level=warning&start=2026-07-10T11%3A00&end=2026-07-10T12%3A30"
     )
 
     assert response.status_code == 200
     assert "safe event" in response.text
     assert "运行 #31" in response.text
+    assert "微信群 · 核心群A" in response.text
     for heading in ("时间", "结果摘要", "关联对象", "关键指标", "操作"):
         assert heading in response.text
     assert "WARN · 目标处理完成" in response.text
@@ -166,6 +168,7 @@ def test_events_page_strict_filters_and_safe_output(
     filters = runtime_service.calls[-1][0]
     assert filters.target_run_id == 51
     assert filters.pipeline_type is PipelineType.GROUP
+    assert filters.subject_name == "核心群A"
     assert filters.start_at.tzinfo is ZONE
 
 

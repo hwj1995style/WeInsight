@@ -70,6 +70,10 @@ class EventRepo(Protocol):
     def append_event(self, event: NewCollectionEvent) -> int: ...
 
 
+class EventRetentionService(Protocol):
+    def run(self, now: datetime, *, dry_run: bool = False): ...
+
+
 class HeartbeatRepo(Protocol):
     def upsert_heartbeat(self, record: WorkerHeartbeatRecord) -> None: ...
 
@@ -97,6 +101,7 @@ class PipelineWorker:
         article_parse_batch_size: int,
         article_analysis_batch_size: int,
         now_provider: Callable[[], datetime] | None = None,
+        event_retention_service: EventRetentionService | None = None,
     ) -> None:
         _required_text(worker_id, "worker_id", 100)
         _required_text(hostname, "hostname", 255)
@@ -130,6 +135,12 @@ class PipelineWorker:
         self.article_parse_batch_size = article_parse_batch_size
         self.article_analysis_batch_size = article_analysis_batch_size
         self.now_provider = now_provider or _shanghai_now
+        self.event_retention_service = event_retention_service
+
+    def cleanup_events_now(self, *, dry_run: bool = False):
+        if self.event_retention_service is None:
+            return None
+        return self.event_retention_service.run(self.now_provider(), dry_run=dry_run)
 
     def run_tick(self, now: datetime) -> PipelineTickResult:
         _require_now(now)

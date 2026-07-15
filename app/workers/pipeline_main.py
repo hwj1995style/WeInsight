@@ -68,6 +68,9 @@ def main(
         worker.heartbeat(clock())
         if args.once:
             worker.run_tick_now()
+            cleanup = getattr(worker, "cleanup_events_now", None)
+            if callable(cleanup):
+                cleanup()
         else:
             scheduler = scheduler_factory(timezone=APPLICATION_TIMEZONE)
             scheduler.add_job(
@@ -92,6 +95,15 @@ def main(
                 max_instances=1,
                 coalesce=True,
             )
+            cleanup = getattr(worker, "cleanup_events_now", None)
+            if callable(cleanup):
+                scheduler.add_job(
+                    cleanup,
+                    "interval",
+                    hours=getattr(config.workers, "event_cleanup_interval_hours", 24),
+                    max_instances=1,
+                    coalesce=True,
+                )
             previous_handlers = _install_signal_handlers()
             scheduler.start()
     except KeyboardInterrupt:

@@ -28,6 +28,7 @@ from app.pipelines.summary_daily_report_query_service import (
 )
 from app.pipelines.summary_daily_report_service import SummaryDailyReportService
 from app.services.report_generation_service import ReportGenerationService
+from app.services.event_retention_service import EventRetentionPolicy, EventRetentionService
 from app.storage.article_analysis_repo import MysqlArticleAnalysisRepo
 from app.storage.article_daily_report_repo import MysqlArticleDailyReportRepo
 from app.storage.article_parse_repo import MysqlArticleParseRepo
@@ -40,6 +41,7 @@ from app.storage.summary_daily_report_query_repo import (
     MysqlSummaryDailyReportQueryRepo,
 )
 from app.storage.worker_heartbeat_repo import MysqlWorkerHeartbeatRepo
+from app.storage.event_retention_repo import MysqlEventRetentionRepo
 from app.workers.pipeline_worker import (
     PipelineWorker,
     default_pipeline_worker_identity,
@@ -126,6 +128,16 @@ def build_pipeline_worker(
             config.workers.article_analysis_batch_size
         ),
         now_provider=clock,
+        event_retention_service=EventRetentionService(
+            MysqlEventRetentionRepo(shared_engine),
+            EventRetentionPolicy(
+                info_days=getattr(config.workers, "event_info_retention_days", 14),
+                verbose_days=getattr(config.workers, "event_verbose_retention_days", 7),
+                warning_error_months=getattr(config.workers, "event_warning_error_retention_months", 3),
+                audit_months=getattr(config.workers, "event_audit_retention_months", 6),
+                batch_size=getattr(config.workers, "event_cleanup_batch_size", 1000),
+            ),
+        ),
     )
 
 

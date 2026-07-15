@@ -33,6 +33,12 @@ auth:
 workers:
   collector_mode: fake
   schedule_tick_seconds: 5
+  event_info_retention_days: 14
+  event_verbose_retention_days: 7
+  event_warning_error_retention_months: 3
+  event_audit_retention_months: 6
+  event_cleanup_interval_hours: 24
+  event_cleanup_batch_size: 1000
   heartbeat_seconds: 10
   run_lease_seconds: 120
   pipeline_tick_seconds: 5

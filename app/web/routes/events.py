@@ -39,6 +39,7 @@ _PAGE_FIELDS = frozenset(
         "target_id",
         "pipeline",
         "level",
+        "subject",
         "start",
         "end",
         "page",
@@ -66,6 +67,7 @@ async def event_list(request: Request) -> Response:
             ),
             pipeline_type=_optional_pipeline(values.get("pipeline")),
             level=_optional_level(values.get("level")),
+            subject_name=_optional_subject(values.get("subject")),
             start_at=_optional_local_datetime(values.get("start"), zone),
             end_at=_optional_local_datetime(values.get("end"), zone),
         )
@@ -101,6 +103,7 @@ async def event_list(request: Request) -> Response:
             "target_id",
             "pipeline",
             "level",
+            "subject",
             "start",
             "end",
         )
@@ -341,6 +344,15 @@ def _optional_level(value: str | None) -> str | None:
     return value
 
 
+def _optional_subject(value: str | None) -> str | None:
+    if value in {None, ""}:
+        return None
+    normalized = value.strip()
+    if not normalized or len(normalized) > 200 or any(ord(char) < 32 for char in normalized):
+        raise ValueError("invalid subject")
+    return normalized
+
+
 def _optional_local_datetime(
     value: str | None,
     zone: ZoneInfo,
@@ -370,6 +382,7 @@ def _empty_values() -> dict[str, str]:
         "target_id": "",
         "pipeline": "",
         "level": "",
+        "subject": "",
         "start": "",
         "end": "",
         "page_size": "50",
