@@ -8,13 +8,13 @@
 {% if backfill_summary %}<div class="downstream-summary" role="status"><strong>补处理任务已提交</strong><span>命中文章 {{ backfill_summary.matched_article_count }}</span><span>新建清洗 {{ backfill_summary.clean_task_created_count }}</span><span>恢复清洗 {{ backfill_summary.clean_task_recovered_count }}</span><span>新建分析 {{ backfill_summary.analyze_task_created_count }}</span><span>恢复分析 {{ backfill_summary.analyze_task_recovered_count }}</span><span>已有结果跳过 {{ backfill_summary.existing_result_skipped_count }}</span><span>运行中跳过 {{ backfill_summary.running_task_skipped_count }}</span><span>范围外跳过 {{ backfill_summary.out_of_scope_skipped_count }}</span></div>{% endif %}
 <form method="post" action="/sources/articles/downstream-processing/backfill" class="downstream-form" id="downstream-backfill-form">
 <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-<label for="downstream-scope">处理范围<select id="downstream-scope" name="scope" required><option value="single">单个公众号</option><option value="enabled">全部已开启公众号</option></select></label>
-<label for="downstream-source">单个公众号<select id="downstream-source" name="source_id" required><option value="">请选择</option>{% for article in articles %}{% if article.downstream_processing_mutable %}<option value="{{ article.source_id }}">{{ article.account_name }}{% if not article.downstream_processing_enabled %}（仅补历史）{% endif %}</option>{% endif %}{% endfor %}</select><small>选择已关闭账号只补历史，不改变未来自动处理。</small></label>
-<label>开始日期<input type="date" name="start_date" value="{{ backfill_start_date }}" required></label>
-<label>结束日期<input type="date" name="end_date" value="{{ backfill_end_date }}" required></label>
-<label for="downstream-mode">处理模式<select id="downstream-mode" name="mode" required><option value="missing_only">只补缺失环节</option><option value="force_analyze">强制重新分析</option></select></label>
+<label class="aligned-form-field" for="downstream-scope">处理范围<select id="downstream-scope" name="scope" required><option value="single">单个公众号</option><option value="enabled">全部已开启公众号</option></select></label>
+<label class="aligned-form-field" for="downstream-source">单个公众号<select id="downstream-source" name="source_id" required><option value="">请选择</option>{% for article in articles %}{% if article.downstream_processing_mutable %}<option value="{{ article.source_id }}">{{ article.account_name }}{% if not article.downstream_processing_enabled %}（仅补历史）{% endif %}</option>{% endif %}{% endfor %}</select><small>选择已关闭账号只补历史，不改变未来自动处理。</small></label>
+<label class="aligned-form-field">开始日期<input type="date" name="start_date" value="{{ backfill_start_date }}" required></label>
+<label class="aligned-form-field">结束日期<input type="date" name="end_date" value="{{ backfill_end_date }}" required></label>
+<label class="aligned-form-field" for="downstream-mode">处理模式<select id="downstream-mode" name="mode" required><option value="missing_only">只补缺失环节</option><option value="force_analyze">强制重新分析</option></select></label>
 <label class="force-confirm" id="force-confirm-field" hidden><input id="force-confirm" type="checkbox" name="confirm_force" value="1"> 我确认强制分析会重新排队，但不会提前删除旧结果</label>
-<button class="button" type="submit">提交补处理</button>
+<div class="aligned-form-action"><button class="button" type="submit">提交补处理</button></div>
 </form></section>
 <section class="content-panel source-panel" aria-label="公众号状态">
 {% if articles %}<div class="table-scroll" tabindex="0" aria-label="公众号状态表，可横向滚动"><table class="data-table article-status-table">

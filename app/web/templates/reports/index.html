@@ -7,10 +7,10 @@
     <form class="report-request-form" method="post" action="/reports/generate">
       <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
       <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
-      <div><label for="generate_report_type">生成类型</label><select id="generate_report_type" name="report_type"><option value="group">微信群</option><option value="article">公众号</option><option value="summary">汇总日报</option><option value="all">全部日报</option></select></div>
-      <div><label for="generate_report_date">日期</label><input id="generate_report_date" type="date" name="report_date" value="{{ report_date.isoformat() }}" required></div>
-      <div><label for="generate_source_name">采集对象（可选）</label><input id="generate_source_name" name="source_name" maxlength="200" autocomplete="off"><p class="field-help">汇总或全部日报必须留空。</p></div>
-      <button type="submit">提交生成请求</button>
+      <div class="aligned-form-field"><label for="generate_report_type">生成类型</label><select id="generate_report_type" name="report_type"><option value="group">微信群</option><option value="article">公众号</option><option value="summary">汇总日报</option><option value="all">全部日报</option></select></div>
+      <div class="aligned-form-field"><label for="generate_report_date">日期</label><input id="generate_report_date" type="date" name="report_date" value="{{ report_date.isoformat() }}" required></div>
+      <div class="aligned-form-field"><label for="generate_source_name">采集对象（可选）</label><input id="generate_source_name" name="source_name" maxlength="200" autocomplete="off"><p class="field-help">汇总或全部日报必须留空。</p></div>
+      <div class="aligned-form-action"><button type="submit">提交生成请求</button></div>
     </form>
   </section>
   <form class="filter-panel report-filters" method="get" action="/reports">
