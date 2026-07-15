@@ -317,6 +317,8 @@ def _event_filter_clause(
     if filters.subject_name is not None:
         conditions.append("job_target.target_name_snapshot = :subject_name")
         params["subject_name"] = filters.subject_name
+    if not filters.include_routine:
+        conditions.append("NOT (event.level = 'info' AND event.event_type = 'collection_run_finished')")
     if filters.start_at is not None:
         conditions.append("event.create_time >= :start_at")
         params["start_at"] = _to_db_datetime(filters.start_at)

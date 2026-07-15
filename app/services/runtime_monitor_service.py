@@ -62,6 +62,7 @@ class EventListFilter:
     pipeline_type: PipelineType | None = None
     level: str | None = None
     subject_name: str | None = None
+    include_routine: bool = False
     start_at: datetime | None = None
     end_at: datetime | None = None
 
@@ -506,6 +507,8 @@ def _validate_event_filters(filters: object) -> None:
     if filters.level is not None and filters.level not in EVENT_LEVELS:
         raise ValueError("level is invalid")
     _optional_text(filters.subject_name, "subject_name", 200)
+    if type(filters.include_routine) is not bool:
+        raise ValueError("include_routine is invalid")
     for field in ("start_at", "end_at"):
         value = getattr(filters, field)
         if value is not None:

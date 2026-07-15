@@ -40,6 +40,7 @@ _PAGE_FIELDS = frozenset(
         "pipeline",
         "level",
         "subject",
+        "include_routine",
         "start",
         "end",
         "page",
@@ -68,6 +69,7 @@ async def event_list(request: Request) -> Response:
             pipeline_type=_optional_pipeline(values.get("pipeline")),
             level=_optional_level(values.get("level")),
             subject_name=_optional_subject(values.get("subject")),
+            include_routine=_optional_checkbox(values.get("include_routine")),
             start_at=_optional_local_datetime(values.get("start"), zone),
             end_at=_optional_local_datetime(values.get("end"), zone),
         )
@@ -104,6 +106,7 @@ async def event_list(request: Request) -> Response:
             "pipeline",
             "level",
             "subject",
+            "include_routine",
             "start",
             "end",
         )
@@ -353,6 +356,14 @@ def _optional_subject(value: str | None) -> str | None:
     return normalized
 
 
+def _optional_checkbox(value: str | None) -> bool:
+    if value in {None, ""}:
+        return False
+    if value != "1":
+        raise ValueError("invalid checkbox")
+    return True
+
+
 def _optional_local_datetime(
     value: str | None,
     zone: ZoneInfo,
@@ -383,6 +394,7 @@ def _empty_values() -> dict[str, str]:
         "pipeline": "",
         "level": "",
         "subject": "",
+        "include_routine": "",
         "start": "",
         "end": "",
         "page_size": "50",

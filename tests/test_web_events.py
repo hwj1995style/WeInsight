@@ -151,7 +151,7 @@ def test_events_page_strict_filters_and_safe_output(
     runtime_service: RuntimeService,
 ) -> None:
     response = authenticated_client.get(
-        "/events?subject=%E6%A0%B8%E5%BF%83%E7%BE%A4A&job_id=7&run_id=31&target_id=51&pipeline=group&"
+        "/events?subject=%E6%A0%B8%E5%BF%83%E7%BE%A4A&include_routine=1&job_id=7&run_id=31&target_id=51&pipeline=group&"
         "level=warning&start=2026-07-10T11%3A00&end=2026-07-10T12%3A30"
     )
 
@@ -169,6 +169,7 @@ def test_events_page_strict_filters_and_safe_output(
     assert filters.target_run_id == 51
     assert filters.pipeline_type is PipelineType.GROUP
     assert filters.subject_name == "核心群A"
+    assert filters.include_routine is True
     assert filters.start_at.tzinfo is ZONE
 
 
