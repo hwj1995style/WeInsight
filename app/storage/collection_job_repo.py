@@ -168,19 +168,28 @@ class MysqlCollectionJobRepo:
                     {"job_name": SYSTEM_ARTICLE_JOB_NAME},
                 ).mappings().first()
             if row is not None and current_ids == normalized:
+                refresh_schedule = (
+                    not normalized
+                    or (
+                        live_run is None
+                        and (
+                            str(row.get("status") or "") != "active"
+                            or row.get("next_run_at") is None
+                        )
+                    )
+                )
                 connection.execute(
                     _REFRESH_SYSTEM_ARTICLE_JOB,
                     {
                         "job_id": int(row["id"]),
                         "interval_seconds": interval_minutes * 60,
                         "next_run_at": (
-                            _to_db_datetime(now) if normalized and live_run is None else None
+                            _to_db_datetime(now) if normalized else None
                         ),
                         "status": (
-                            str(row["status"])
-                            if live_run is not None
-                            else ("active" if normalized else "stopped")
+                            "active" if normalized else "stopped"
                         ),
+                        "refresh_schedule": refresh_schedule,
                     },
                 )
                 return
@@ -685,7 +694,7 @@ def _list_filter_clause(filters: JobListFilter) -> tuple[str, dict[str, Any]]:
 
 _LOCK_SYSTEM_ARTICLE_JOB = text(
     """
-    SELECT job.id,
+    SELECT job.id, job.status, job.next_run_at,
            GROUP_CONCAT(target.article_config_id ORDER BY target.article_config_id) AS target_ids
     FROM wechat_collection_job AS job
     LEFT JOIN wechat_collection_job_target AS target ON target.job_id = job.id
@@ -728,8 +737,8 @@ _REFRESH_SYSTEM_ARTICLE_JOB = text(
     """
     UPDATE wechat_collection_job
     SET interval_seconds = :interval_seconds,
-        status = :status,
-        next_run_at = :next_run_at,
+        status = CASE WHEN :refresh_schedule THEN :status ELSE status END,
+        next_run_at = CASE WHEN :refresh_schedule THEN :next_run_at ELSE next_run_at END,
         version = version + 1
     WHERE id = :job_id
     """

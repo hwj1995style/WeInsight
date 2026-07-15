@@ -265,6 +265,23 @@ def test_system_reconcile_defers_target_switch_while_old_run_is_live() -> None:
     assert all("completed" not in item for item in sql)
 
 
+def test_system_reconcile_preserves_next_run_when_targets_are_unchanged() -> None:
+    next_run = datetime(2026, 7, 10, 9, 10)
+    engine = Engine([
+        Result(rows=[{"coordination_key": "article_global"}]),
+        Result(rows=[{"id": 41, "status": "active", "next_run_at": next_run, "target_ids": "8"}]),
+        Result(rows=[]),
+        Result(),
+    ])
+
+    MysqlCollectionJobRepo(engine).reconcile_system_article_job((8,), 10, NOW)
+
+    sql, params = engine.connection.executions[3]
+    assert "CASE WHEN :refresh_schedule" in sql
+    assert params["refresh_schedule"] is False
+    assert params["next_run_at"] == NOW.replace(tzinfo=None)
+
+
 def test_system_reconcile_refuses_to_run_without_seeded_coordination_row() -> None:
     engine = Engine([Result(rows=[])])
 
