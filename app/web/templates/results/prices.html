@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}公众号报价矩阵 · WeInsight{% endblock %}
+{% block content %}
+  <div class="page-heading"><div><h1>公众号报价矩阵</h1><p>横向对比同日报价；推算值均标明计算依据。</p></div></div>
+  <nav class="section-tabs" aria-label="结果类型"><a href="/results/groups">群消息</a><a href="/results/articles">文章</a><a href="/results/prices" aria-current="page">报价</a></nav>
+  <form class="filter-panel" method="get" action="/results/prices">
+    <div><label for="quote_date">报价日期</label><input id="quote_date" type="date" name="quote_date" value="{{ quote_date or '' }}"></div>
+    <button type="submit">查询</button>
+  </form>
+  <section class="content-panel result-panel price-matrix">
+    {% if matrix and matrix.columns %}
+      <p class="price-matrix-summary">报价日期：{{ matrix.quote_date }}{% if matrix.updated_at %} · 最近更新：{{ matrix.updated_at }}{% endif %} · 来源 {{ matrix.source_count }} 条</p>
+      <div class="table-scroll price-matrix-scroll" tabindex="0" aria-label="公众号报价矩阵，可横向滚动">
+        <table class="data-table results-table price-matrix-table">
+          <thead>
+            <tr>
+              <th scope="col" rowspan="2">码数</th>
+              {% set header = namespace(account_name='') %}
+              {% for column in matrix.columns %}
+                {% if column.account_name != header.account_name %}
+                  {% set account_columns = matrix.columns | selectattr('account_name', 'equalto', column.account_name) | list %}
+                  <th scope="colgroup" colspan="{{ account_columns | length }}">{{ column.account_name | replace('江西九江褐壳蛋', '江西九江') | replace('蛋品', '') | replace('价格', '') }}（{{ column.unit }}）</th>
+                  {% set header.account_name = column.account_name %}
+                {% endif %}
+              {% endfor %}
+            </tr>
+            <tr>{% for column in matrix.columns %}<th scope="col">{{ column.label }}</th>{% endfor %}</tr>
+          </thead>
+          <tbody>
+            {% for row in matrix.rows %}
+              <tr>
+                <th scope="row">{{ row.size }}码</th>
+                {% for column in matrix.columns %}
+                  {% set cell = row.cells[column.key] %}
+                  <td class="price-cell{% if cell.source == 'extrapolated' %} price-cell-extrapolated{% endif %}" data-price-source="{{ cell.source }}"{% if cell.source == 'extrapolated' %} tabindex="0" aria-label="{{ cell.display_value }}，推算；{{ cell.explanation }}" title="{{ cell.explanation }}"{% elif cell.explanation %} title="{{ cell.explanation }}"{% endif %}>{{ cell.display_value }}</td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <section class="price-matrix-rules" aria-labelledby="price-matrix-rules"><h2 id="price-matrix-rules">取数规则</h2><p class="price-matrix-rule-note">缺码采用最近一组已知价差推算，具体依据可悬停查看。</p><div class="price-matrix-rule-grid">{% for rule in matrix.rules %}<article><h3>{{ rule.account_name }}</h3><p>{{ rule.description or ('报价按' ~ rule.unit ~ '展示。') }}</p></article>{% endfor %}</div></section>
+    {% else %}
+      <div class="empty-state"><h2>暂无可展示的公众号报价</h2><p>请选择其他报价日期后重试。</p></div>
+    {% endif %}
+  </section>
+{% endblock %}

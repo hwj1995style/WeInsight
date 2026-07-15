@@ -1,0 +1,64 @@
+review_version: v1
+
+score_scale:
+  min: 1
+  max: 5
+
+sections:
+  group_daily_report:
+    label: "群日报"
+    dimensions:
+      - demand_supply_accuracy
+      - keyword_noise
+      - contact_masking
+      - readability
+  article_daily_report:
+    label: "文章日报"
+    dimensions:
+      - summary_usefulness
+      - tag_accuracy
+      - table_extraction_quality
+      - ocr_table_quality
+      - readability
+  summary_daily_report:
+    label: "汇总日报"
+    dimensions:
+      - overview_usefulness
+      - cross_link_balance
+      - actionability
+
+dimension_labels:
+  demand_supply_accuracy: "供需判断准确性"
+  keyword_noise: "关键词噪声控制"
+  contact_masking: "联系方式脱敏"
+  readability: "可读性"
+  summary_usefulness: "摘要可用性"
+  tag_accuracy: "标签准确性"
+  table_extraction_quality: "HTML 表格提取质量"
+  ocr_table_quality: "图片 OCR 表格质量"
+  overview_usefulness: "总览可用性"
+  cross_link_balance: "双链路信息平衡"
+  actionability: "行动建议可执行性"
+
+quality_thresholds:
+  pass_min_average_score: 4.0
+  watch_min_average_score: 3.0
+  pause_below_average_score: 3.0
+  critical_dimension_min_score: 2
+
+threshold_adjustment_rules:
+  keep_current_thresholds:
+    when: "三类日报平均分均不低于 4.0，且无关键维度低于 3 分"
+    action: "保持当前清洗、分析和日报规则，仅记录样本"
+  keep_manual_review:
+    when: "任一日报平均分低于 4.0 但不低于 3.0，或同一维度连续两天低于 4 分"
+    action: "继续人工复盘，不扩大自动化范围，优先调整关键词、标签或模板文案"
+  pause_article_link:
+    when: "文章日报或汇总日报平均分低于 3.0，或表格/OCR 维度低于 2 分"
+    action: "暂停 article 链路扩容，保留群链路，回到人工单账号复核"
+  tighten_group_keywords:
+    when: "群日报关键词噪声连续两天低于 3 分"
+    action: "收紧群分析关键词规则，增加排除词和人工抽样"
+  review_summary_template:
+    when: "汇总日报行动建议低于 3 分"
+    action: "调整汇总日报模板，只保留已验证的群日报和文章日报摘要信号"

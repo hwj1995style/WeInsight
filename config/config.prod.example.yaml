@@ -1,0 +1,101 @@
+app:
+  env: prod
+  timezone: Asia/Shanghai
+  log_level: INFO
+
+wechat:
+  pc_version: "4.1.8.107"
+  window_title: "微信"
+  fixed_window: true
+  check_login_interval_seconds: 300
+
+runtime:
+  log_dir: runtime/logs
+  screenshot_dir: runtime/screenshots
+  report_dir: runtime/reports
+
+web:
+  host: ${WEINSIGHT_WEB_HOST}
+  port: 8848
+  secure_cookie: true
+  tls_certfile: ${WEINSIGHT_TLS_CERTFILE}
+  tls_keyfile: ${WEINSIGHT_TLS_KEYFILE}
+
+auth:
+  default_username: admin
+  session_cookie_name: weinsight_session
+  csrf_cookie_name: weinsight_csrf
+  session_idle_minutes: 480
+  session_absolute_minutes: 1440
+  login_failure_limit: 5
+  login_lock_minutes: 15
+
+workers:
+  collector_mode: real
+  schedule_tick_seconds: 5
+  event_info_retention_days: 14
+  event_verbose_retention_days: 7
+  event_warning_error_retention_months: 3
+  event_audit_retention_months: 6
+  event_cleanup_interval_hours: 24
+  event_cleanup_batch_size: 1000
+  heartbeat_seconds: 10
+  run_lease_seconds: 120
+  pipeline_tick_seconds: 5
+  group_clean_batch_size: 50
+  group_analysis_batch_size: 100
+  article_parse_batch_size: 20
+  article_analysis_batch_size: 20
+
+pipelines:
+  group:
+    enabled: true
+    core_group_limit: 5
+    poll_interval_seconds: 30
+    max_group_per_round: 5
+
+    rpa_timeout_seconds: 60
+    target_round_seconds: 60
+  article:
+    enabled: false
+    account_limit: 20
+    crawl_time: "07:30"
+    account_poll_interval_minutes: 60
+    max_articles_per_account: 5
+    collect_today_only: true
+    dedup_enabled: true
+    dedup_key: article_hash
+    browser_executable_path: auto
+    parse_after_release_ui: true
+    egg_price_extraction_enabled: true
+    price_items_json_preview_limit: 20
+    image_quote_note_enabled: true
+    image_ocr_enabled: true
+    sync_interval_minutes: 10
+    werss_catalog_base_url: http://127.0.0.1:8001
+    werss_access_key: ${WEINSIGHT_WERSS_ACCESS_KEY}
+    werss_secret_key: ${WEINSIGHT_WERSS_SECRET_KEY}
+    rss_max_concurrency: 4
+    rss_max_response_bytes: 10485760
+    rss_allowed_private_hosts:
+      - 127.0.0.1:8001
+    content_base_url: http://127.0.0.1:8001
+    content_timeout_seconds: 30
+    content_max_response_bytes: 5242880
+    content_mode: web
+  ui_resource:
+    mode: exclusive
+    group_priority: true
+    max_core_group_block_seconds: 10
+    lock_acquire_timeout_seconds: 5
+    lock_lease_seconds: 120
+    lock_heartbeat_interval_seconds: 10
+    stale_lock_recover_seconds: 180
+    metrics_enabled: true
+
+mysql:
+  host: prod-mysql.internal
+  port: 3306
+  database: weinsight_prod
+  username: weinsight_prod
+  password: ${WEINSIGHT_MYSQL_PASSWORD}

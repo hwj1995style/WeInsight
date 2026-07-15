@@ -1,0 +1,25 @@
+services:
+  werss:
+    image: ghcr.io/rachelos/we-mp-rss@sha256:53912fcb3d523d1e640adcb7066cc18123f00e9510882a7982d0991f3113845f
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WERSS_PORT:-8001}:8001"
+    env_file:
+      - .env
+    environment:
+      DB: ${DB:?set the SQLAlchemy MySQL URL}
+    volumes:
+      - ./data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/', timeout=5)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "2m"
+        max-file: "2"

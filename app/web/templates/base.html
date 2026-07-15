@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}WeInsight 管理后台{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}?v=20260715-fluid-workspace">
+  </head>
+  <body>
+    <div class="app-shell" data-sidebar-state="expanded">
+      <aside class="sidebar" id="app-sidebar">
+        <div class="sidebar-brand">
+          <a class="brand" href="/dashboard"><span class="brand-mark">W</span><span class="brand-label">WeInsight</span></a>
+          <button id="sidebar-toggle" class="icon-button sidebar-toggle" type="button" aria-label="折叠侧栏" aria-expanded="true" aria-controls="app-sidebar"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+        </div>
+        <nav class="primary-nav" aria-label="主要导航">
+        <a href="/dashboard" aria-label="总览" title="总览" {% if section == "dashboard" %}aria-current="page"{% endif %}><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg><span class="nav-label">总览</span></a>
+        <a href="/sources/groups" aria-label="微信群" title="微信群" {% if section == "groups" %}aria-current="page"{% endif %}><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 19v-1c0-2.8 2.7-5 6-5s6 2.2 6 5v1M16 11a2.5 2.5 0 1 0 0-5M17 14c2.3.3 4 1.9 4 4v1"/></svg><span class="nav-label">微信群</span></a>
+        <a href="/sources/articles" aria-label="公众号" title="公众号" {% if section == "articles" %}aria-current="page"{% endif %}><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M5 3h11l3 3v15H5V3zm3 5h8M8 12h8M8 16h6"/></svg><span class="nav-label">公众号</span></a>
+        <a href="/jobs" aria-label="任务" title="任务" {% if section == "jobs" %}aria-current="page"{% endif %}><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M9 5h6M9 3h6v4H9V3zM6 5H4v16h16V5h-2M8 12l2 2 5-5"/></svg><span class="nav-label">任务</span></a>
+        <a href="/runs" aria-label="运行" title="运行" {% if section == "runs" %}aria-current="page"{% endif %}><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M8 5v14l11-7L8 5z"/></svg><span class="nav-label">运行</span></a>
+        <a href="/events" aria-label="日志" title="日志" {% if section == "events" %}aria-current="page"{% endif %}><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M6 4h12v16H6V4zm3 4h6M9 12h6M9 16h4"/></svg><span class="nav-label">日志</span></a>
+        <a href="/workers" aria-label="Worker" title="Worker" {% if section == "workers" %}aria-current="page"{% endif %}><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M9 3h6v3h3v6h-3v3H9v-3H6V6h3V3zm-5 9v7h16v-7M8 19v2m8-2v2"/></svg><span class="nav-label">Worker</span></a>
+        <a href="/results/groups" aria-label="结果" title="结果" {% if section == "results" %}aria-current="page"{% endif %}><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3"/></svg><span class="nav-label">结果</span></a>
+        <a href="/reports" aria-label="日报" title="日报" {% if section == "reports" %}aria-current="page"{% endif %}><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M5 3h14v18H5V3zm3 5h8m-8 4h8m-8 4h5"/></svg><span class="nav-label">日报</span></a>
+        </nav>
+        <div class="sidebar-account"><span>{{ request.state.admin.username }}</span><a href="/account/password">账户设置</a><form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button type="submit">退出</button></form></div>
+      </aside>
+      <div id="nav-backdrop" class="nav-backdrop" hidden></div>
+      <div class="app-main" id="app-main">
+        <header class="top-toolbar">
+          <button id="mobile-nav-toggle" class="icon-button mobile-nav-toggle" type="button" aria-label="打开导航" aria-expanded="false" aria-controls="app-sidebar"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+          <span class="toolbar-title">{% block page_title %}{{ self.title() | replace(" · WeInsight", "") }}{% endblock %}</span>
+          <div class="toolbar-account">{{ request.state.admin.username }}</div>
+        </header>
+        <main class="page-shell">{% block content %}{% endblock %}</main>
+      </div>
+    </div>
+    <script src="/static/app-shell.js" defer></script>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

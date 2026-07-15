@@ -1,0 +1,38 @@
+# Python caches and tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local environments and secrets
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+deploy/werss/.env
+!deploy/werss/.env.example
+deploy/werss/data/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Local runtime state
+runtime/
+wxauto_logs/
+*.log
+
+# Subagent execution scratch data
+.superpowers/sdd/
+.worktrees/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

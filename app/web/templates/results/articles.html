@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}文章结果 · WeInsight{% endblock %}
+{% block content %}
+  <div class="page-heading"><div><h1>文章分析明细</h1><p>仅显示经过筛选的结构化分析字段。</p></div></div>
+  <nav class="section-tabs" aria-label="结果类型"><a href="/results/groups">群消息</a><a href="/results/articles" aria-current="page">文章</a><a href="/results/prices">报价</a></nav>
+  <form class="filter-panel" method="get" action="/results/articles">
+    <div><label for="account_name">公众号</label><input id="account_name" name="account_name" value="{{ values.get('account_name', '') }}"></div>
+    <div><label for="publish_date">发布日期</label><input id="publish_date" type="date" name="publish_date" value="{{ values.get('publish_date', '') }}"></div>
+    <div><label for="quote_date">报价日期</label><input id="quote_date" type="date" name="quote_date" value="{{ values.get('quote_date', '') }}"></div>
+    <div><label for="page_size">每页</label><select id="page_size" name="page_size">{% for size in [20, 50, 100] %}<option value="{{ size }}" {% if page.page_size == size %}selected{% endif %}>{{ size }}</option>{% endfor %}</select></div>
+    <button type="submit">查询</button>
+  </form>
+  <section class="content-panel result-panel">
+    {% if articles %}<div class="table-scroll" tabindex="0" aria-label="文章结果明细"><table class="data-table results-table"><thead><tr><th scope="col">公众号</th><th scope="col">标题</th><th scope="col">发布时间</th><th scope="col">报价日期</th><th scope="col">采集时间</th><th scope="col">摘要</th><th scope="col">标签</th><th scope="col">内容长度</th><th scope="col">分析版本</th></tr></thead><tbody>{% for row in articles %}<tr><th scope="row">{{ row.account_name }}</th><td>{{ row.title }}</td><td>{{ row.publish_time or '-' }}</td><td>{{ row.quote_date or '-' }}</td><td>{{ row.collect_time or '-' }}</td><td class="content-cell">{{ row.summary_text }}</td><td>{{ row.topic_tags | join('、') or '-' }}</td><td>{{ row.content_length }}</td><td>{{ row.analysis_version }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state"><h2>暂无符合条件的文章明细</h2><p>调整筛选条件后重试。</p></div>{% endif %}
+  </section>
+  {% include "results/pagination.html" %}
+{% endblock %}

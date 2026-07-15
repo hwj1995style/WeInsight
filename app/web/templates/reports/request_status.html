@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}日报请求状态 · WeInsight{% endblock %}
+{% block content %}
+  <a class="back-link" href="/reports">← 返回日报</a>
+  <section id="report-request-status" class="content-panel request-status-panel"{% if polling %} hx-get="/reports/requests/{{ item.id }}" hx-trigger="every 2s" hx-select="#report-request-status" hx-target="#report-request-status" hx-swap="outerHTML"{% endif %}>
+    <div class="page-heading request-status-heading"><div><h1>日报生成请求</h1><p>请求编号 #{{ item.id }}</p></div><span class="request-status request-status-{{ item.status.value }}">{{ status_label }}</span></div>
+    <dl class="detail-grid">
+      <div><dt>日报类型</dt><dd>{{ type_label }}</dd></div>
+      <div><dt>日报日期</dt><dd>{{ item.report_date.isoformat() }}</dd></div>
+      <div><dt>采集对象</dt><dd>{{ item.source_name or '全部对象' }}</dd></div>
+      <div><dt>提交人</dt><dd>{{ item.requested_by }}</dd></div>
+      <div><dt>数据截止</dt><dd>{{ item.data_cutoff_time }}</dd></div>
+      <div><dt>创建时间</dt><dd>{{ item.create_time }}</dd></div>
+      <div><dt>开始时间</dt><dd>{{ item.start_time or '—' }}</dd></div>
+      <div><dt>结束时间</dt><dd>{{ item.end_time or '—' }}</dd></div>
+    </dl>
+    {% if item.error_summary %}<p class="notice error request-error">{{ item.error_summary }}</p>{% endif %}
+    {% if polling %}<p class="muted polling-note" role="status">页面每 2 秒自动更新，任务完成后停止轮询。</p>{% endif %}
+  </section>
+{% endblock %}
+{% block scripts %}{% if polling %}<script src="{{ url_for('static', path='/vendor/htmx.min.js') }}" defer></script>{% endif %}{% endblock %}

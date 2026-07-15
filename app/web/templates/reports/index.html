@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}日报 · WeInsight{% endblock %}
+{% block content %}
+  <div class="page-heading"><div><h1>采集日报</h1><p>按自然日与采集对象查看脱敏日报摘要和安全正文。</p></div></div>
+  <section class="content-panel report-request-panel">
+    <div><h2>手动生成日报</h2><p class="muted">请求由后处理 Worker 异步执行；今日生成临时版，历史日期生成最终版。</p></div>
+    <form class="report-request-form" method="post" action="/reports/generate">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+      <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
+      <div class="aligned-form-field"><label for="generate_report_type">生成类型</label><select id="generate_report_type" name="report_type"><option value="group">微信群</option><option value="article">公众号</option><option value="summary">汇总日报</option><option value="all">全部日报</option></select></div>
+      <div class="aligned-form-field"><label for="generate_report_date">日期</label><input id="generate_report_date" type="date" name="report_date" value="{{ report_date.isoformat() }}" required></div>
+      <div class="aligned-form-field"><label for="generate_source_name">采集对象（可选）</label><input id="generate_source_name" name="source_name" maxlength="200" autocomplete="off"><p class="field-help">汇总或全部日报必须留空。</p></div>
+      <div class="aligned-form-action"><button type="submit">提交生成请求</button></div>
+    </form>
+  </section>
+  <form class="filter-panel report-filters" method="get" action="/reports">
+    <div><label for="report_date">日期</label><input id="report_date" type="date" name="date" value="{{ report_date.isoformat() }}"></div>
+    <div><label for="report_type">日报类型</label><select id="report_type" name="type"><option value="group" {% if report_type == 'group' %}selected{% endif %}>微信群</option><option value="article" {% if report_type == 'article' %}selected{% endif %}>公众号</option><option value="summary" {% if report_type == 'summary' %}selected{% endif %}>双链路汇总</option></select></div>
+    <div><label for="source">采集对象</label><input id="source" name="source" value="{{ source or '' }}" {% if report_type == 'summary' %}disabled{% endif %}></div>
+    <div><label for="page_size">每页</label><select id="page_size" name="page_size">{% for size in [20, 50, 100] %}<option value="{{ size }}" {% if page_size == size %}selected{% endif %}>{{ size }}</option>{% endfor %}</select></div>
+    <button type="submit">查询</button>
+  </form>
+
+  {% if report_type == 'summary' %}
+    <div class="report-download-bar"><a class="button secondary compact" href="/reports/summary/{{ report_date.isoformat() }}.md">下载汇总 Markdown</a></div>
+    <div class="report-grid">
+      <section class="content-panel"><h2>微信群日报摘要</h2>{% if group_reports %}<div class="table-scroll" tabindex="0" aria-label="微信群日报摘要"><table class="data-table report-table"><thead><tr><th scope="col">对象</th><th scope="col">消息</th><th scope="col">发送人</th><th scope="col">需求 / 供应</th></tr></thead><tbody>{% for row in group_reports %}<tr><th scope="row">{{ row.group_name }}</th><td>{{ row.message_count }}</td><td>{{ row.sender_count }}</td><td>{{ row.demand_count }} / {{ row.supply_count }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="muted">暂无微信群日报。</p>{% endif %}</section>
+      <section class="content-panel"><h2>公众号日报摘要</h2>{% if article_reports %}<div class="table-scroll" tabindex="0" aria-label="公众号日报摘要"><table class="data-table report-table"><thead><tr><th scope="col">对象</th><th scope="col">文章</th><th scope="col">平均长度</th></tr></thead><tbody>{% for row in article_reports %}<tr><th scope="row">{{ row.account_name }}</th><td>{{ row.article_count }}</td><td>{{ row.avg_content_length }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="muted">暂无公众号日报。</p>{% endif %}</section>
+    </div>
+  {% else %}
+    <section class="content-panel report-list">
+      <h2>{{ '微信群日报' if report_type == 'group' else '公众号日报' }}</h2>
+      {% if reports %}<div class="table-scroll" tabindex="0" aria-label="日报列表"><table class="data-table report-table"><thead><tr><th scope="col">对象</th><th scope="col">标题</th><th scope="col">版本</th><th scope="col">数据截止</th><th scope="col">触发方式</th><th scope="col">关键计数</th><th scope="col">查看</th></tr></thead><tbody>{% for row in reports %}{% set row_source = row.group_name if report_type == 'group' else row.account_name %}<tr><th scope="row">{{ row_source }}</th><td>{{ row.title }}</td><td><span class="report-version report-version-{{ row.report_status.value }}">{{ lifecycle_labels[row.report_status] }}</span></td><td>{{ row.data_cutoff_time }}</td><td>{{ trigger_labels[row.generation_trigger] }} · {{ row.last_generated_by }}</td><td>{% if report_type == 'group' %}消息 {{ row.message_count }} / 发送人 {{ row.sender_count }}{% else %}文章 {{ row.article_count }} / 平均长度 {{ row.avg_content_length }}{% endif %}</td><td><a href="/reports?date={{ report_date.isoformat() }}&amp;type={{ report_type }}&amp;source={{ row_source | urlencode }}&amp;page_size={{ page_size }}">详情</a><br><a href="/reports/{{ report_type }}/{{ report_date.isoformat() }}/{{ row_source | urlencode }}.md">下载</a></td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state"><h2>暂无符合条件的日报</h2><p>可调整日期或采集对象。</p></div>{% endif %}
+    </section>
+    {% if detail %}<section class="content-panel report-detail"><div class="report-metrics"><div><span>对象</span><strong>{{ detail.group_name if report_type == 'group' else detail.account_name }}</strong></div><div><span>版本</span><strong>{{ lifecycle_labels[detail.report_status] }}</strong></div><div><span>数据截止</span><strong>{{ detail.data_cutoff_time }}</strong></div><div><span>触发方式</span><strong>{{ trigger_labels[detail.generation_trigger] }} · {{ detail.last_generated_by }}</strong></div>{% if report_type == 'group' %}<div><span>消息</span><strong>{{ detail.message_count }}</strong></div><div><span>需求</span><strong>{{ detail.demand_count }}</strong></div><div><span>供应</span><strong>{{ detail.supply_count }}</strong></div>{% else %}<div><span>文章</span><strong>{{ detail.article_count }}</strong></div><div><span>平均长度</span><strong>{{ detail.avg_content_length }}</strong></div>{% endif %}</div><div class="report-download-bar"><a class="button secondary compact" href="/reports/{{ report_type }}/{{ report_date.isoformat() }}/{{ (detail.group_name if report_type == 'group' else detail.account_name) | urlencode }}.md">下载 Markdown</a></div><article class="report-markdown">{{ safe_markdown }}</article></section>{% elif source %}<section class="content-panel empty-state"><h2>未找到日报详情</h2><p>该日期和对象没有可用日报。</p></section>{% endif %}
+  {% endif %}
+  <nav class="pagination" aria-label="日报分页"><span>第 {{ page }} 页</span><div>{% if previous_url %}<a class="button secondary compact" href="{{ previous_url }}">上一页</a>{% endif %} {% if next_url %}<a class="button secondary compact" href="{{ next_url }}">下一页</a>{% endif %}</div></nav>
+{% endblock %}
