@@ -9,6 +9,7 @@ from app.domain.article_analysis import CleanArticleForAnalysis
 from app.pipelines.article_transient_extractor import (
     PlaywrightArticleTransientExtractor,
     ProviderBackedArticleTransientExtractor,
+    TextFirstArticleTransientExtractor,
     extract_transient_article_data,
 )
 
@@ -37,6 +38,45 @@ def test_provider_backed_extractor_replaces_only_transient_body() -> None:
     assert provider.seen_sources[0].article_url == article.article_url
     assert provider.seen_sources[0].content_locator == "locator-123"
     assert provider.seen_sources[0].content_locator_type == "werss_article_view"
+
+
+def test_text_first_router_uses_dom_extractor_only_for_matrix_accounts() -> None:
+    class FakeExtractor:
+        def __init__(self, marker: str) -> None:
+            self.marker = marker
+            self.calls = []
+
+        def extract(self, article):
+            self.calls.append(article.account_name)
+            return article
+
+    provider = FakeExtractor("provider")
+    dom = FakeExtractor("dom")
+    router = TextFirstArticleTransientExtractor(provider, dom)
+    target = CleanArticleForAnalysis(
+        article_hash="target",
+        account_name="成都鸡蛋价格",
+        title="报价",
+        publish_time=None,
+        author=None,
+        digest=None,
+        content_length=0,
+    )
+    other = CleanArticleForAnalysis(
+        article_hash="other",
+        account_name="行业观察",
+        title="新闻",
+        publish_time=None,
+        author=None,
+        digest=None,
+        content_length=0,
+    )
+
+    router.extract(target)
+    router.extract(other)
+
+    assert dom.calls == ["成都鸡蛋价格"]
+    assert provider.calls == ["行业观察"]
 
 
 class FakeContentProvider:
@@ -253,14 +293,102 @@ def test_playwright_transient_extractor_reopens_article_and_replaces_transient_f
                 "timeout": 12345,
             },
         ),
+        ("evaluate", "lazy_load"),
         ("wait_for_timeout", 1200),
         ("evaluate", "script"),
         ("close", None),
     ]
 
 
-def _build_fake_sync_playwright(payload: dict[str, Any], events: list[tuple[str, Any]]):
+def test_playwright_transient_extractor_runs_ocr_only_for_configured_image_account(
+    monkeypatch,
+) -> None:
+    class FakeOcrEngine:
+        def __init__(self) -> None:
+            self.images = []
+
+        def recognize(self, image_bytes: bytes) -> list[str]:
+            self.images.append(image_bytes)
+            return [
+                "湖南三尖精品蛋360枚/箱收购价",
+                "48 -1 262 262 0",
+                "47 -1 261 261 0",
+            ]
+
+    payload = {
+        "body_text": "",
+        "tables": [],
+        "large_images": [
+            {
+                "source_image_index": 0,
+                "width": 484,
+                "height": 590,
+                "current_src": "https://mmbiz.qpic.cn/example/0",
+            }
+        ],
+    }
+    events: list[tuple[str, Any]] = []
+    sync_playwright = _build_fake_sync_playwright(
+        payload, events, image_bytes=b"image-bytes"
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "playwright",
+        SimpleNamespace(sync_api=SimpleNamespace(sync_playwright=sync_playwright)),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "playwright.sync_api",
+        SimpleNamespace(sync_playwright=sync_playwright),
+    )
+    monkeypatch.setattr(
+        "app.pipelines.article_transient_extractor.resolve_playwright_browser_executable_path",
+        lambda configured_path: None,
+    )
+    engine = FakeOcrEngine()
+    extractor = PlaywrightArticleTransientExtractor(ocr_engine=engine)
+    article = CleanArticleForAnalysis(
+        article_hash="ocr",
+        account_name="湖南三尖农牧公司",
+        title="湖南三尖报价",
+        publish_time=None,
+        author=None,
+        digest=None,
+        content_length=0,
+        article_url="https://mp.weixin.qq.com/s/ocr",
+    )
+
+    result = extractor.extract(article)
+
+    assert engine.images == [b"image-bytes"]
+    assert any(
+        item.get("source_media_type") == "image_ocr"
+        and item["rows"][0] == ["48", "-1", "262", "262", "0"]
+        for item in result.transient_ocr_tables or []
+    )
+    assert ("image_get", "https://mmbiz.qpic.cn/example/0") in events
+
+
+def _build_fake_sync_playwright(
+    payload: dict[str, Any],
+    events: list[tuple[str, Any]],
+    *,
+    image_bytes: bytes = b"",
+):
+    class FakeResponse:
+        ok = True
+
+        def body(self) -> bytes:
+            return image_bytes
+
+    class FakeRequest:
+        def get(self, url: str, **kwargs) -> FakeResponse:
+            events.append(("image_get", url))
+            return FakeResponse()
+
     class FakePage:
+        request = FakeRequest()
+
         def goto(self, url: str, *, wait_until: str, timeout: int) -> None:
             events.append(
                 (
@@ -277,6 +405,9 @@ def _build_fake_sync_playwright(payload: dict[str, Any], events: list[tuple[str,
             events.append(("wait_for_timeout", timeout_ms))
 
         def evaluate(self, script: str) -> dict[str, Any]:
+            if "scrollHeight" in script:
+                events.append(("evaluate", "lazy_load"))
+                return None
             assert "#js_content" in script
             assert "large_images" in script
             events.append(("evaluate", "script"))

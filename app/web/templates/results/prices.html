@@ -19,7 +19,7 @@
               {% for column in matrix.columns %}
                 {% if column.account_name != header.account_name %}
                   {% set account_columns = matrix.columns | selectattr('account_name', 'equalto', column.account_name) | list %}
-                  <th scope="colgroup" colspan="{{ account_columns | length }}">{{ column.account_name | replace('蛋品', '') | replace('价格', '') }}（{{ column.unit }}）</th>
+                  <th scope="colgroup" colspan="{{ account_columns | length }}">{{ column.account_name | replace('江西九江褐壳蛋', '江西九江') | replace('蛋品', '') | replace('价格', '') }}（{{ column.unit }}）</th>
                   {% set header.account_name = column.account_name %}
                 {% endif %}
               {% endfor %}
@@ -32,7 +32,7 @@
                 <th scope="row">{{ row.size }}码</th>
                 {% for column in matrix.columns %}
                   {% set cell = row.cells[column.key] %}
-                  <td class="price-cell{% if cell.source == 'extrapolated' %} price-cell-extrapolated{% endif %}" data-price-source="{{ cell.source }}"{% if cell.source == 'extrapolated' %} tabindex="0" aria-label="{{ cell.display_value }}，推算；{{ cell.explanation }}" title="{{ cell.explanation }}"{% elif cell.explanation %} title="{{ cell.explanation }}"{% endif %}>{{ cell.display_value }}{% if cell.source == 'extrapolated' %}<span class="price-cell-note" aria-hidden="true">推算</span>{% endif %}</td>
+                  <td class="price-cell{% if cell.source == 'extrapolated' %} price-cell-extrapolated{% endif %}" data-price-source="{{ cell.source }}"{% if cell.source == 'extrapolated' %} tabindex="0" aria-label="{{ cell.display_value }}，推算；{{ cell.explanation }}" title="{{ cell.explanation }}"{% elif cell.explanation %} title="{{ cell.explanation }}"{% endif %}>{{ cell.display_value }}</td>
                 {% endfor %}
               </tr>
             {% endfor %}

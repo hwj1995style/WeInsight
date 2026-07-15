@@ -42,6 +42,7 @@ class PriceMatrixColumn:
     label: str
     unit: str
     price_side: PriceSide
+    product_variant: str | None = None
 
 
 @dataclass(frozen=True)
@@ -81,20 +82,26 @@ class PriceMatrixSourceRow:
     price_low: Decimal | None
     price_high: Decimal | None
     price_unit_text: str | None
+    product_name: str | None = None
 
 
 ACCOUNT_MATRIX_RULES = tuple(
-    AccountMatrixRule(account_name=account_name, unit=unit, description=description)
-    for account_name, unit, description in (
-        ("家美鲜鸡蛋 佳美鲜", "元/箱", "按元/箱展示；精确码数或重量区间展开；价格存在上下限时拆分低价、高价列。"),
-        ("河北馆陶鸡蛋报价", "元/箱", "按元/箱展示；净重区间内各码使用同一报价；价格存在上下限时拆分低价、高价列。"),
-        ("河南金咕咕蛋品", "元/斤", "按元/斤展示；规格区间展开；区间边界重复时取较高价格；价格存在上下限时拆分低价、高价列。"),
-        ("贵阳鸡蛋价格", "元/箱", "按元/箱展示；明确拆分低价、高价列；重量区间展开。"),
-        ("蓝天禽蛋联盟", "元/箱", "按元/箱展示；只纳入配置指定的目标市场；重量区间内各码使用同一报价。"),
-        ("湖南三尖农牧公司", "元/箱", "按元/箱展示；精确码数或重量区间展开；价格存在上下限时拆分低价、高价列。"),
-        ("成都鸡蛋价格", "元/箱", "按元/箱展示；净重区间内各码使用同一报价；价格区间拆低价、高价列。"),
-        ("河北辛集城方蛋品", "元/箱", "按元/箱展示；精确码数或重量区间展开；价格存在上下限时拆分低价、高价列。"),
-        ("江西九江褐壳蛋", "元/箱", "按元/箱展示；精确码数或重量区间展开；价格存在上下限时拆分低价、高价列。"),
+    AccountMatrixRule(
+        account_name=account_name,
+        unit=unit,
+        description=description,
+        target_market=target_market,
+    )
+    for account_name, unit, description, target_market in (
+        ("家美鲜鸡蛋 佳美鲜", "元/箱", "按元/箱展示；精确码数或重量区间展开；只输出单列报价。", None),
+        ("河北馆陶鸡蛋报价", "元/箱", "按元/箱展示；净重区间内各码使用同一报价；只输出单列报价。", None),
+        ("河南金咕咕蛋品", "元/斤", "按元/斤展示；规格区间展开；区间边界重复时取较高价格；只输出单列报价。", None),
+        ("贵阳鸡蛋价格", "元/箱", "按元/箱展示；明确拆分低价、高价列；重量区间展开。", None),
+        ("蓝天禽蛋联盟", "元/箱", "按元/箱展示；只纳入配置指定的目标市场；重量区间内各码使用同一报价。", "阜阳"),
+        ("湖南三尖农牧公司", "元/箱", "按元/箱展示；精确码数或重量区间展开；只输出单列报价。", None),
+        ("成都鸡蛋价格", "元/箱", "按元/箱展示；净重区间内各码使用同一报价；价格区间取高价；规格区间重复时取较高价。", None),
+        ("河北辛集城方蛋品", "元/箱", "按元/箱展示；精确码数或重量区间展开；只输出单列报价。", None),
+        ("江西九江褐壳蛋", "元/箱", "按元/箱展示；褐壳、粉壳分别成列；两列独立按精确码数或重量区间展开。", None),
     )
 )
 
@@ -109,6 +116,10 @@ _ACCOUNT_KEYS = {
     "河北辛集城方蛋品": "xinji",
     "江西九江褐壳蛋": "jiujiang",
 }
+
+_HIGH_PRICE_CONFLICT_ACCOUNTS = frozenset(
+    {"河南金咕咕蛋品", "成都鸡蛋价格"}
+)
 
 
 def select_latest_article_rows(
@@ -163,9 +174,24 @@ def _column_definitions(
         account_rows = rows_by_account.get(rule.account_name)
         if not account_rows:
             continue
+        if rule.account_name == "江西九江褐壳蛋":
+            for variant, label in (("brown", "褐壳蛋"), ("powder", "粉壳蛋")):
+                if any(_jiujiang_variant(row) == variant for row in account_rows):
+                    columns.append(
+                        PriceMatrixColumn(
+                            key=f"jiujiang:{variant}",
+                            account_name=rule.account_name,
+                            label=label,
+                            unit=rule.unit,
+                            price_side="single",
+                            product_variant=variant,
+                        )
+                    )
+            continue
         sides: tuple[PriceSide, ...] = (
             ("low", "high")
-            if any(row.price_high is not None for row in account_rows)
+            if rule.account_name == "贵阳鸡蛋价格"
+            and any(row.price_high is not None for row in account_rows)
             else ("single",)
         )
         for side in sides:
@@ -185,8 +211,9 @@ def map_observed_cells(
     rows: Sequence[PriceMatrixSourceRow],
     columns: Sequence[PriceMatrixColumn],
 ) -> dict[str, dict[int, PriceMatrixCell]]:
-    column_by_account_and_side = {
-        (column.account_name, column.price_side): column for column in columns
+    column_by_identity = {
+        (column.account_name, column.price_side, column.product_variant): column
+        for column in columns
     }
     observed: dict[str, dict[int, PriceMatrixCell]] = {
         column.key: {} for column in columns
@@ -196,14 +223,26 @@ def map_observed_cells(
         if size_range is None or row.price_low is None:
             continue
         low_size, high_size = size_range
-        has_split_columns = (row.account_name, "low") in column_by_account_and_side
+        product_variant = (
+            _jiujiang_variant(row)
+            if row.account_name == "江西九江褐壳蛋"
+            else None
+        )
+        has_split_columns = (row.account_name, "low", None) in column_by_identity
+        single_price = (
+            row.price_high
+            if row.account_name == "成都鸡蛋价格" and row.price_high is not None
+            else row.price_low
+        )
         prices: tuple[tuple[PriceSide, Decimal | None], ...] = (
             (("low", row.price_low), ("high", row.price_high))
             if has_split_columns
-            else (("single", row.price_low),)
+            else (("single", single_price),)
         )
         for side, price in prices:
-            column = column_by_account_and_side.get((row.account_name, side))
+            column = column_by_identity.get(
+                (row.account_name, side, product_variant)
+            )
             if column is None or price is None:
                 continue
             for size in range(low_size, high_size + 1):
@@ -212,7 +251,7 @@ def map_observed_cells(
                     observed[column.key][size] = PriceMatrixCell(price, "observed")
                 elif existing.value == price:
                     continue
-                elif row.account_name == "河南金咕咕蛋品":
+                elif row.account_name in _HIGH_PRICE_CONFLICT_ACCOUNTS:
                     if existing.value is None or price > existing.value:
                         observed[column.key][size] = PriceMatrixCell(price, "observed")
                 else:
@@ -222,6 +261,15 @@ def map_observed_cells(
                         "同一账号同一码数存在不同原始报价，按规则无法决胜，已留空",
                     )
     return observed
+
+
+def _jiujiang_variant(row: PriceMatrixSourceRow) -> str | None:
+    product_name = row.product_name or ""
+    if "粉壳" in product_name:
+        return "powder"
+    if any(alias in product_name for alias in ("褐壳", "红壳", "红蛋")):
+        return "brown"
+    return None
 
 
 _SPEC_RANGE_PATTERN = re.compile(
@@ -284,6 +332,10 @@ def extrapolate_missing_cells(
                     pairs,
                     key=lambda candidate: (
                         min(abs(target - candidate[0][0]), abs(target - candidate[1][0])),
+                        abs(
+                            (candidate[1][1] - candidate[0][1])
+                            / Decimal(candidate[1][0] - candidate[0][0])
+                        ),
                         candidate[0][0],
                     ),
                 )

@@ -16,7 +16,9 @@ from app.pipelines.article_parse_service import (
     PlaywrightArticleContentProvider,
 )
 from app.pipelines.article_transient_extractor import (
+    PlaywrightArticleTransientExtractor,
     ProviderBackedArticleTransientExtractor,
+    TextFirstArticleTransientExtractor,
 )
 from app.pipelines.group_analysis_service import (
     GroupAnalysisService,
@@ -28,6 +30,7 @@ from app.pipelines.summary_daily_report_query_service import (
 )
 from app.pipelines.summary_daily_report_service import SummaryDailyReportService
 from app.services.report_generation_service import ReportGenerationService
+from app.services.windows_ocr_service import WindowsOcrService
 from app.services.event_retention_service import EventRetentionPolicy, EventRetentionService
 from app.storage.article_analysis_repo import MysqlArticleAnalysisRepo
 from app.storage.article_daily_report_repo import MysqlArticleDailyReportRepo
@@ -83,9 +86,7 @@ def build_pipeline_worker(
     )
     article_analysis_service = ArticleAnalysisService(
         repo=article_analysis_repo,
-        extractor=ProviderBackedArticleTransientExtractor(
-            build_article_content_provider(config.pipelines.article)
-        ),
+        extractor=build_article_transient_extractor(config.pipelines.article),
         price_items_preview_limit=(
             config.pipelines.article.price_items_json_preview_limit
         ),
@@ -166,6 +167,28 @@ def build_article_content_provider(article_config):
             web, werss, _ARTICLE_CONTENT_SHADOW_METRICS
         )
     return FallbackArticleContentProvider(werss, web)
+
+
+def build_article_transient_extractor(article_config):
+    provider_extractor = ProviderBackedArticleTransientExtractor(
+        build_article_content_provider(article_config)
+    )
+    ocr_engine = (
+        WindowsOcrService(
+            timeout_seconds=getattr(article_config, "content_timeout_seconds", 30)
+        )
+        if getattr(article_config, "image_ocr_enabled", True)
+        else None
+    )
+    dom_extractor = PlaywrightArticleTransientExtractor(
+        timeout_ms=getattr(article_config, "content_timeout_seconds", 30) * 1000,
+        browser_executable_path=article_config.browser_executable_path,
+        image_quote_note_enabled=getattr(
+            article_config, "image_quote_note_enabled", True
+        ),
+        ocr_engine=ocr_engine,
+    )
+    return TextFirstArticleTransientExtractor(provider_extractor, dom_extractor)
 
 
 def get_article_content_shadow_metrics() -> dict[str, int]:

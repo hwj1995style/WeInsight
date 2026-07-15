@@ -102,6 +102,7 @@ def test_matrix_query_is_account_scoped_and_selects_only_safe_fields() -> None:
     assert "p.include_in_egg_price = 1" in normalized
     assert "p.product_family = :product_family" in normalized
     assert "p.article_hash AS article_hash" in sql
+    assert "p.product_name AS product_name" in sql
     assert "p.weight_low AS weight_low" in sql
     assert params["quote_date"] == date(2026, 7, 14)
     assert params["product_family"] == "chicken_egg"
@@ -114,7 +115,7 @@ def test_matrix_query_maps_safe_source_rows() -> None:
     source = {
         "row_id": 7, "article_hash": "hash", "account_name": NINE_ACCOUNT_NAMES[0],
         "quote_date": date(2026, 7, 14), "publish_time": NOW, "analyze_time": NOW,
-        "region": None, "market_name": "market", "product_family": "chicken_egg",
+        "region": None, "market_name": "market", "product_name": "褐壳蛋", "product_family": "chicken_egg",
         "include_in_egg_price": 1, "spec_text": "45斤", "weight_low": "45",
         "weight_high": None, "price_low": "180", "price_high": "182",
         "price_unit_text": "元/箱", "raw_row_json": "secret",
@@ -131,7 +132,7 @@ def test_matrix_query_maps_safe_source_rows() -> None:
         region=None, market_name="market", product_family="chicken_egg",
         include_in_egg_price=True, spec_text="45斤", weight_low=Decimal("45"),
         weight_high=None, price_low=Decimal("180"), price_high=Decimal("182"),
-        price_unit_text="元/箱",
+        price_unit_text="元/箱", product_name="褐壳蛋",
     )]
 
 

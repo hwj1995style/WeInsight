@@ -31,8 +31,10 @@ from app.pipelines.group_pipeline_service import GroupPipelineService
 from app.pipelines.group_polling_runner import GroupPollingRunner, GroupPollingTarget
 from app.pipelines.article_parse_service import ArticleParseService
 from app.pipelines.article_analysis_service import ArticleAnalysisService
-from app.pipelines.article_transient_extractor import ProviderBackedArticleTransientExtractor
-from app.workers.pipeline_runtime_factory import build_article_content_provider
+from app.workers.pipeline_runtime_factory import (
+    build_article_content_provider,
+    build_article_transient_extractor,
+)
 from app.rpa.desktop_probe import WechatDesktopProbe, WechatHealthStatus
 from app.rpa.screenshots import DesktopScreenshotClient
 from app.rpa.wxauto_client import WxautoGroupRpaClient, WxautoNotAvailableError
@@ -1100,9 +1102,7 @@ def build_real_article_analysis_service(config) -> ArticleAnalysisService:
     engine = create_mysql_engine(config.mysql)
     return ArticleAnalysisService(
         repo=MysqlArticleAnalysisRepo(engine),
-        extractor=ProviderBackedArticleTransientExtractor(
-            build_article_content_provider(config.pipelines.article)
-        ),
+        extractor=build_article_transient_extractor(config.pipelines.article),
         price_items_preview_limit=config.pipelines.article.price_items_json_preview_limit,
         egg_price_extraction_enabled=config.pipelines.article.egg_price_extraction_enabled,
     )

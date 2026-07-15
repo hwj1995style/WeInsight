@@ -6,7 +6,10 @@ from sqlalchemy import create_engine
 from app.content.article_content import ArticleContent, ContentFetchError, ProcessShadowMetrics, ShadowArticleContentProvider
 from app.content.fallback_provider import FallbackArticleContentProvider
 from app.core.config import load_config
-from app.pipelines.article_transient_extractor import ProviderBackedArticleTransientExtractor
+from app.pipelines.article_transient_extractor import (
+    ProviderBackedArticleTransientExtractor,
+    TextFirstArticleTransientExtractor,
+)
 from app.workers.pipeline_runtime_factory import build_article_content_provider, build_pipeline_worker, get_article_content_shadow_metrics
 
 
@@ -77,6 +80,7 @@ def test_pipeline_worker_wires_distinct_parse_and_analysis_providers_with_shared
     )
     parse_provider = worker.article_parse_service.provider
     extractor = worker.article_analysis_service.extractor
-    assert isinstance(extractor, ProviderBackedArticleTransientExtractor)
-    assert parse_provider is not extractor.provider
-    assert parse_provider.metrics is extractor.provider.metrics
+    assert isinstance(extractor, TextFirstArticleTransientExtractor)
+    assert isinstance(extractor.provider_extractor, ProviderBackedArticleTransientExtractor)
+    assert parse_provider is not extractor.provider_extractor.provider
+    assert parse_provider.metrics is extractor.provider_extractor.provider.metrics

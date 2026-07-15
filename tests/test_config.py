@@ -120,6 +120,7 @@ def test_pipeline_capacity_defaults_match_design() -> None:
     assert config.pipelines.article.egg_price_extraction_enabled is True
     assert config.pipelines.article.price_items_json_preview_limit == 20
     assert config.pipelines.article.image_quote_note_enabled is True
+    assert config.pipelines.article.image_ocr_enabled is True
     assert config.pipelines.article.browser_executable_path == "auto"
     assert config.pipelines.ui_resource.max_core_group_block_seconds == 10
     assert config.pipelines.ui_resource.lock_lease_seconds == 120
@@ -294,6 +295,7 @@ def test_prod_example_config_loads_without_plaintext_password(monkeypatch) -> No
     assert config.pipelines.article.egg_price_extraction_enabled is True
     assert config.pipelines.article.price_items_json_preview_limit == 20
     assert config.pipelines.article.image_quote_note_enabled is True
+    assert config.pipelines.article.image_ocr_enabled is True
     assert config.pipelines.article.browser_executable_path == "auto"
     assert config.web.host == "10.20.30.40"
     assert config.web.secure_cookie is True

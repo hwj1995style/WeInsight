@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, Protocol
 
+from app.domain.egg_price_quote_locator import locate_quote_content
+
 
 ANALYSIS_VERSION = "egg_price_v1"
 QUOTE_DATE_SOURCE_UNKNOWN = "unknown"
@@ -180,11 +182,17 @@ def extract_egg_prices(
 ) -> EggPriceExtraction:
     items: list[EggPriceItem] = []
     table_summaries: list[dict[str, Any]] = []
-    notes = _unsupported_image_notes(getattr(article, "transient_ocr_tables", None))
+    located = locate_quote_content(
+        article.account_name,
+        getattr(article, "transient_body_text", None) or "",
+        list(getattr(article, "transient_html_tables", None) or []),
+        list(getattr(article, "transient_ocr_tables", None) or []),
+    )
+    notes = _unsupported_image_notes(located.ocr_notes)
     publish_date = None if article.publish_time is None else article.publish_time.date()
     quote_info = quote_date_info or resolve_quote_date(article)
 
-    for table_index, table in enumerate(article.transient_html_tables or []):
+    for table_index, table in enumerate(located.tables):
         parsed_items = _items_from_table(
             article,
             publish_date,
@@ -197,7 +205,9 @@ def extract_egg_prices(
         items.extend(parsed_items)
         table_summaries.append(
             {
-                "source_media_type": "dom_table",
+                "source_media_type": str(
+                    table.get("source_media_type") or "dom_table"
+                ),
                 "source_table_index": table.get("source_table_index", table_index),
                 "title": str(table.get("title") or ""),
                 "headers": [str(header) for header in table.get("headers", [])],
@@ -206,7 +216,14 @@ def extract_egg_prices(
             }
         )
 
-    text_items = _items_from_text(article, publish_date, quote_info, len(items), analyze_time)
+    text_items = _items_from_text(
+        article,
+        publish_date,
+        quote_info,
+        len(items),
+        analyze_time,
+        text=located.body_text,
+    )
     items.extend(text_items)
 
     return EggPriceExtraction(
@@ -267,15 +284,19 @@ def _unsupported_image_notes(value: Any) -> list[dict[str, Any]]:
     for item in value:
         if not isinstance(item, dict):
             continue
-        if item.get("source_media_type") != "image_quote_not_supported_v1":
+        source_media_type = item.get("source_media_type")
+        if source_media_type not in {
+            "image_quote_not_supported_v1",
+            "image_ocr_failed_v1",
+        }:
             continue
         notes.append(
             {
-                "source_media_type": "image_quote_not_supported_v1",
+                "source_media_type": source_media_type,
                 "source_image_index": item.get("source_image_index"),
                 "width": item.get("width"),
                 "height": item.get("height"),
-                "note": "image_quote_not_supported_v1",
+                "note": str(item.get("note") or source_media_type),
             }
         )
     return notes
@@ -296,6 +317,7 @@ def _items_from_table(
     context = dict(table.get("context") or {})
     context = _merge_context_from_text(context, title)
     context = _merge_context_from_text(context, " ".join(headers))
+    source_media_type = str(table.get("source_media_type") or "dom_table")
     items: list[EggPriceItem] = []
     if not headers:
         return items
@@ -312,7 +334,7 @@ def _items_from_table(
             publish_date=publish_date,
             quote_date_info=quote_date_info,
             item_index=item_offset + len(items) + 1,
-            source_media_type="dom_table",
+            source_media_type=source_media_type,
             source_table_index=table.get("source_table_index", table_index),
             source_row_index=row_index,
             source_table_title=title or None,
@@ -343,8 +365,10 @@ def _items_from_text(
     quote_date_info: QuoteDateInfo,
     item_offset: int,
     analyze_time: datetime,
+    *,
+    text: str | None = None,
 ) -> list[EggPriceItem]:
-    text = article.transient_body_text or ""
+    text = article.transient_body_text or "" if text is None else text
     context: dict[str, Any] = {}
     items: list[EggPriceItem] = []
 
@@ -636,7 +660,7 @@ def _merge_context_from_text(context: dict[str, Any], text: str) -> dict[str, An
     if "停车场" in text:
         updated["trade_scene"] = "停车场"
         updated["source_table_title"] = text
-    for name in ("洋鸡蛋", "红壳蛋", "粉壳蛋", "红心蛋", "绿壳蛋", "草鸡蛋", "红蛋", "粉蛋", "鸭蛋", "鹌鹑蛋"):
+    for name in ("洋鸡蛋", "红壳蛋", "褐壳蛋", "粉壳蛋", "红心蛋", "绿壳蛋", "草鸡蛋", "红蛋", "粉蛋", "鸭蛋", "鹌鹑蛋"):
         if name in text:
             updated["product_name"] = name
             break
@@ -707,6 +731,7 @@ def _product_name(line: str, context: dict[str, Any]) -> str | None:
     for name in (
         "洋鸡蛋",
         "红壳蛋",
+        "褐壳蛋",
         "粉壳蛋",
         "红心蛋",
         "绿壳蛋",
@@ -735,7 +760,7 @@ def _product_family(text: str) -> str:
         return "salted_egg"
     if "鸭蛋" in text:
         return "duck_egg"
-    if any(name in text for name in ("鸡蛋", "洋鸡蛋", "红蛋", "粉蛋", "红壳蛋", "粉壳蛋", "红心蛋", "绿壳蛋", "草鸡蛋")):
+    if any(name in text for name in ("鸡蛋", "洋鸡蛋", "红蛋", "粉蛋", "红壳蛋", "褐壳蛋", "粉壳蛋", "红心蛋", "绿壳蛋", "草鸡蛋")):
         return "chicken_egg"
     return "other_egg"
 

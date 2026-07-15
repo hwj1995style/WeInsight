@@ -169,7 +169,9 @@ def test_e2e_proves_mobile_keyboard_console_and_navigation_contracts():
 
 def test_shell_uses_fluid_workspace_and_has_no_security_warning_residue():
     css = Path("app/web/static/app.css").read_text("utf-8")
-    assert "max-width: 1600px" in css
+    page_shell_rule = css.split(".page-shell {", 1)[1].split("}", 1)[0]
+    assert "width: calc(100% - 2.5rem)" in page_shell_rule
+    assert "max-width" not in page_shell_rule
     assert "min(1120px" not in css
     assert ".security-warning" not in css
 

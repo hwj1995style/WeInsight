@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 from app.content.article_content import ArticleContentProvider
 from app.domain.article_analysis import CleanArticleForAnalysis
 from app.domain.article_parsing import ArticleParseSource
+from app.domain.egg_price_quote_locator import (
+    OCR_ACCOUNT_NAMES,
+    TARGET_ACCOUNT_NAMES,
+    parse_account_ocr_lines,
+)
 from app.pipelines.article_parse_service import resolve_playwright_browser_executable_path
 
 
@@ -16,6 +22,12 @@ _MAX_CELLS_PER_ROW = 24
 _MAX_TEXT_CHARS = 120_000
 _MAX_CELL_CHARS = 500
 _MAX_TITLE_CHARS = 300
+_MAX_OCR_IMAGES = 4
+_MAX_OCR_IMAGE_BYTES = 10 * 1024 * 1024
+
+
+class ImageOcrEngine(Protocol):
+    def recognize(self, image_bytes: bytes) -> list[str]: ...
 
 
 @dataclass(frozen=True)
@@ -51,6 +63,17 @@ class ProviderBackedArticleTransientExtractor:
         )
 
 
+class TextFirstArticleTransientExtractor:
+    def __init__(self, provider_extractor, dom_extractor) -> None:
+        self.provider_extractor = provider_extractor
+        self.dom_extractor = dom_extractor
+
+    def extract(self, article: CleanArticleForAnalysis) -> CleanArticleForAnalysis:
+        if article.account_name in TARGET_ACCOUNT_NAMES:
+            return self.dom_extractor.extract(article)
+        return self.provider_extractor.extract(article)
+
+
 class PlaywrightArticleTransientExtractor:
     def __init__(
         self,
@@ -59,11 +82,13 @@ class PlaywrightArticleTransientExtractor:
         headless: bool = True,
         browser_executable_path: str | None = None,
         image_quote_note_enabled: bool = True,
+        ocr_engine: ImageOcrEngine | None = None,
     ) -> None:
         self.timeout_ms = timeout_ms
         self.headless = headless
         self.browser_executable_path = browser_executable_path
         self.image_quote_note_enabled = image_quote_note_enabled
+        self.ocr_engine = ocr_engine
 
     def extract(self, article: CleanArticleForAnalysis) -> CleanArticleForAnalysis:
         from playwright.sync_api import sync_playwright
@@ -84,8 +109,14 @@ class PlaywrightArticleTransientExtractor:
                     wait_until="domcontentloaded",
                     timeout=self.timeout_ms,
                 )
+                page.evaluate(_PAGE_LAZY_LOAD_SCRIPT)
                 page.wait_for_timeout(1200)
                 payload = page.evaluate(_PAGE_EXTRACTION_SCRIPT)
+                recognized_ocr_tables = self._extract_image_ocr(
+                    page,
+                    article,
+                    payload,
+                )
             finally:
                 browser.close()
 
@@ -97,8 +128,69 @@ class PlaywrightArticleTransientExtractor:
             article,
             transient_body_text=transient.body_text,
             transient_html_tables=transient.html_tables,
-            transient_ocr_tables=transient.ocr_tables,
+            transient_ocr_tables=[*transient.ocr_tables, *recognized_ocr_tables],
         )
+
+    def _extract_image_ocr(
+        self,
+        page,
+        article: CleanArticleForAnalysis,
+        payload: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        if self.ocr_engine is None or article.account_name not in OCR_ACCOUNT_NAMES:
+            return []
+        results: list[dict[str, Any]] = []
+        attempted_images = 0
+        for image in _iter_dicts(payload.get("large_images")):
+            source_image_index = _to_int(image.get("source_image_index"))
+            width = _to_int(image.get("width"))
+            height = _to_int(image.get("height"))
+            if not _is_account_ocr_candidate(
+                article.account_name, width=width, height=height
+            ):
+                continue
+            if attempted_images >= _MAX_OCR_IMAGES:
+                break
+            attempted_images += 1
+            src = str(image.get("current_src") or "")
+            if not _allowed_wechat_image_url(src):
+                continue
+            try:
+                response = page.request.get(
+                    src,
+                    headers={"Referer": article.article_url},
+                    timeout=self.timeout_ms,
+                )
+                if not response.ok:
+                    continue
+                image_bytes = response.body()
+                if not image_bytes or len(image_bytes) > _MAX_OCR_IMAGE_BYTES:
+                    continue
+                recognize_account = getattr(
+                    self.ocr_engine, "recognize_account", None
+                )
+                lines = (
+                    recognize_account(article.account_name, image_bytes)
+                    if callable(recognize_account)
+                    else self.ocr_engine.recognize(image_bytes)
+                )
+                parsed = parse_account_ocr_lines(
+                    article.account_name,
+                    lines,
+                    source_image_index=source_image_index,
+                )
+                if parsed is not None:
+                    results.append(parsed)
+                    break
+            except Exception:
+                results.append(
+                    {
+                        "source_media_type": "image_ocr_failed_v1",
+                        "source_image_index": source_image_index,
+                        "note": "image_ocr_failed_v1",
+                    }
+                )
+        return results
 
 
 def extract_transient_article_data(
@@ -260,6 +352,32 @@ def _to_int(value: Any) -> int:
         return 0
 
 
+def _allowed_wechat_image_url(value: str) -> bool:
+    try:
+        parsed = urlsplit(value)
+        host = (parsed.hostname or "").lower()
+        return parsed.scheme == "https" and (
+            host == "mmbiz.qpic.cn"
+            or host.endswith(".qpic.cn")
+            or host.endswith(".qlogo.cn")
+        )
+    except ValueError:
+        return False
+
+
+def _is_account_ocr_candidate(
+    account_name: str, *, width: int, height: int
+) -> bool:
+    if width <= 0 or height <= 0:
+        return False
+    ratio = width / height
+    if account_name == "河南金咕咕蛋品":
+        return width >= 800 and height >= 450 and 1.8 <= ratio <= 2.5
+    if account_name == "湖南三尖农牧公司":
+        return width >= 450 and height >= 400 and 0.7 <= ratio <= 1.0
+    return False
+
+
 _PAGE_EXTRACTION_SCRIPT = r"""
 () => {
   const MAX_TABLES = 20;
@@ -363,13 +481,33 @@ _PAGE_EXTRACTION_SCRIPT = r"""
       source_image_index: idx,
       width: Number(img.naturalWidth || img.width || img.getAttribute('width') || 0),
       height: Number(img.naturalHeight || img.height || img.getAttribute('height') || 0),
+      current_src: String(img.currentSrc || img.getAttribute('data-src') || img.src || ''),
     }))
-    .filter((img) => img.width >= 600 || img.height >= 600);
+    .filter((img) =>
+      img.width >= 600 ||
+      img.height >= 600 ||
+      (img.width >= 450 && img.height >= 250)
+    );
 
   return {
     body_text: elementText(root, MAX_BODY_CHARS),
     tables,
     large_images,
   };
+}
+"""
+
+
+_PAGE_LAZY_LOAD_SCRIPT = r"""
+async () => {
+  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const root = document.scrollingElement || document.documentElement;
+  const step = Math.max(600, Math.floor(window.innerHeight * 0.8));
+  for (let y = 0, count = 0; y < root.scrollHeight && count < 30; y += step, count += 1) {
+    window.scrollTo(0, y);
+    await delay(60);
+  }
+  window.scrollTo(0, 0);
+  await delay(200);
 }
 """

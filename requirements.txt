@@ -17,3 +17,4 @@ httpx==0.28.1
 feedparser==6.0.12
 markdown-it-py==3.0.0
 bleach==6.2.0
+Pillow==12.2.0

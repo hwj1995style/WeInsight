@@ -75,6 +75,7 @@ class ArticlePipelineConfig:
     egg_price_extraction_enabled: bool
     price_items_json_preview_limit: int
     image_quote_note_enabled: bool
+    image_ocr_enabled: bool
     sync_interval_minutes: int
     werss_catalog_base_url: str
     werss_access_key: str
@@ -302,6 +303,7 @@ def load_config(path: Path) -> Config:
         "egg_price_extraction_enabled": True,
         "price_items_json_preview_limit": 20,
         "image_quote_note_enabled": True,
+        "image_ocr_enabled": True,
         **data["pipelines"]["article"],
     }
 

@@ -240,6 +240,42 @@ def test_price_results_render_matrix_groups_units_and_extrapolation(
     assert "取数规则" in response.text
 
 
+def test_price_matrix_shortens_jiujiang_group_heading(
+    authenticated_client: TestClient,
+    result_service: FakeResultService,
+) -> None:
+    columns = (
+        PriceMatrixColumn(
+            "jiujiang:brown", "江西九江褐壳蛋", "褐壳蛋", "元/箱", "single"
+        ),
+        PriceMatrixColumn(
+            "jiujiang:powder", "江西九江褐壳蛋", "粉壳蛋", "元/箱", "single"
+        ),
+    )
+    result_service.matrix = PriceMatrix(
+        quote_date=date(2026, 7, 14),
+        updated_at=datetime(2026, 7, 14, 9, 30),
+        source_count=1,
+        columns=columns,
+        rows=(
+            PriceMatrixRow(
+                size=45,
+                cells={
+                    "jiujiang:brown": PriceMatrixCell(Decimal("222"), "observed"),
+                    "jiujiang:powder": PriceMatrixCell(Decimal("246"), "observed"),
+                },
+            ),
+        ),
+        rules=(AccountMatrixRule("江西九江褐壳蛋", "元/箱"),),
+    )
+
+    response = authenticated_client.get("/results/prices")
+
+    assert "江西九江（元/箱）" in response.text
+    assert "江西九江褐壳蛋（元/箱）" not in response.text
+    assert "褐壳蛋" in response.text and "粉壳蛋" in response.text
+
+
 def test_price_matrix_renders_account_specific_rule_copy(
     authenticated_client: TestClient,
     result_service: FakeResultService,
@@ -273,6 +309,8 @@ def test_price_matrix_has_scroll_and_accessibility_hooks(
     assert 'class="price-cell price-cell-extrapolated"' in response.text
     assert 'tabindex="0"' in response.text
     assert 'aria-label="236，推算；依据 39码 214 与 40码 216，按每码 +2 向高码推算"' in response.text
+    assert 'class="price-cell-note"' not in response.text
+    assert ">推算</span>" not in response.text
     assert 'data-price-source="observed" tabindex="0"' not in response.text
 
 

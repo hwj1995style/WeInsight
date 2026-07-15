@@ -26,6 +26,7 @@ def source_row(
     price_low: str | Decimal | None = "216",
     price_high: str | Decimal | None = None,
     market_name: str | None = None,
+    product_name: str | None = None,
     spec_text: str | None = None,
 ) -> PriceMatrixSourceRow:
     decimal_or_none = lambda value: None if value is None else Decimal(value)
@@ -46,6 +47,7 @@ def source_row(
         price_low=decimal_or_none(price_low),
         price_high=decimal_or_none(price_high),
         price_unit_text=None,
+        product_name=product_name,
     )
 
 
@@ -92,9 +94,9 @@ def test_matrix_rules_expose_complete_account_specific_copy() -> None:
         "贵阳鸡蛋价格": "明确拆分低价、高价列",
         "蓝天禽蛋联盟": "只纳入配置指定的目标市场",
         "湖南三尖农牧公司": "精确码数或重量区间展开",
-        "成都鸡蛋价格": "价格区间拆低价、高价列",
+        "成都鸡蛋价格": "价格区间取高价",
         "河北辛集城方蛋品": "精确码数或重量区间展开",
-        "江西九江褐壳蛋": "精确码数或重量区间展开",
+        "江西九江褐壳蛋": "褐壳、粉壳分别成列",
     }
 
     assert {
@@ -105,17 +107,22 @@ def test_matrix_rules_expose_complete_account_specific_copy() -> None:
         assert rule.unit in rule.description
 
 
-def test_lantian_rule_without_verified_target_market_fails_closed() -> None:
+def test_lantian_rule_only_accepts_verified_target_market() -> None:
     rule = next(rule for rule in ACCOUNT_MATRIX_RULES if rule.account_name == "蓝天禽蛋联盟")
-    assert rule.target_market is None
+    assert rule.target_market == "阜阳"
 
-    matrix = build_price_matrix(
+    rejected = build_price_matrix(
         [source_row(account_name="蓝天禽蛋联盟", market_name="任意市场")],
         date(2026, 7, 14),
     )
+    accepted = build_price_matrix(
+        [source_row(account_name="蓝天禽蛋联盟", market_name="阜阳")],
+        date(2026, 7, 14),
+    )
 
-    assert matrix.columns == ()
-    assert matrix.source_count == 0
+    assert rejected.columns == ()
+    assert rejected.source_count == 0
+    assert [column.key for column in accepted.columns] == ["lantian:single"]
 
 
 def test_matrix_always_contains_sizes_50_down_to_30() -> None:
@@ -175,6 +182,111 @@ def test_weight_range_expands_and_price_range_splits_columns() -> None:
 
     assert cell_value(matrix, 39, "guiyang:low") == Decimal("214")
     assert cell_value(matrix, 40, "guiyang:high") == Decimal("219")
+
+
+def test_only_guiyang_splits_low_high_and_chengdu_range_uses_high_price() -> None:
+    matrix = build_price_matrix(
+        [
+            source_row(
+                account_name="成都鸡蛋价格",
+                weight_low=33,
+                weight_high=35,
+                price_low="188",
+                price_high="195",
+            )
+        ],
+        date(2026, 7, 14),
+    )
+
+    assert [column.key for column in matrix.columns] == ["chengdu:single"]
+    assert cell_value(matrix, 33, "chengdu:single") == Decimal("195")
+    assert cell_value(matrix, 35, "chengdu:single") == Decimal("195")
+
+
+def test_chengdu_price_ranges_and_repeated_spec_boundaries_use_high_price() -> None:
+    ranges = (
+        (27, 33, "182", "188"),
+        (33, 35, "188", "195"),
+        (35, 37, "195", "202"),
+        (37, 39, "202", "210"),
+        (39, 41, "210", "216"),
+        (41, 43, "216", "226"),
+        (43, 45, "226", "233"),
+    )
+    matrix = build_price_matrix(
+        [
+            source_row(
+                row_id=index,
+                account_name="成都鸡蛋价格",
+                quote_date=date(2026, 7, 15),
+                weight_low=weight_low,
+                weight_high=weight_high,
+                price_low=price_low,
+                price_high=price_high,
+            )
+            for index, (weight_low, weight_high, price_low, price_high) in enumerate(
+                ranges, start=1
+            )
+        ],
+        date(2026, 7, 15),
+    )
+
+    assert cell(matrix, 41, "chengdu:single") == PriceMatrixCell(
+        Decimal("226"), "observed"
+    )
+    assert cell(matrix, 43, "chengdu:single") == PriceMatrixCell(
+        Decimal("233"), "observed"
+    )
+
+
+def test_jiujiang_splits_brown_and_powder_products_not_low_high() -> None:
+    matrix = build_price_matrix(
+        [
+            source_row(
+                row_id=1,
+                account_name="江西九江褐壳蛋",
+                product_name="褐壳蛋",
+                weight_low=44,
+                weight_high=44,
+                price_low="234",
+            ),
+            source_row(
+                row_id=2,
+                account_name="江西九江褐壳蛋",
+                product_name="粉壳蛋",
+                weight_low=44,
+                weight_high=44,
+                price_low="232",
+            ),
+        ],
+        date(2026, 7, 14),
+    )
+
+    assert [(column.key, column.label, column.price_side) for column in matrix.columns] == [
+        ("jiujiang:brown", "褐壳蛋", "single"),
+        ("jiujiang:powder", "粉壳蛋", "single"),
+    ]
+    assert cell_value(matrix, 44, "jiujiang:brown") == Decimal("234")
+    assert cell_value(matrix, 44, "jiujiang:powder") == Decimal("232")
+
+
+@pytest.mark.parametrize("alias", ["褐壳蛋", "红壳蛋", "红蛋"])
+def test_jiujiang_brown_shell_aliases_share_one_column(alias: str) -> None:
+    matrix = build_price_matrix(
+        [
+            source_row(
+                account_name="江西九江褐壳蛋",
+                product_name=alias,
+                weight_low=44,
+                weight_high=44,
+                price_low="234",
+            )
+        ],
+        date(2026, 7, 14),
+    )
+
+    assert [column.key for column in matrix.columns] == ["jiujiang:brown"]
+    assert cell_value(matrix, 44, "jiujiang:brown") == Decimal("234")
 
 
 @pytest.mark.parametrize(
@@ -275,6 +387,21 @@ def test_internal_gap_uses_nearest_pair_and_lower_pair_on_equal_distance() -> No
     )
 
     assert cell_value(matrix, 38, "jiameixian:single") == Decimal("212")
+
+
+def test_equal_distance_uses_smallest_absolute_per_size_delta() -> None:
+    matrix = build_price_matrix(
+        [
+            source_row(row_id=1, weight_low=35, weight_high=35, price_low="200"),
+            source_row(row_id=2, weight_low=36, weight_high=36, price_low="210"),
+            source_row(row_id=3, weight_low=40, weight_high=40, price_low="220"),
+            source_row(row_id=4, weight_low=41, weight_high=41, price_low="222"),
+        ],
+        date(2026, 7, 14),
+    )
+
+    assert cell_value(matrix, 38, "jiameixian:single") == Decimal("216")
+    assert "每码 +2" in (cell(matrix, 38, "jiameixian:single").explanation or "")
 
 
 def test_one_known_value_does_not_extrapolate() -> None:

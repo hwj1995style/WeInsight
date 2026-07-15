@@ -51,6 +51,15 @@ def test_extracts_fujian_short_text_quotes() -> None:
     assert first.include_in_standard_price is True
 
 
+def test_classifies_brown_shell_egg_as_chicken_egg() -> None:
+    source = Source(transient_body_text="褐壳蛋价格：4.90元/斤（稳）")
+
+    result = extract_egg_prices(source, analyze_time=datetime(2026, 7, 9, 10, 0))
+
+    assert result.items[0].product_name == "褐壳蛋"
+    assert result.items[0].product_family == "chicken_egg"
+
+
 def test_uses_title_quote_date_when_publish_time_is_previous_day() -> None:
     source = Source(
         account_name="福建闽融鸡蛋报价平台",
@@ -202,19 +211,19 @@ def test_extracts_guiyang_packaged_price_dom_table() -> None:
 
     result = extract_egg_prices(source, analyze_time=datetime(2026, 7, 9, 10, 0))
 
-    assert len(result.items) == 11
+    assert len(result.items) == 21
     assert all(item.product_family == "chicken_egg" for item in result.items)
     assert all(item.product_name == "鸡蛋" for item in result.items)
-    first = result.items[0]
-    assert first.spec_text == "大码"
-    assert first.weight_text == "52斤以上"
-    assert first.price_text == "228—233"
-    assert first.change_text == "↑5"
-    assert first.trend == "up"
-    assert first.package_policy == "含包装"
-    assert first.conversion_method == "row_weight"
-    assert first.include_in_standard_price is True
-    assert result.table_summaries[0]["parsed_item_count"] == 11
+    size_50 = next(item for item in result.items if item.weight_low == 50)
+    assert size_50.spec_text == "大码"
+    assert size_50.weight_text == "50斤"
+    assert size_50.price_text == "224—229"
+    assert size_50.change_text == "↑5"
+    assert size_50.trend == "up"
+    assert size_50.package_policy == "含包装"
+    assert size_50.conversion_method == "row_weight"
+    assert size_50.include_in_standard_price is True
+    assert result.table_summaries[0]["parsed_item_count"] == 21
 
 
 def test_guiyang_old_hen_price_does_not_inherit_egg_context() -> None:
@@ -232,9 +241,8 @@ def test_guiyang_old_hen_price_does_not_inherit_egg_context() -> None:
 
     result = extract_egg_prices(source, analyze_time=datetime(2026, 7, 9, 10, 0))
 
-    assert len(result.items) == 2
-    assert [item.price_text for item in result.items] == ["4.90—5.00元", "5.00—5.10元"]
-    assert all(item.product_family == "chicken_egg" for item in result.items)
+    assert result.items == []
+    assert result.status == "no_price_data"
 
 
 def test_no_header_dom_prose_table_does_not_duplicate_text_line_quotes() -> None:
@@ -255,9 +263,8 @@ def test_no_header_dom_prose_table_does_not_duplicate_text_line_quotes() -> None
 
     result = extract_egg_prices(source, analyze_time=datetime(2026, 7, 9, 10, 0))
 
-    assert len(result.items) == 1
-    assert result.items[0].source_media_type == "text_line"
-    assert result.items[0].price_text == "4.90—5.00元"
+    assert result.items == []
+    assert result.status == "no_price_data"
 
 
 def test_extracts_yixiandan_quote_basis_and_region() -> None:
