@@ -11,28 +11,30 @@
     {% if matrix and matrix.columns %}
       <p class="price-matrix-summary">报价日期：{{ matrix.quote_date }}{% if matrix.updated_at %} · 最近更新：{{ matrix.updated_at }}{% endif %} · 来源 {{ matrix.source_count }} 条</p>
       <div class="table-scroll price-matrix-scroll" tabindex="0" aria-label="公众号报价矩阵，可横向滚动">
-        <table class="data-table results-table price-matrix-table">
+        <table class="data-table results-table price-matrix-table" data-price-matrix="interactive">
           <thead>
             <tr>
               <th scope="col" rowspan="2">码数</th>
-              {% set header = namespace(account_name='') %}
+              {% set header = namespace(account_name='', column_index=0) %}
               {% for column in matrix.columns %}
                 {% if column.account_name != header.account_name %}
                   {% set account_columns = matrix.columns | selectattr('account_name', 'equalto', column.account_name) | list %}
-                  <th scope="colgroup" colspan="{{ account_columns | length }}">{{ column.account_name | replace('江西九江褐壳蛋', '江西九江') | replace('蛋品', '') | replace('价格', '') }}（{{ column.unit }}）</th>
+                  <th scope="colgroup" colspan="{{ account_columns | length }}" data-column-start="{{ header.column_index }}" data-column-end="{{ header.column_index + (account_columns | length) - 1 }}">{{ column.account_name | replace('江西九江褐壳蛋', '江西九江') | replace('蛋品', '') | replace('价格', '') }}（{{ column.unit }}）</th>
                   {% set header.account_name = column.account_name %}
+                  {% set header.column_index = header.column_index + (account_columns | length) %}
                 {% endif %}
               {% endfor %}
             </tr>
-            <tr>{% for column in matrix.columns %}<th scope="col">{{ column.label }}</th>{% endfor %}</tr>
+            <tr>{% for column in matrix.columns %}<th scope="col" data-column-index="{{ loop.index0 }}">{{ column.label }}</th>{% endfor %}</tr>
           </thead>
           <tbody>
             {% for row in matrix.rows %}
-              <tr>
+              {% set row_index = loop.index0 %}
+              <tr data-row-index="{{ row_index }}">
                 <th scope="row">{{ row.size }}码</th>
                 {% for column in matrix.columns %}
                   {% set cell = row.cells[column.key] %}
-                  <td class="price-cell{% if cell.source == 'extrapolated' %} price-cell-extrapolated{% endif %}" data-price-source="{{ cell.source }}"{% if cell.source == 'extrapolated' %} tabindex="0" aria-label="{{ cell.display_value }}，推算；{{ cell.explanation }}" title="{{ cell.explanation }}"{% elif cell.explanation %} title="{{ cell.explanation }}"{% endif %}>{{ cell.display_value }}</td>
+                  <td class="price-cell{% if cell.source == 'extrapolated' %} price-cell-extrapolated{% endif %}" data-price-source="{{ cell.source }}" data-row-index="{{ row_index }}" data-column-index="{{ loop.index0 }}" tabindex="{% if row_index == 0 and loop.index0 == 0 %}0{% else %}-1{% endif %}"{% if cell.source == 'extrapolated' %} aria-label="{{ cell.display_value }}，推算；{{ cell.explanation }}" title="{{ cell.explanation }}"{% elif cell.explanation %} title="{{ cell.explanation }}"{% endif %}>{{ cell.display_value }}</td>
                 {% endfor %}
               </tr>
             {% endfor %}
@@ -45,3 +47,4 @@
     {% endif %}
   </section>
 {% endblock %}
+{% block scripts %}<script src="/static/price-matrix.js?v=20260716-crosshair" defer></script>{% endblock %}

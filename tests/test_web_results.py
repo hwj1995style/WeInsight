@@ -308,10 +308,28 @@ def test_price_matrix_has_scroll_and_accessibility_hooks(
     assert 'scope="row"' in response.text
     assert 'class="price-cell price-cell-extrapolated"' in response.text
     assert 'tabindex="0"' in response.text
+    assert 'data-price-matrix="interactive"' in response.text
+    assert 'data-column-index="0"' in response.text
+    assert 'data-row-index="0"' in response.text
+    assert 'data-column-start="0" data-column-end="1"' in response.text
+    assert '/static/app.css?v=20260716-price-crosshair' in response.text
+    assert '<script src="/static/price-matrix.js?v=20260716-crosshair" defer></script>' in response.text
     assert 'aria-label="236，推算；依据 39码 214 与 40码 216，按每码 +2 向高码推算"' in response.text
     assert 'class="price-cell-note"' not in response.text
     assert ">推算</span>" not in response.text
-    assert 'data-price-source="observed" tabindex="0"' not in response.text
+    assert 'data-price-source="observed" data-row-index="0" data-column-index="0" tabindex="0"' in response.text
+
+
+def test_price_matrix_script_supports_pointer_focus_and_arrow_navigation() -> None:
+    script = Path("app/web/static/price-matrix.js").read_text(encoding="utf-8")
+
+    assert "pointerover" in script and "pointerout" in script
+    assert "focusin" in script and "focusout" in script
+    assert "ArrowLeft" in script and "ArrowRight" in script
+    assert "ArrowUp" in script and "ArrowDown" in script
+    assert "price-row-active" in script
+    assert "price-column-active" in script
+    assert "price-cell-active" in script
 
 
 def test_price_matrix_uses_service_default_date_and_never_renders_sensitive_fields(

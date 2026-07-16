@@ -64,7 +64,7 @@ def locate_quote_content(
             if _is_jiameixian_main(item) and _row_count(item) >= 2
         ]
         if candidates:
-            selected = [_expand_jiameixian_lower_step(max(candidates, key=_row_count))]
+            selected = [_with_chicken_context(max(candidates, key=_row_count))]
     elif account_name == "河北馆陶鸡蛋报价":
         candidates = [item for item in html_tables if _has_headers(item, "净重", "今日价")]
         candidates = [item for item in candidates if _row_count(item) >= 2]
@@ -124,6 +124,8 @@ def locate_quote_content(
                 if item.get("source_media_type")
                 != "image_quote_not_supported_v1"
             ]
+
+    selected = [_expand_table_edge_steps(item) for item in selected]
 
     return LocatedQuoteContent(body_text="", tables=selected, ocr_notes=notes)
 
@@ -249,44 +251,122 @@ def _is_jiameixian_main(item: dict[str, Any]) -> bool:
     )
 
 
-def _expand_jiameixian_lower_step(item: dict[str, Any]) -> dict[str, Any]:
+_EXPLICIT_LOWER_STEP_PATTERN = re.compile(
+    r"(?<!\d)(3\d|4\d|50)\s*(?:码|斤)?\s*以下\s*"
+    r"(?:顺减|每斤)?\s*[-－—–]?\s*(\d+(?:\.\d+)?)"
+)
+_HIGH_EDGE_STEP_PATTERN = re.compile(
+    r"(?:精品)?大码\s*以上\s*每斤\s*[+＋]\s*(\d+(?:\.\d+)?)"
+)
+_LOW_EDGE_STEP_PATTERN = re.compile(
+    r"小码\s*以下\s*每斤\s*[-－—–]\s*(\d+(?:\.\d+)?)"
+)
+
+
+def _expand_table_edge_steps(item: dict[str, Any]) -> dict[str, Any]:
     result = _with_chicken_context(item)
     headers = list(result.get("headers") or [])
     rows = [list(row) for row in result.get("rows") or []]
-    try:
-        weight_index = headers.index("净重")
-        today_index = headers.index("今日价")
-    except ValueError:
+    weight_index = next(
+        (index for index, header in enumerate(headers) if "净重" in header or "毛重" in header),
+        None,
+    )
+    today_index = next(
+        (index for index, header in enumerate(headers) if "今日价" in header),
+        None,
+    )
+    if weight_index is None or today_index is None:
         return result
 
-    rule_match = None
-    for row in rows:
-        if len(row) == 1:
-            rule_match = re.search(r"(3\d)以下顺减\s*[-—]?\s*(\d+(?:\.\d+)?)", row[0])
-            if rule_match:
-                break
-    if rule_match is None:
-        return result
-
-    base_size = int(rule_match.group(1))
-    step = Decimal(rule_match.group(2))
-    base_price = None
+    known: dict[int, Decimal] = {}
     for row in rows:
         if len(row) <= max(weight_index, today_index):
             continue
-        if _first_int(row[weight_index]) == base_size:
-            base_price = _first_decimal(row[today_index])
-            break
-    if base_price is None:
+        size = _first_int(row[weight_index])
+        price = _first_decimal(row[today_index])
+        if size is not None and 30 <= size <= 50 and price is not None:
+            known[size] = price
+    if not known:
         return result
 
-    data_rows = [row for row in rows if not (len(row) == 1 and "顺减" in row[0])]
-    for size in range(base_size - 1, 29, -1):
-        price = base_price - step * Decimal(base_size - size)
+    # A single-cell row belongs to this table. Title/context may be inferred
+    # from nearby DOM siblings, so evaluate direct rows first when duplicate
+    # direction rules are present.
+    fragments = [row[0] for row in rows if len(row) == 1]
+    fragments.append(str(result.get("title") or ""))
+    fragments.extend(str(value) for value in (result.get("context") or {}).values())
+    explicit_lower_rules: list[tuple[int, Decimal]] = []
+    high_steps: list[Decimal] = []
+    low_steps: list[Decimal] = []
+    for fragment in fragments:
+        explicit_lower_rules.extend(
+            (int(match.group(1)), Decimal(match.group(2)))
+            for match in _EXPLICIT_LOWER_STEP_PATTERN.finditer(fragment)
+        )
+        high_steps.extend(
+            Decimal(match.group(1))
+            for match in _HIGH_EDGE_STEP_PATTERN.finditer(fragment)
+        )
+        low_steps.extend(
+            Decimal(match.group(1))
+            for match in _LOW_EDGE_STEP_PATTERN.finditer(fragment)
+        )
+    if not explicit_lower_rules and not high_steps and not low_steps:
+        return result
+
+    original_low_size = min(known)
+    original_low_price = known[original_low_size]
+    original_high_size = max(known)
+    original_high_price = known[original_high_size]
+
+    rule_patterns = (
+        _EXPLICIT_LOWER_STEP_PATTERN,
+        _HIGH_EDGE_STEP_PATTERN,
+        _LOW_EDGE_STEP_PATTERN,
+    )
+    data_rows = [
+        row
+        for row in rows
+        if not (
+            len(row) == 1
+            and any(pattern.search(row[0]) for pattern in rule_patterns)
+        )
+    ]
+
+    def append_price(size: int, price: Decimal) -> None:
+        if size in known:
+            return
         new_row = [""] * len(headers)
         new_row[weight_index] = str(size)
         new_row[today_index] = _decimal_text(price)
         data_rows.append(new_row)
+        known[size] = price
+
+    for base_size, step in explicit_lower_rules:
+        base_price = known.get(base_size)
+        if base_price is None or step <= 0:
+            continue
+        for size in range(base_size - 1, 29, -1):
+            append_price(size, base_price - step * Decimal(base_size - size))
+
+    for step in low_steps:
+        if step <= 0:
+            continue
+        for size in range(original_low_size - 1, 29, -1):
+            append_price(
+                size,
+                original_low_price - step * Decimal(original_low_size - size),
+            )
+
+    for step in high_steps:
+        if step <= 0:
+            continue
+        for size in range(original_high_size + 1, 51):
+            append_price(
+                size,
+                original_high_price + step * Decimal(size - original_high_size),
+            )
+
     result["rows"] = data_rows
     return result
 
