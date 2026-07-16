@@ -327,11 +327,34 @@ def test_group_report_list_is_url_filtered_and_server_paginated(
     assert "核心群日报" in response.text
     assert 'name="date" value="2026-07-10"' in response.text
     assert 'option value="group" selected' in response.text
-    assert 'name="source" value="核心群"' in response.text
+    assert '<option value="">全部对象</option>' in response.text
+    assert '<option value="核心群" selected>核心群</option>' in response.text
     assert group.calls == [
         ("list", REPORT_DATE, "核心群", 21, 20),
+        ("list", REPORT_DATE, None, 1000, 0),
         ("get", REPORT_DATE, "核心群"),
     ]
+
+
+def test_report_source_filter_is_select_with_current_type_options(
+    authenticated_client: TestClient,
+) -> None:
+    group_response = authenticated_client.get(
+        "/reports?date=2026-07-10&type=group"
+    )
+    article_response = authenticated_client.get(
+        "/reports?date=2026-07-10&type=article"
+    )
+    summary_response = authenticated_client.get(
+        "/reports?date=2026-07-10&type=summary"
+    )
+
+    assert '<select id="source" name="source"' in group_response.text
+    assert '<option value="核心群"' in group_response.text
+    assert '<option value="行情观察"' not in group_response.text
+    assert '<option value="行情观察"' in article_response.text
+    assert '<option value="核心群"' not in article_response.text
+    assert '<select id="source" name="source" disabled>' in summary_response.text
 
 
 def test_reports_page_contains_server_generated_manual_request_key(
@@ -908,7 +931,15 @@ def test_all_report_service_calls_run_in_threadpool(
     assert authenticated_client.get("/reports?type=group&date=2026-07-10&source=A").status_code == 200
     assert authenticated_client.get("/reports?type=article&date=2026-07-10&source=B").status_code == 200
 
-    assert calls == ["load_sources", "list_reports", "get_report", "list_reports", "get_report"]
+    assert calls == [
+        "load_sources",
+        "list_reports",
+        "list_reports",
+        "get_report",
+        "list_reports",
+        "list_reports",
+        "get_report",
+    ]
 
 
 def test_new_post_status_and_download_calls_run_in_threadpool(
