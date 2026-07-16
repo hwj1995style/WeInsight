@@ -4,8 +4,10 @@ import json
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime
+from decimal import Decimal
 
 from app.domain.article_egg_price import extract_egg_prices
+from app.domain.price_matrix import PriceMatrixSourceRow, build_price_matrix
 
 
 @dataclass(frozen=True)
@@ -147,6 +149,66 @@ def test_extracts_jiameixian_dom_table_context() -> None:
     assert result.items[0].include_in_standard_price is True
     assert result.table_summaries[0]["row_count"] == 2
     assert result.table_summaries[0]["parsed_item_count"] == 2
+
+
+def test_extracts_dynamic_edge_step_rows_from_current_article_table() -> None:
+    source = Source(
+        account_name="江西九江褐壳蛋",
+        transient_html_tables=[
+            {
+                "source_media_type": "dom_table",
+                "source_table_index": 0,
+                "title": "当日褐壳参考价",
+                "context": {"quote_basis": "360枚/箱"},
+                "headers": ["净重", "价差", "今日价", "涨跌稳"],
+                "rows": [
+                    ["精品大码以上每斤+2"],
+                    ["50", "标价", "222", "0"],
+                    ["49", "-2", "220", "0"],
+                    ["38", "-4", "186", "0"],
+                    ["小码以下每斤-4元"],
+                ],
+            }
+        ],
+    )
+
+    result = extract_egg_prices(source, analyze_time=datetime(2026, 7, 16, 10, 0))
+
+    by_weight = {item.weight_text: item for item in result.items}
+    assert by_weight["37"].price_text == "182"
+    assert by_weight["30"].price_text == "154"
+    assert by_weight["50"].price_text == "222"
+    assert all(item.product_name == "褐壳蛋" for item in result.items)
+
+    matrix = build_price_matrix(
+        [
+            PriceMatrixSourceRow(
+                row_id=index,
+                article_hash=item.article_hash,
+                account_name=item.account_name,
+                quote_date=item.quote_date,
+                publish_time=item.publish_time,
+                analyze_time=item.analyze_time,
+                region=item.region,
+                market_name=item.market_name,
+                product_name=item.product_name,
+                product_family=item.product_family,
+                include_in_egg_price=item.include_in_egg_price,
+                spec_text=item.spec_text,
+                weight_low=Decimal(str(item.weight_low)) if item.weight_low is not None else None,
+                weight_high=Decimal(str(item.weight_high)) if item.weight_high is not None else None,
+                price_low=Decimal(str(item.price_low)) if item.price_low is not None else None,
+                price_high=Decimal(str(item.price_high)) if item.price_high is not None else None,
+                price_unit_text=item.price_unit_text,
+            )
+            for index, item in enumerate(result.items, start=1)
+        ],
+        date(2026, 7, 9),
+    )
+    rule_cell = next(row for row in matrix.rows if row.size == 37).cells["jiujiang:brown"]
+    assert rule_cell.value == Decimal("182")
+    assert rule_cell.source == "observed"
+    assert rule_cell.explanation is None
 
 
 def test_extracts_hebei_mid_table_heading_context() -> None:

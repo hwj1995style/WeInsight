@@ -15,7 +15,7 @@ def table(*, title="", headers=None, rows=None, context=None, media="dom_table")
     }
 
 
-def test_jiameixian_locator_keeps_only_main_table_and_expands_lower_step() -> None:
+def test_jiameixian_locator_parses_current_article_lower_step() -> None:
     main = table(
         title="通货装车价（含包装）",
         headers=["净重", "价差", "昨日价", "今日价", "涨跌"],
@@ -42,6 +42,65 @@ def test_jiameixian_locator_keeps_only_main_table_and_expands_lower_step() -> No
         ["31", "", "", "187", ""],
         ["30", "", "", "181", ""],
     ]
+
+
+def test_edge_steps_are_parsed_from_table_text_instead_of_account_constants() -> None:
+    main = table(
+        title="通货装车价（含包装）",
+        headers=["净重", "价差", "今日价", "涨跌稳"],
+        rows=[
+            ["精品大码以上每斤+3"],
+            ["48", "标价", "218", "0"],
+            ["47", "-2", "216", "0"],
+            ["38", "-4", "186", "0"],
+            ["小码以下每斤-5元"],
+        ],
+    )
+
+    located = locate_quote_content("江西九江褐壳蛋", "", [main], [])
+
+    prices = {int(row[0]): row[2] for row in located.tables[0]["rows"]}
+    assert prices[50] == "224"
+    assert prices[49] == "221"
+    assert prices[37] == "181"
+    assert prices[30] == "146"
+
+
+def test_direct_table_rule_takes_priority_over_inferred_nearby_title() -> None:
+    main = table(
+        title="相邻表说明：小码以下每斤-9元",
+        headers=["净重", "价差", "今日价", "涨跌稳"],
+        rows=[
+            ["38", "-4", "186", "0"],
+            ["小码以下每斤-4元"],
+        ],
+    )
+
+    located = locate_quote_content("江西九江褐壳蛋", "", [main], [])
+
+    prices = {int(row[0]): row[2] for row in located.tables[0]["rows"]}
+    assert prices[37] == "182"
+    assert prices[30] == "154"
+
+
+def test_jiujiang_brown_and_powder_tables_apply_their_own_dynamic_rules() -> None:
+    brown = table(
+        title="当日褐壳参考价",
+        headers=["毛重", "价差", "今日价", "涨跌稳"],
+        rows=[["33", "-5", "198", "0"], ["32", "-5", "193", "0"], ["32以下顺减-6"]],
+    )
+    powder = table(
+        title="当日粉壳参考价",
+        headers=["净重", "价差", "今日价", "涨跌稳"],
+        rows=[["33", "-4", "202", "0"], ["32", "-4", "198", "0"], ["32以下顺减-7"]],
+    )
+
+    located = locate_quote_content("江西九江褐壳蛋", "", [brown, powder], [])
+
+    brown_prices = {int(row[0]): row[2] for row in located.tables[0]["rows"]}
+    powder_prices = {int(row[0]): row[2] for row in located.tables[1]["rows"]}
+    assert brown_prices[30] == "181"
+    assert powder_prices[30] == "184"
 
 
 def test_guiyang_locator_selects_quote_table_and_expands_thresholds() -> None:
