@@ -16,7 +16,7 @@
   <form class="filter-panel report-filters" method="get" action="/reports">
     <div><label for="report_date">日期</label><input id="report_date" type="date" name="date" value="{{ report_date.isoformat() }}"></div>
     <div><label for="report_type">日报类型</label><select id="report_type" name="type"><option value="group" {% if report_type == 'group' %}selected{% endif %}>微信群</option><option value="article" {% if report_type == 'article' %}selected{% endif %}>公众号</option><option value="summary" {% if report_type == 'summary' %}selected{% endif %}>双链路汇总</option></select></div>
-    <div><label for="source">采集对象</label><input id="source" name="source" value="{{ source or '' }}" {% if report_type == 'summary' %}disabled{% endif %}></div>
+    <div><label for="source">采集对象</label><select id="source" name="source" {% if report_type == 'summary' %}disabled{% endif %}><option value="">全部对象</option>{% for source_option in source_options %}<option value="{{ source_option }}" {% if source == source_option %}selected{% endif %}>{{ source_option }}</option>{% endfor %}</select></div>
     <div><label for="page_size">每页</label><select id="page_size" name="page_size">{% for size in [20, 50, 100] %}<option value="{{ size }}" {% if page_size == size %}selected{% endif %}>{{ size }}</option>{% endfor %}</select></div>
     <button type="submit">查询</button>
   </form>

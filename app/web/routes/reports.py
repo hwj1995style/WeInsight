@@ -27,6 +27,7 @@ TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 router = APIRouter()
 REPORT_TYPES = frozenset({"group", "article", "summary"})
+_SOURCE_OPTION_LIMIT = 1000
 _LIST_QUERY_FIELDS = frozenset({"date", "type", "source", "page", "page_size"})
 _GENERATE_FORM_FIELDS = frozenset(
     {"csrf_token", "idempotency_key", "report_type", "report_date", "source_name"}
@@ -127,6 +128,7 @@ async def _load_report_context(
             "reports": (),
             "detail": None,
             "safe_markdown": None,
+            "source_options": (),
             "next_url": _next_url(has_next, report_date, report_type, source, page_size, offset),
             "idempotency_key": secrets.token_urlsafe(32),
             "lifecycle_labels": _LIFECYCLE_LABELS,
@@ -145,6 +147,17 @@ async def _load_report_context(
         page_size + 1,
         offset,
     )
+    source_reports = await run_in_threadpool(
+        service.list_reports,
+        report_date,
+        None,
+        _SOURCE_OPTION_LIMIT,
+        0,
+    )
+    source_field = "group_name" if report_type == "group" else "account_name"
+    source_options = tuple(
+        sorted({str(getattr(item, source_field)) for item in source_reports})
+    )
     has_next = len(reports) > page_size
     detail = None
     safe_markdown = None
@@ -158,6 +171,7 @@ async def _load_report_context(
         "article_reports": (),
         "detail": detail,
         "safe_markdown": safe_markdown,
+        "source_options": source_options,
         "next_url": _next_url(
             has_next,
             report_date,
