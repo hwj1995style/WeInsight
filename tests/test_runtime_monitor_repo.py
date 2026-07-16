@@ -122,7 +122,7 @@ def test_list_sql_applies_visibility_to_count_and_data_before_pagination() -> No
         if "ORDER BY" in sql:
             assert (
                 sql.index("event.create_time >= :visible_since")
-                < sql.index("ORDER BY")
+                < sql.rindex("ORDER BY event.id DESC")
                 < sql.index("LIMIT")
                 < sql.index("OFFSET")
             )
@@ -230,6 +230,82 @@ def test_worker_expiry_boundary_is_fail_closed() -> None:
         }
     )
     assert worker.is_live is False
+
+
+def test_worker_query_prioritizes_live_and_recent_heartbeats() -> None:
+    sql = " ".join(str(runtime_monitor_repo._WORKERS).split())
+
+    assert (
+        "ORDER BY within_ttl DESC, last_heartbeat_at DESC, "
+        "worker_type ASC, hostname ASC, worker_id ASC"
+    ) in sql
+
+
+def test_event_query_aggregates_run_targets_without_duplicating_events() -> None:
+    executed: list[str] = []
+
+    class Result:
+        def scalar_one(self):
+            return 0
+
+        def mappings(self):
+            return self
+
+        def all(self):
+            return []
+
+    class Connection:
+        def execute(self, statement, params=None):
+            executed.append(" ".join(str(statement).split()))
+            return Result()
+
+    class Context:
+        def __enter__(self):
+            return Connection()
+
+        def __exit__(self, *args):
+            return False
+
+    class Engine:
+        def begin(self):
+            return Context()
+
+    runtime_monitor_repo.MysqlRuntimeMonitorRepo(Engine()).list_events(
+        EventListFilter(), 1, 50, NOW - timedelta(days=1)
+    )
+
+    data_sql = executed[1]
+    assert "GROUP BY run_target.run_id" in data_sql
+    assert "run_targets.run_id = event.run_id" in data_sql
+    assert "COALESCE(run_targets.target_count, 0) AS target_count" in data_sql
+    assert "run_targets.target_names_json" in data_sql
+
+
+def test_runtime_event_decodes_ordered_target_names_safely() -> None:
+    row = {
+        "id": 1,
+        "job_id": 10,
+        "run_id": 757,
+        "target_run_id": None,
+        "pipeline_type": "article",
+        "subject_name": None,
+        "target_count": 2,
+        "target_names_json": '["公众号A","公众号, B"]',
+        "worker_id": "collector-1",
+        "level": "warning",
+        "event_type": "misfire",
+        "stage": None,
+        "message": "safe",
+        "metrics_json": "{}",
+        "actor_type": "worker",
+        "actor_name": "collector-1",
+        "create_time": datetime(2026, 7, 10, 12, 0),
+    }
+
+    event = runtime_monitor_repo._runtime_event(row)
+
+    assert event.target_count == 2
+    assert event.target_names == ("公众号A", "公众号, B")
 
 
 def test_web_runtime_monitor_has_no_direct_ui_lock_dependency() -> None:

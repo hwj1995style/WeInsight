@@ -133,6 +133,8 @@ class RuntimeEvent:
     actor_name: str
     create_time: datetime
     subject_name: str | None = None
+    target_count: int = 0
+    target_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -532,6 +534,9 @@ def _safe_event(event: RuntimeEvent) -> RuntimeEvent:
         actor_type=_safe_structured(event.actor_type, maximum=20),
         actor_name=_safe_label(event.actor_name, maximum=100),
         subject_name=_safe_optional(event.subject_name),
+        target_names=tuple(
+            _safe_label(name, maximum=200) for name in event.target_names
+        ),
     )
 
 
@@ -571,14 +576,18 @@ def _event_view(event: RuntimeEvent) -> RuntimeEventView:
         )
         if value is not None
     )
+    type_label = {
+        PipelineType.GROUP: "微信群",
+        PipelineType.ARTICLE: "公众号",
+    }.get(event.pipeline_type, "对象")
     if event.subject_name:
-        type_label = {
-            PipelineType.GROUP: "微信群",
-            PipelineType.ARTICLE: "公众号",
-        }.get(event.pipeline_type, "对象")
         subject = f"{type_label} · {event.subject_name}"
     elif event.target_run_id is not None:
         subject = " · ".join(id_subjects)
+    elif event.run_id is not None and event.target_count == 1 and event.target_names:
+        subject = f"{type_label} · {event.target_names[0]}"
+    elif event.run_id is not None and event.target_count > 0:
+        subject = f"{type_label} · 本轮 {event.target_count} 个目标"
     elif event.run_id is not None:
         subject = "本轮全部目标"
     else:

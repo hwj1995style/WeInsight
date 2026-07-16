@@ -416,6 +416,33 @@ def test_misfire_event_shows_missed_schedule_count(tmp_path: Path) -> None:
     ]
 
 
+def test_run_level_event_shows_target_count_and_names(tmp_path: Path) -> None:
+    service = RuntimeMonitorService(Repo(), tmp_path, heartbeat_ttl_seconds=30)
+    event = RuntimeEvent(
+        1, 10, 757, None, PipelineType.ARTICLE, "w-1", "warning",
+        "misfire", None, "safe", "{}", "worker", "actor", NOW,
+        target_count=2,
+        target_names=("成都鸡蛋价格", "贵阳鸡蛋价格"),
+    )
+
+    view = service.to_event_view(event)
+
+    assert view.subject == "公众号 · 本轮 2 个目标"
+    assert view.event.target_names == ("成都鸡蛋价格", "贵阳鸡蛋价格")
+
+
+def test_single_target_run_level_event_shows_specific_name(tmp_path: Path) -> None:
+    service = RuntimeMonitorService(Repo(), tmp_path, heartbeat_ttl_seconds=30)
+    event = RuntimeEvent(
+        1, 10, 757, None, PipelineType.ARTICLE, "w-1", "info",
+        "collection_run_finished", None, "safe", "{}", "worker", "actor", NOW,
+        target_count=1,
+        target_names=("成都鸡蛋价格",),
+    )
+
+    assert service.to_event_view(event).subject == "公众号 · 成都鸡蛋价格"
+
+
 def test_event_view_whitelists_ordered_scalar_metrics(tmp_path: Path) -> None:
     service = RuntimeMonitorService(Repo(), tmp_path, heartbeat_ttl_seconds=30)
     metrics = json.dumps({
