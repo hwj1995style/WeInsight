@@ -236,6 +236,56 @@ class WorkersConfig:
 
 
 @dataclass(frozen=True)
+class WeRSSAuthorizationConfig:
+    enabled: bool = False
+    base_url: str = "http://127.0.0.1:8001"
+    management_username: str = "admin"
+    management_password_env: str = "WERSS_AUTH_ADMIN_PASSWORD"
+    check_interval_seconds: int = 300
+    warning_threshold_hours: int = 24
+
+    def __post_init__(self) -> None:
+        if self.base_url != "http://127.0.0.1:8001":
+            raise ValueError("authorization base_url must be http://127.0.0.1:8001")
+        for field_name in ("management_username", "management_password_env"):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value or value != value.strip():
+                raise ValueError(f"{field_name} must be a non-empty trimmed string")
+        if not 60 <= self.check_interval_seconds <= 3600:
+            raise ValueError("check_interval_seconds must be from 60 to 3600")
+        if not 1 <= self.warning_threshold_hours <= 168:
+            raise ValueError("warning_threshold_hours must be from 1 to 168")
+
+
+@dataclass(frozen=True)
+class AuthorizationEmailConfig:
+    enabled: bool = False
+    host: str = ""
+    port: int = 587
+    username: str = ""
+    password_env: str = "WERSS_AUTH_SMTP_PASSWORD"
+    security: str = "starttls"
+    from_address: str = ""
+    recipients: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.security not in {"starttls", "ssl", "plain"}:
+            raise ValueError("email security must be starttls, ssl or plain")
+        if isinstance(self.port, bool) or not isinstance(self.port, int) or not 1 <= self.port <= 65535:
+            raise ValueError("email port must be from 1 to 65535")
+        if not self.enabled:
+            return
+        for field_name in ("host", "password_env", "from_address"):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value or value != value.strip():
+                raise ValueError(f"email {field_name} must be a non-empty trimmed string")
+        if not self.recipients:
+            raise ValueError("email recipients must not be empty when enabled")
+        if len(set(self.recipients)) != len(self.recipients):
+            raise ValueError("email recipients must not contain duplicates")
+
+
+@dataclass(frozen=True)
 class Config:
     app: AppConfig
     wechat: WechatConfig
@@ -245,6 +295,8 @@ class Config:
     web: WebConfig
     auth: AuthConfig
     workers: WorkersConfig
+    werss_authorization: WeRSSAuthorizationConfig = WeRSSAuthorizationConfig()
+    authorization_email: AuthorizationEmailConfig = AuthorizationEmailConfig()
 
     def __post_init__(self) -> None:
         if self.app.env != "prod":
@@ -325,4 +377,15 @@ def load_config(path: Path) -> Config:
         web=WebConfig(**data["web"]),
         auth=AuthConfig(**data["auth"]),
         workers=WorkersConfig(**data["workers"]),
+        werss_authorization=WeRSSAuthorizationConfig(
+            **data.get("werss_authorization", {})
+        ),
+        authorization_email=AuthorizationEmailConfig(
+            **{
+                **data.get("authorization_email", {}),
+                "recipients": tuple(
+                    data.get("authorization_email", {}).get("recipients", ())
+                ),
+            }
+        ),
     )

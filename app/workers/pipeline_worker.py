@@ -78,6 +78,10 @@ class HeartbeatRepo(Protocol):
     def upsert_heartbeat(self, record: WorkerHeartbeatRecord) -> None: ...
 
 
+class AuthorizationMonitorService(Protocol):
+    def monitor_now(self, now: datetime): ...
+
+
 class PipelineWorker:
     def __init__(
         self,
@@ -102,6 +106,7 @@ class PipelineWorker:
         article_analysis_batch_size: int,
         now_provider: Callable[[], datetime] | None = None,
         event_retention_service: EventRetentionService | None = None,
+        authorization_monitor_service: AuthorizationMonitorService | None = None,
     ) -> None:
         _required_text(worker_id, "worker_id", 100)
         _required_text(hostname, "hostname", 255)
@@ -136,6 +141,7 @@ class PipelineWorker:
         self.article_analysis_batch_size = article_analysis_batch_size
         self.now_provider = now_provider or _shanghai_now
         self.event_retention_service = event_retention_service
+        self.authorization_monitor_service = authorization_monitor_service
 
     def cleanup_events_now(self, *, dry_run: bool = False):
         if self.event_retention_service is None:
@@ -173,6 +179,11 @@ class PipelineWorker:
             ),
         )
         report_request_status = self._run_report(now)
+        if self.authorization_monitor_service is not None:
+            try:
+                self.authorization_monitor_service.monitor_now(now)
+            except Exception as exc:
+                self._append_failure_event("werss_authorization_monitor", exc)
         return PipelineTickResult(
             group_clean_success=group_clean_success,
             group_analysis_success=group_analysis_success,

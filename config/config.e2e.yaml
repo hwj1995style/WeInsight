@@ -47,6 +47,12 @@ workers:
   article_parse_batch_size: 20
   article_analysis_batch_size: 20
 
+werss_authorization:
+  enabled: false
+
+authorization_email:
+  enabled: false
+
 pipelines:
   group:
     enabled: true

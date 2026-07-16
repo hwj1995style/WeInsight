@@ -1,6 +1,8 @@
 # 公众号 RSS 采集运行手册
 
-本手册用于在 Windows 采集机的 Docker Desktop 中运行 WeRSS，并通过标准 RSS/Atom 向 WeInsight 提供公众号文章。WeRSS 只监听 `127.0.0.1`，连接现有外部 MySQL；禁止将管理端口开放到公网。WeInsight 只通过固定本机只读 API `http://127.0.0.1:8001/api/v1/wx/mps` 的 GET 请求同步公众号清单；禁止跨库读取 WeRSS 私有表，禁止向 WeRSS 发起写请求。
+本手册用于在 Windows 采集机的 Docker Desktop 中运行 WeRSS，并通过标准 RSS/Atom 向 WeInsight 提供公众号文章。WeRSS 只监听 `127.0.0.1`，连接现有外部 MySQL；禁止将管理端口开放到公网。WeInsight 的目录同步只通过固定本机只读 API `http://127.0.0.1:8001/api/v1/wx/mps` 的 GET 请求完成，禁止跨库读取 WeRSS 私有表，目录同步客户端仍然禁止向 WeRSS 发起写请求。经批准的授权管理模块可额外调用固定白名单中的 `sys/info` 与 `auth/qr/*` 接口；它使用独立管理凭据，不能扩大目录同步客户端的调用范围。
+
+授权管理密码和 SMTP 密码可在 WeInsight 公众号页重新设置，保存后只以 Windows DPAPI `CurrentUser` 密文存入 `wechat_werss_authorization_settings`，页面不回显。Web 与 Pipeline Worker 必须使用同一 Windows 账号运行；迁移主机或更换运行账号后，需要在页面重新输入两个密码。SMTP 服务器、端口、加密方式、发件人和多个收件人也在同一页面维护，保存后无需重启。
 
 ## 只读清单凭据与边界
 

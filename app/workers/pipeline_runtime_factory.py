@@ -32,6 +32,7 @@ from app.pipelines.summary_daily_report_service import SummaryDailyReportService
 from app.services.report_generation_service import ReportGenerationService
 from app.services.windows_ocr_service import WindowsOcrService
 from app.services.event_retention_service import EventRetentionPolicy, EventRetentionService
+from app.services.werss_authorization_factory import build_werss_authorization_service
 from app.storage.article_analysis_repo import MysqlArticleAnalysisRepo
 from app.storage.article_daily_report_repo import MysqlArticleDailyReportRepo
 from app.storage.article_parse_repo import MysqlArticleParseRepo
@@ -138,6 +139,9 @@ def build_pipeline_worker(
                 audit_months=getattr(config.workers, "event_audit_retention_months", 6),
                 batch_size=getattr(config.workers, "event_cleanup_batch_size", 1000),
             ),
+        ),
+        authorization_monitor_service=build_werss_authorization_service(
+            config, shared_engine
         ),
     )
 

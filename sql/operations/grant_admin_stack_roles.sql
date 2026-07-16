@@ -30,6 +30,8 @@ GRANT SELECT ON `weinsight_prod`.`wechat_group_daily_report` TO 'weinsight_web_r
 GRANT SELECT ON `weinsight_prod`.`wechat_article_daily_report` TO 'weinsight_web_role';
 GRANT SELECT ON `weinsight_prod`.`wechat_group_process_task` TO 'weinsight_web_role';
 GRANT SELECT ON `weinsight_prod`.`wechat_article_process_task` TO 'weinsight_web_role';
+GRANT SELECT, INSERT, UPDATE ON `weinsight_prod`.`wechat_werss_authorization_state` TO 'weinsight_web_role';
+GRANT SELECT, INSERT, UPDATE ON `weinsight_prod`.`wechat_werss_authorization_settings` TO 'weinsight_web_role';
 
 -- collector role
 GRANT SELECT ON `weinsight_prod`.`wechat_group_config` TO 'weinsight_collector_role';
@@ -66,3 +68,6 @@ GRANT SELECT, INSERT, UPDATE ON `weinsight_prod`.`wechat_article_daily_report` T
 GRANT SELECT, INSERT, UPDATE ON `weinsight_prod`.`wechat_report_generation_request` TO 'weinsight_pipeline_role';
 GRANT INSERT ON `weinsight_prod`.`wechat_collection_job_event` TO 'weinsight_pipeline_role';
 GRANT INSERT, UPDATE ON `weinsight_prod`.`wechat_worker_heartbeat` TO 'weinsight_pipeline_role';
+GRANT SELECT, INSERT, UPDATE ON `weinsight_prod`.`wechat_werss_authorization_state` TO 'weinsight_pipeline_role';
+GRANT SELECT, INSERT, UPDATE ON `weinsight_prod`.`wechat_werss_authorization_notice` TO 'weinsight_pipeline_role';
+GRANT SELECT ON `weinsight_prod`.`wechat_werss_authorization_settings` TO 'weinsight_pipeline_role';

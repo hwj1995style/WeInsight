@@ -19,6 +19,7 @@ from app.services.collection_job_service import CollectionJobService
 from app.services.result_query_service import ResultQueryService
 from app.services.source_management_service import SourceManagementService
 from app.services.report_generation_service import ReportGenerationService
+from app.services.werss_authorization_factory import build_werss_authorization_service
 from app.storage.admin_auth_repo import MysqlAdminAuthRepo
 from app.storage.article_config_repo import MysqlArticleAccountConfigRepo
 from app.storage.article_source_status_repo import MysqlArticleSourceStatusRepo
@@ -88,6 +89,7 @@ def create_app(
     event_repo: MysqlCollectionEventRepo | None = None,
     report_request_service: ReportGenerationService | None = None,
     report_request_repo: MysqlReportRequestRepo | None = None,
+    werss_authorization_service=None,
 ) -> FastAPI:
     app = FastAPI(
         title="WeInsight Admin",
@@ -115,6 +117,7 @@ def create_app(
             event_repo,
             report_request_service,
             report_request_repo,
+            werss_authorization_service,
         )
     ):
         engine = create_mysql_engine(config.mysql)
@@ -175,6 +178,10 @@ def create_app(
         )
     app.state.runtime_monitor_service = runtime_monitor_service
     app.state.event_repo = event_repo or MysqlCollectionEventRepo(engine)
+    app.state.werss_authorization_service = (
+        werss_authorization_service
+        or build_werss_authorization_service(config, engine)
+    )
     app.state.login_attempt_limiter = LoginAttemptLimiter(
         config.auth.login_failure_limit,
         config.auth.login_lock_minutes,

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
 from time import monotonic
 from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from app.services.source_management_service import (
@@ -22,6 +23,9 @@ from app.services.article_downstream_service import (
     ArticleDownstreamSourceUnavailableError,
     ArticleDownstreamValidationError,
 )
+from app.integrations.werss_authorization import WeRSSAuthorizationError
+from app.domain.werss_authorization import AuthorizationSettingsCommand
+from app.storage.collection_event_repo import NewCollectionEvent
 
 
 TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "templates"
@@ -172,6 +176,24 @@ async def article_list(
         return _source_error_response(request, exc, "/sources/articles")
     start_date, end_date = request.app.state.article_downstream_service.default_backfill_dates(datetime.now())
     summary = _take_downstream_flash(request)
+    authorization_state = None
+    authorization_settings = None
+    authorization_service = getattr(
+        request.app.state, "werss_authorization_service", None
+    )
+    if authorization_service is not None:
+        try:
+            authorization_state = await run_in_threadpool(
+                authorization_service.get_state, datetime.now()
+            )
+        except Exception:
+            authorization_state = None
+        settings_reader = getattr(authorization_service, "public_settings", None)
+        if callable(settings_reader):
+            try:
+                authorization_settings = await run_in_threadpool(settings_reader)
+            except Exception:
+                authorization_settings = None
     return templates.TemplateResponse(
         request=request,
         name="sources/articles.html",
@@ -183,8 +205,246 @@ async def article_list(
             "backfill_start_date": start_date.isoformat(),
             "backfill_end_date": end_date.isoformat(),
             "backfill_summary": summary,
+            "authorization_state": authorization_state,
+            "authorization_scan_configured": bool(
+                authorization_settings
+                and authorization_settings.werss_password_configured
+            ),
+            "authorization_email_enabled": bool(
+                authorization_settings
+                and authorization_settings.smtp_enabled
+            ),
+            "authorization_settings": authorization_settings,
         },
     )
+
+
+@router.post("/articles/authorization/settings")
+async def article_authorization_settings_save(request: Request) -> Response:
+    try:
+        payload = await request.json()
+        command = _authorization_settings_command(payload)
+        settings = await run_in_threadpool(
+            request.app.state.werss_authorization_service.save_settings,
+            command,
+            datetime.now(),
+        )
+    except (TypeError, ValueError):
+        await _append_authorization_audit(request, "werss_authorization_settings_failed", "授权提醒配置保存失败", {"reason": "validation"})
+        return JSONResponse(
+            {"code": "invalid_settings", "message": "请检查配置字段和邮箱格式。"},
+            status_code=422,
+        )
+    except WeRSSAuthorizationError as exc:
+        await _append_authorization_audit(request, "werss_authorization_settings_failed", "授权提醒配置保存失败", {"reason": exc.code})
+        return _authorization_error(exc)
+    await _append_authorization_audit(
+        request,
+        "werss_authorization_settings_changed",
+        "授权提醒配置已更新",
+        {"smtp_enabled": settings.smtp_enabled, "recipient_count": len(settings.recipients)},
+    )
+    return JSONResponse(_public_settings_payload(settings))
+
+
+@router.post("/articles/authorization/settings/test-werss")
+async def article_authorization_settings_test_werss(request: Request) -> Response:
+    try:
+        await run_in_threadpool(
+            request.app.state.werss_authorization_service.test_werss_settings,
+            datetime.now(),
+        )
+    except WeRSSAuthorizationError as exc:
+        await _append_authorization_audit(request, "werss_authorization_test_failed", "WeRSS管理凭据测试失败", {"target": "werss", "reason": exc.code})
+        return _authorization_error(exc)
+    await _append_authorization_audit(request, "werss_authorization_test_succeeded", "WeRSS管理凭据测试成功", {"target": "werss"})
+    return JSONResponse({"status": "ok", "message": "WeRSS 管理凭据验证成功。"})
+
+
+@router.post("/articles/authorization/settings/test-email")
+async def article_authorization_settings_test_email(request: Request) -> Response:
+    try:
+        await run_in_threadpool(
+            request.app.state.werss_authorization_service.test_email_settings,
+            datetime.now(),
+        )
+    except WeRSSAuthorizationError as exc:
+        await _append_authorization_audit(request, "werss_authorization_test_failed", "授权提醒测试邮件发送失败", {"target": "email", "reason": exc.code})
+        return _authorization_error(exc)
+    await _append_authorization_audit(request, "werss_authorization_test_succeeded", "授权提醒测试邮件发送成功", {"target": "email"})
+    return JSONResponse({"status": "ok", "message": "测试邮件已发送。"})
+
+
+@router.post("/articles/authorization/refresh")
+async def article_authorization_refresh(request: Request) -> Response:
+    service = request.app.state.werss_authorization_service
+    try:
+        snapshot = await run_in_threadpool(service.refresh, datetime.now())
+    except WeRSSAuthorizationError as exc:
+        return _authorization_error(exc)
+    return JSONResponse(_authorization_payload(snapshot))
+
+
+@router.post("/articles/authorization/qr/start")
+async def article_authorization_qr_start(request: Request) -> Response:
+    service = request.app.state.werss_authorization_service
+    try:
+        session_id = await run_in_threadpool(
+            service.start_scan, request.state.admin.id, datetime.now()
+        )
+    except WeRSSAuthorizationError as exc:
+        return _authorization_error(exc)
+    return JSONResponse(
+        {
+            "session_id": session_id,
+            "image_url": f"/sources/articles/authorization/qr/{session_id}/image",
+        }
+    )
+
+
+@router.get("/articles/authorization/qr/{session_id}/image")
+async def article_authorization_qr_image(request: Request, session_id: str) -> Response:
+    service = request.app.state.werss_authorization_service
+    try:
+        content, content_type = await run_in_threadpool(
+            service.qr_image, session_id, request.state.admin.id, datetime.now()
+        )
+    except WeRSSAuthorizationError as exc:
+        return _authorization_error(exc)
+    return Response(
+        content,
+        media_type=content_type,
+        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+    )
+
+
+@router.get("/articles/authorization/qr/{session_id}/status")
+async def article_authorization_qr_status(request: Request, session_id: str) -> Response:
+    service = request.app.state.werss_authorization_service
+    try:
+        status = await run_in_threadpool(
+            service.qr_status, session_id, request.state.admin.id, datetime.now()
+        )
+    except WeRSSAuthorizationError as exc:
+        return _authorization_error(exc)
+    return JSONResponse({"status": status.status})
+
+
+@router.post("/articles/authorization/qr/{session_id}/cancel")
+async def article_authorization_qr_cancel(request: Request, session_id: str) -> Response:
+    service = request.app.state.werss_authorization_service
+    try:
+        await run_in_threadpool(
+            service.cancel_scan, session_id, request.state.admin.id, datetime.now()
+        )
+    except WeRSSAuthorizationError as exc:
+        return _authorization_error(exc)
+    return JSONResponse({"status": "cancelled"})
+
+
+def _authorization_payload(snapshot) -> dict[str, object]:
+    return {
+        "status": snapshot.status,
+        "account_name": snapshot.account_name,
+        "expires_at": snapshot.expires_at.isoformat(sep=" ") if snapshot.expires_at else None,
+        "last_checked_at": snapshot.last_checked_at.isoformat(sep=" "),
+    }
+
+
+def _authorization_settings_command(payload: object) -> AuthorizationSettingsCommand:
+    expected = {
+        "werss_username", "werss_password", "smtp_enabled", "smtp_host",
+        "smtp_port", "smtp_username", "smtp_password", "smtp_security",
+        "from_address", "recipients",
+    }
+    if not isinstance(payload, dict) or set(payload) != expected:
+        raise ValueError("invalid settings fields")
+    recipients = payload["recipients"]
+    if not isinstance(recipients, list) or not all(isinstance(item, str) for item in recipients):
+        raise ValueError("invalid recipients")
+    return AuthorizationSettingsCommand(
+        werss_username=payload["werss_username"],
+        werss_password=payload["werss_password"],
+        smtp_enabled=payload["smtp_enabled"],
+        smtp_host=payload["smtp_host"],
+        smtp_port=payload["smtp_port"],
+        smtp_username=payload["smtp_username"],
+        smtp_password=payload["smtp_password"],
+        smtp_security=payload["smtp_security"],
+        from_address=payload["from_address"],
+        recipients=tuple(recipients),
+    )
+
+
+def _public_settings_payload(settings) -> dict[str, object]:
+    return {
+        "werss_username": settings.werss_username,
+        "werss_password_configured": settings.werss_password_configured,
+        "smtp_enabled": settings.smtp_enabled,
+        "smtp_host": settings.smtp_host,
+        "smtp_port": settings.smtp_port,
+        "smtp_username": settings.smtp_username,
+        "smtp_password_configured": settings.smtp_password_configured,
+        "smtp_security": settings.smtp_security,
+        "from_address": settings.from_address,
+        "recipients": list(settings.recipients),
+    }
+
+
+def _authorization_error(exc: WeRSSAuthorizationError) -> JSONResponse:
+    statuses = {
+        "werss_scan_not_configured": 409,
+        "werss_qr_busy": 409,
+        "werss_qr_not_found": 404,
+        "werss_authorization_disabled": 409,
+    }
+    messages = {
+        "werss_scan_not_configured": "尚未配置 WeRSS 扫码管理凭据。",
+        "werss_qr_busy": "已有扫码授权正在进行，请稍后再试。",
+        "werss_qr_not_found": "扫码会话不存在或已过期。",
+        "werss_qr_timeout": "二维码生成超时，请取消后重新获取。",
+        "werss_qr_invalid": "WeRSS 返回的二维码无效，请取消后重新获取。",
+        "werss_authorization_disabled": "WeRSS 授权管理未启用。",
+        "werss_settings_unavailable": "授权设置服务不可用。",
+        "werss_settings_decrypt_failed": "已保存密码无法解密，请重新设置。",
+        "werss_email_not_configured": "请先启用并完整配置邮件提醒。",
+        "werss_email_test_failed": "测试邮件发送失败，请检查 SMTP 配置。",
+        "werss_authorization_auth_failed": "WeRSS 管理用户名或密码不正确。",
+    }
+    return JSONResponse(
+        {"code": exc.code, "message": messages.get(exc.code, "WeRSS 授权服务暂时不可用。")},
+        status_code=statuses.get(exc.code, 503),
+    )
+
+
+async def _append_authorization_audit(
+    request: Request,
+    event_type: str,
+    message: str,
+    metrics: dict[str, object],
+) -> None:
+    repo = getattr(request.app.state, "event_repo", None)
+    if repo is None:
+        return
+    try:
+        await run_in_threadpool(
+            repo.append_event,
+            NewCollectionEvent(
+                job_id=None,
+                run_id=None,
+                target_run_id=None,
+                worker_id=None,
+                level="info" if event_type.endswith(("changed", "succeeded")) else "warning",
+                event_type=event_type,
+                stage="werss_authorization",
+                message=message,
+                metrics_json=json.dumps(metrics, ensure_ascii=True, separators=(",", ":")),
+                actor_type="admin",
+                actor_name=request.state.admin.username,
+            ),
+        )
+    except Exception:
+        return
 
 
 @router.post("/articles/{source_id}/downstream-processing", response_class=HTMLResponse)

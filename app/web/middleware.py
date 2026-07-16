@@ -45,6 +45,17 @@ class AdminSessionMiddleware(BaseHTTPMiddleware):
 
         request.state.admin = admin
         request.state.csrf_token = csrf_cookie
+        request.state.authorization_alert = None
+        authorization_service = getattr(
+            request.app.state, "werss_authorization_service", None
+        )
+        if authorization_service is not None:
+            try:
+                request.state.authorization_alert = authorization_service.alert(
+                    _now(config.app.timezone)
+                )
+            except Exception:
+                request.state.authorization_alert = None
         if request.method in UNSAFE_METHODS:
             request_token = await _request_csrf_token(request)
             if request_token == _INVALID_CSRF_FORM:
