@@ -148,7 +148,7 @@ def test_analyze_clean_article_keeps_image_quote_not_supported_note() -> None:
     assert "https://mp.weixin.qq.com" not in result.extracted_tables_json()
 
 
-def test_article_analysis_service_consumes_article_tasks_and_creates_daily_report() -> None:
+def test_article_analysis_service_consumes_article_tasks_without_legacy_report_task() -> None:
     source = CleanArticleForAnalysis(
         article_hash="hash-1",
         account_name="行业观察",
@@ -186,7 +186,7 @@ def test_article_analysis_service_consumes_article_tasks_and_creates_daily_repor
     assert repo.analyses[0].topic_tags == ["深圳", "湖北", "供应链", "报价", "供需"]
     assert len(repo.analyses[0].egg_price_items) == 1
     assert repo.analyses[0].egg_price_items[0].price_text == "208-213"
-    assert repo.daily_report_dates == [datetime(2026, 7, 6, 8, 30).date()]
+    assert repo.daily_report_dates == []
     assert repo.successes == ["hash-1"]
     assert repo.failures == []
     assert not hasattr(repo.analyses[0], "transient_body_text")
@@ -325,7 +325,7 @@ def test_article_analysis_service_creates_daily_report_task_by_quote_date() -> N
     assert result.success_count == 1
     assert repo.analyses[0].publish_date == date(2026, 7, 8)
     assert repo.analyses[0].quote_date == date(2026, 7, 9)
-    assert repo.daily_report_dates == [date(2026, 7, 9)]
+    assert repo.daily_report_dates == []
 
 
 class FakeArticleAnalysisRepo:

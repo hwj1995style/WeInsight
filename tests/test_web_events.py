@@ -190,6 +190,33 @@ def test_events_page_does_not_link_target_without_run(
     assert 'href="/runs/' not in response.text
 
 
+def test_run_level_event_lists_specific_collection_targets(
+    authenticated_client: TestClient,
+    runtime_service: RuntimeService,
+) -> None:
+    run_event = replace(
+        _runtime_event(),
+        target_run_id=None,
+        subject_name=None,
+        pipeline_type=PipelineType.ARTICLE,
+        event_type="misfire",
+        target_count=2,
+        target_names=("成都鸡蛋价格", "贵阳鸡蛋价格"),
+    )
+    runtime_service.list_events = lambda filters, page, page_size: PagedResult(
+        [run_event], page, page_size, 1
+    )
+
+    response = authenticated_client.get("/events")
+
+    assert response.status_code == 200
+    assert "WARN · 错过计划已合并执行" in response.text
+    assert "公众号 · 本轮 2 个目标" in response.text
+    assert "查看具体对象" in response.text
+    assert "成都鸡蛋价格" in response.text
+    assert "贵阳鸡蛋价格" in response.text
+
+
 @pytest.mark.parametrize(
     "query",
     [

@@ -107,6 +107,7 @@ def _snapshot(*, zero: bool = False) -> DashboardSnapshot:
         backlogs=(
             BacklogCount("group", "clean", "pending", 3),
             BacklogCount("article", "parse", "failed", 1),
+            BacklogCount("report", "report_generation", "running", 2),
         ),
     )
 
@@ -161,7 +162,10 @@ def test_dashboard_renders_aggregated_kpis_and_conserving_fallback_table(
 
     assert response.status_code == 200
     assert dashboard_service.calls == [24]
-    for text in ("15", "10", "4 / 5", "18 / 20", "10", "clean", "parse"):
+    for text in (
+        "15", "10", "4 / 5", "18 / 20", "10", "clean", "parse",
+        "日报", "report_generation",
+    ):
         assert text in response.text
     assert 'data-success="12"' in response.text
     assert 'data-failed="2"' in response.text
@@ -328,6 +332,7 @@ def test_dashboard_sql_uses_only_aggregates_and_safe_control_tables() -> None:
         "wechat_article_daily_report",
         "wechat_group_process_task",
         "wechat_article_process_task",
+        "wechat_report_generation_request",
         "count(",
     ):
         assert required in sql
@@ -341,6 +346,8 @@ def test_dashboard_sql_uses_only_aggregates_and_safe_control_tables() -> None:
         "screenshot_path",
     ):
         assert forbidden not in sql
+    assert "task_type <> 'article_daily_report'" in sql
+    assert "'report_generation'" in sql
 
 
 @pytest.mark.parametrize(

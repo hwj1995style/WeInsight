@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import datetime
 from typing import Protocol
 
 from app.content.article_content import ContentFetchError
@@ -27,9 +27,6 @@ class ArticleAnalysisRepo(Protocol):
         ...
 
     def upsert_article_analysis_with_price_items(self, analysis: AnalyzedArticle) -> None:
-        ...
-
-    def create_daily_report_task(self, report_date: date) -> None:
         ...
 
     def mark_analyze_task_success(self, article_hash: str) -> None:
@@ -82,9 +79,6 @@ class ArticleAnalysisService:
                     egg_price_extraction_enabled=self.egg_price_extraction_enabled,
                 )
                 self.repo.upsert_article_analysis_with_price_items(analysis)
-                report_date = analysis.quote_date or analysis.publish_date
-                if report_date is not None:
-                    self.repo.create_daily_report_task(report_date)
                 self.repo.mark_analyze_task_success(article.article_hash)
                 success_count += 1
             except Exception as exc:

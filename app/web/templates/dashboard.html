@@ -39,7 +39,7 @@
       </div>
     </section>
   </div>
-  <section class="content-panel backlog-panel dashboard-backlog"><h2>待处理任务</h2>{% if snapshot.backlogs %}<div class="table-scroll" tabindex="0" aria-label="待处理任务摘要"><table class="data-table compact-table"><thead><tr><th scope="col">链路</th><th scope="col">任务类型</th><th scope="col">状态</th><th scope="col">数量</th></tr></thead><tbody>{% for item in snapshot.backlogs %}<tr><th scope="row">{{ '微信群' if item.pipeline == 'group' else '公众号' }}</th><td>{{ item.task_type }}</td><td>{{ item.status }}</td><td>{{ item.count }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state"><h3>当前没有待处理任务</h3><p>待处理、运行中和失败任务均为 0。</p></div>{% endif %}</section>
+  <section class="content-panel backlog-panel dashboard-backlog"><h2>待处理任务</h2>{% if snapshot.backlogs %}<div class="table-scroll" tabindex="0" aria-label="待处理任务摘要"><table class="data-table compact-table"><thead><tr><th scope="col">链路</th><th scope="col">任务类型</th><th scope="col">状态</th><th scope="col">数量</th></tr></thead><tbody>{% for item in snapshot.backlogs %}<tr><th scope="row">{{ {'group': '微信群', 'article': '公众号', 'report': '日报'}[item.pipeline] }}</th><td>{{ item.task_type }}</td><td>{{ item.status }}</td><td>{{ item.count }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state"><h3>当前没有待处理任务</h3><p>待处理、运行中和失败任务均为 0。</p></div>{% endif %}</section>
 {% endblock %}
 {% block scripts %}
   <script src="/static/vendor/echarts.min.js"></script>

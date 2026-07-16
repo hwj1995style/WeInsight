@@ -140,6 +140,8 @@ class MysqlRuntimeMonitorRepo:
             SELECT
                 event.id, event.job_id, event.run_id, event.target_run_id,
                 job.pipeline_type, job_target.target_name_snapshot AS subject_name,
+                COALESCE(run_targets.target_count, 0) AS target_count,
+                run_targets.target_names_json,
                 event.worker_id, event.level,
                 event.event_type, event.stage, event.message,
                 event.metrics_json, event.actor_type, event.actor_name,
@@ -150,6 +152,26 @@ class MysqlRuntimeMonitorRepo:
                 ON target_run.id = event.target_run_id
             LEFT JOIN wechat_collection_job_target job_target
                 ON job_target.id = target_run.job_target_id
+            LEFT JOIN (
+                SELECT
+                    run_target.run_id,
+                    COUNT(*) AS target_count,
+                    CONCAT(
+                        '[',
+                        GROUP_CONCAT(
+                            JSON_QUOTE(target.target_name_snapshot)
+                            ORDER BY target.priority_snapshot ASC,
+                                     target.target_name_snapshot ASC,
+                                     run_target.id ASC
+                            SEPARATOR ','
+                        ),
+                        ']'
+                    ) AS target_names_json
+                FROM wechat_collection_job_target_run run_target
+                JOIN wechat_collection_job_target target
+                  ON target.id = run_target.job_target_id
+                GROUP BY run_target.run_id
+            ) run_targets ON run_targets.run_id = event.run_id
             {where}
             ORDER BY event.id DESC
             LIMIT :limit OFFSET :offset
@@ -413,6 +435,8 @@ def _runtime_event(row) -> RuntimeEvent:
         target_run_id=_optional_int(row.get("target_run_id")),
         pipeline_type=(None if pipeline is None else PipelineType(str(pipeline))),
         subject_name=_optional_text(row.get("subject_name")),
+        target_count=_nonnegative(row.get("target_count", 0)),
+        target_names=_target_names(row.get("target_names_json")),
         worker_id=_optional_text(row.get("worker_id")),
         level=str(row["level"]),
         event_type=str(row["event_type"]),
@@ -422,6 +446,22 @@ def _runtime_event(row) -> RuntimeEvent:
         actor_type=str(row["actor_type"]),
         actor_name=str(row.get("actor_name") or ""),
         create_time=_db_datetime(row["create_time"]),
+    )
+
+
+def _target_names(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    try:
+        decoded = json.loads(str(value))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return ()
+    if not isinstance(decoded, list):
+        return ()
+    return tuple(
+        name
+        for item in decoded
+        if (name := _optional_text(item)) is not None
     )
 
 
@@ -619,7 +659,8 @@ _WORKERS = text(
         last_heartbeat_at, start_time, last_error_summary,
         CASE WHEN last_heartbeat_at >= :cutoff THEN 1 ELSE 0 END AS within_ttl
     FROM wechat_worker_heartbeat
-    ORDER BY worker_type ASC, hostname ASC, worker_id ASC
+    ORDER BY within_ttl DESC, last_heartbeat_at DESC,
+             worker_type ASC, hostname ASC, worker_id ASC
     """
 )
 

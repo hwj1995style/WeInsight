@@ -133,6 +133,8 @@ class RuntimeEvent:
     actor_name: str
     create_time: datetime
     subject_name: str | None = None
+    target_count: int = 0
+    target_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -532,15 +534,25 @@ def _safe_event(event: RuntimeEvent) -> RuntimeEvent:
         actor_type=_safe_structured(event.actor_type, maximum=20),
         actor_name=_safe_label(event.actor_name, maximum=100),
         subject_name=_safe_optional(event.subject_name),
+        target_names=tuple(
+            _safe_label(name, maximum=200) for name in event.target_names
+        ),
     )
 
 
 _EVENT_SUMMARIES = {
+    "job_created": "已创建采集任务",
+    "job_stop_requested": "已请求停止采集任务",
+    "job_deleted": "已删除采集任务",
+    "collection_run_claimed": "已领取采集运行",
     "collection_run_started": "开始执行采集任务",
     "collection_run_finished": "本轮采集完成",
+    "collection_run_lease_expired": "采集运行租约已过期",
     "collection_target_started": "开始处理目标",
     "collection_target_finished": "目标处理完成",
+    "misfire": "错过计划已合并执行",
     "pipeline_stage_failed": "后处理失败",
+    "werss_catalog_sync_changed": "WeRSS 公众号清单已同步",
 }
 _METRIC_FIELDS = (
     (("executed_target_count", "target_total_count"), "目标"),
@@ -550,6 +562,7 @@ _METRIC_FIELDS = (
     (("duplicate_count",), "重复"),
     (("skipped_count",), "跳过"),
     (("read_count",), "读取"),
+    (("missed_count",), "错过计划"),
 )
 
 
@@ -563,14 +576,18 @@ def _event_view(event: RuntimeEvent) -> RuntimeEventView:
         )
         if value is not None
     )
+    type_label = {
+        PipelineType.GROUP: "微信群",
+        PipelineType.ARTICLE: "公众号",
+    }.get(event.pipeline_type, "对象")
     if event.subject_name:
-        type_label = {
-            PipelineType.GROUP: "微信群",
-            PipelineType.ARTICLE: "公众号",
-        }.get(event.pipeline_type, "对象")
         subject = f"{type_label} · {event.subject_name}"
     elif event.target_run_id is not None:
         subject = " · ".join(id_subjects)
+    elif event.run_id is not None and event.target_count == 1 and event.target_names:
+        subject = f"{type_label} · {event.target_names[0]}"
+    elif event.run_id is not None and event.target_count > 0:
+        subject = f"{type_label} · 本轮 {event.target_count} 个目标"
     elif event.run_id is not None:
         subject = "本轮全部目标"
     else:
