@@ -85,3 +85,17 @@ def test_system_job_singleton_migration_is_idempotent_and_preserves_history() ->
     assert "SET status = 'stop_requested', next_run_at = NULL" in sql
     for destructive in ("DELETE FROM", "DROP TABLE", "TRUNCATE TABLE"):
         assert destructive not in sql.upper()
+
+
+def test_legacy_article_daily_report_task_migration_retires_without_deleting() -> None:
+    path = Path(
+        "sql/migrations/20260716_001_retire_legacy_article_daily_report_tasks.sql"
+    )
+    sql = path.read_text(encoding="utf-8")
+
+    assert "UPDATE wechat_article_process_task" in sql
+    assert "task_type = 'article_daily_report'" in sql
+    assert "status = 'success'" in sql
+    assert "status IN ('pending', 'running', 'failed')" in sql
+    for destructive in ("DELETE FROM", "DROP TABLE", "TRUNCATE TABLE"):
+        assert destructive not in sql.upper()

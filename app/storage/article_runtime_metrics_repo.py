@@ -97,6 +97,7 @@ def _task_backlog_statement():
             COUNT(*) AS cnt
         FROM wechat_article_process_task
         WHERE status IN ('pending', 'running', 'failed')
+          AND task_type <> 'article_daily_report'
         GROUP BY task_type, status
         ORDER BY task_type ASC, status ASC
         """

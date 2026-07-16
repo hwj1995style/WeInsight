@@ -106,6 +106,8 @@ def test_mysql_article_runtime_metrics_repo_returns_windowed_counts_and_backlogs
     assert engine.connection.executions[3][1]["hours"] == 24
     for sql, _params in engine.connection.executions:
         _assert_article_metrics_sql_is_safe(sql)
+    task_sql = engine.connection.executions[2][0]
+    assert "task_type <> 'article_daily_report'" in task_sql
 
 
 def test_mysql_article_runtime_metrics_repo_rejects_non_positive_hours() -> None:

@@ -27,7 +27,7 @@ class BacklogCount:
     count: int
 
     def __post_init__(self) -> None:
-        if self.pipeline not in {"group", "article"}:
+        if self.pipeline not in {"group", "article", "report"}:
             raise ValueError("unsupported backlog pipeline")
         if not self.task_type or not self.status:
             raise ValueError("backlog labels must not be empty")

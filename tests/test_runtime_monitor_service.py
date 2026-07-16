@@ -361,9 +361,16 @@ def test_event_and_worker_control_labels_are_sanitized_on_read(tmp_path: Path) -
     [
         ("collection_run_started", "开始执行采集任务"),
         ("collection_run_finished", "本轮采集完成"),
+        ("collection_run_claimed", "已领取采集运行"),
+        ("collection_run_lease_expired", "采集运行租约已过期"),
         ("collection_target_started", "开始处理目标"),
         ("collection_target_finished", "目标处理完成"),
+        ("job_created", "已创建采集任务"),
+        ("job_stop_requested", "已请求停止采集任务"),
+        ("job_deleted", "已删除采集任务"),
+        ("misfire", "错过计划已合并执行"),
         ("pipeline_stage_failed", "后处理失败"),
+        ("werss_catalog_sync_changed", "WeRSS 公众号清单已同步"),
         ("something_new", "未分类事件"),
     ],
 )
@@ -392,6 +399,21 @@ def test_event_view_preserves_alert_level_in_summary(
 
     assert text in view.summary
     assert view.subject == "系统事件"
+
+
+def test_misfire_event_shows_missed_schedule_count(tmp_path: Path) -> None:
+    service = RuntimeMonitorService(Repo(), tmp_path, heartbeat_ttl_seconds=30)
+    event = RuntimeEvent(
+        1, 10, 757, None, PipelineType.ARTICLE, "w-1", "warning",
+        "misfire", None, "safe", '{"missed_count":75}', "worker", "actor", NOW,
+    )
+
+    view = service.to_event_view(event)
+
+    assert view.summary == "WARN · 错过计划已合并执行"
+    assert [(item.label, item.value) for item in view.metric_items] == [
+        ("错过计划", "75")
+    ]
 
 
 def test_event_view_whitelists_ordered_scalar_metrics(tmp_path: Path) -> None:

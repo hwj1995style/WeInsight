@@ -135,7 +135,14 @@ def _backlog_statement():
             SELECT 'article' AS pipeline, task_type, status, COUNT(*) AS item_count
             FROM wechat_article_process_task
             WHERE status IN ('pending', 'running', 'failed')
+              AND task_type <> 'article_daily_report'
             GROUP BY task_type, status
+            UNION ALL
+            SELECT 'report' AS pipeline, 'report_generation' AS task_type,
+                   status, COUNT(*) AS item_count
+            FROM wechat_report_generation_request
+            WHERE status IN ('pending', 'running', 'failed')
+            GROUP BY status
         ) AS backlog
         GROUP BY pipeline, task_type, status
         ORDER BY pipeline ASC, task_type ASC, status ASC

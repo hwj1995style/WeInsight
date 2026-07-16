@@ -520,6 +520,7 @@ def test_pipeline_main_registers_exact_three_blocking_scheduler_jobs(
     ]
     assert scheduler.shutdown_calls == [True]
     assert worker.calls[0] == ("heartbeat", NOW)
+    assert worker.calls[1] == "compensation"
     assert worker.calls[-2:] == [("stopping", NOW), ("stopped", NOW)]
 
 
@@ -537,6 +538,7 @@ def test_pipeline_main_once_runs_one_tick_without_scheduler(monkeypatch) -> None
     assert result == 0
     assert worker.calls == [
         ("heartbeat", NOW),
+        "compensation",
         "tick",
         ("stopping", NOW),
         ("stopped", NOW),

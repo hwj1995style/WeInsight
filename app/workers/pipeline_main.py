@@ -66,6 +66,7 @@ def main(
     primary_error: Exception | None = None
     try:
         worker.heartbeat(clock())
+        worker.ensure_daily_compensation_now()
         if args.once:
             worker.run_tick_now()
             cleanup = getattr(worker, "cleanup_events_now", None)
