@@ -47,6 +47,17 @@ workers:
   article_parse_batch_size: 20
   article_analysis_batch_size: 20
 
+werss_authorization:
+  enabled: true
+  base_url: http://127.0.0.1:8001
+  management_username: admin
+  management_password_env: WERSS_AUTH_ADMIN_PASSWORD
+  check_interval_seconds: 300
+  warning_threshold_hours: 24
+
+authorization_email:
+  enabled: false
+
 pipelines:
   group:
     enabled: true

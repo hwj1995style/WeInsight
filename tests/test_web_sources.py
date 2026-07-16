@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from app.core.config import Config, load_config
 from app.domain.article_downstream import ArticleBackfillSummary
+from app.domain.werss_authorization import PublicAuthorizationSettings, WeRSSAuthorizationSnapshot
 from app.services.auth_service import AuthenticatedAdmin
 from app.services.source_management_service import (
     ArticleSourceCommand,
@@ -245,6 +246,54 @@ class FakeArticleDownstreamService:
         return ArticleBackfillSummary(9, 1, 2, 3, 4, 5, 6, 7)
 
 
+class FakeAuthorizationService:
+    scan_configured = True
+    email_enabled = True
+
+    def __init__(self):
+        self.calls = []
+        self.state = WeRSSAuthorizationSnapshot(
+            status="expiring",
+            account_name="测试公众号",
+            expires_at=datetime(2026, 7, 17, 8, 0, 0),
+            last_checked_at=datetime(2026, 7, 16, 9, 0, 0),
+            last_successful_check_at=datetime(2026, 7, 16, 9, 0, 0),
+            last_error_code=None,
+            authorization_version="version",
+        )
+
+    def get_state(self, now):
+        return self.state
+
+    def alert(self, now):
+        return None
+
+    def public_settings(self):
+        return PublicAuthorizationSettings(
+            werss_username="controller",
+            werss_password_configured=True,
+            smtp_enabled=True,
+            smtp_host="smtp.example.com",
+            smtp_port=587,
+            smtp_username="notifier@example.com",
+            smtp_password_configured=True,
+            smtp_security="starttls",
+            from_address="notifier@example.com",
+            recipients=("owner@example.com",),
+            updated_at=datetime(2026, 7, 16, 10, 0, 0),
+        )
+
+    def save_settings(self, command, now):
+        self.calls.append(("save_settings", command, now))
+        return self.public_settings()
+
+    def test_werss_settings(self, now):
+        self.calls.append(("test_werss", now))
+
+    def test_email_settings(self, now):
+        self.calls.append(("test_email", now))
+
+
 @pytest.fixture
 def config() -> Config:
     return load_config(Path("config/config.dev.yaml"))
@@ -284,6 +333,7 @@ def app(
         source_service=source_service,
         article_status_service=article_status_service,
         article_downstream_service=article_downstream_service,
+        werss_authorization_service=FakeAuthorizationService(),
     )
 
 
@@ -323,8 +373,70 @@ def test_article_page_is_read_only_and_refreshes_with_get(authenticated_client):
     assert "每 10 分钟" in response.text
     assert 'href="/sources/articles"' in response.text
     assert "行业观察&lt;script&gt;" in response.text
+    assert 'id="authorization-management"' in response.text
+    assert "测试公众号" in response.text
+    assert "即将到期" in response.text
+    assert "敏感 Token、Cookie" in response.text
+    assert "配置授权与邮件提醒" in response.text
+    assert 'id="authorization-settings-open"' in response.text
+    assert '<dialog class="settings-dialog" id="authorization-settings-dialog"' in response.text
+    assert "密码已配置" not in response.text
+    assert "尚未配置密码" not in response.text
+    assert "保存时自动校验" not in response.text
+    assert 'value="werss-secret"' not in response.text
+    assert 'value="smtp-secret"' not in response.text
     for text in ("新增公众号", "编辑公众号", ">删除<"):
         assert text not in response.text
+
+
+def test_authorization_settings_save_uses_json_csrf_and_never_echoes_passwords(
+    authenticated_client,
+):
+    payload = {
+        "werss_username": "controller",
+        "werss_password": "new-werss-secret",
+        "smtp_enabled": True,
+        "smtp_host": "smtp.example.com",
+        "smtp_port": 587,
+        "smtp_username": "notifier@example.com",
+        "smtp_password": "new-smtp-secret",
+        "smtp_security": "starttls",
+        "from_address": "notifier@example.com",
+        "recipients": ["owner@example.com"],
+    }
+    response = authenticated_client.post(
+        "/sources/articles/authorization/settings",
+        json=payload,
+        headers={"X-CSRF-Token": "csrf-token"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["werss_password_configured"] is True
+    assert body["smtp_password_configured"] is True
+    assert "new-werss-secret" not in response.text
+    assert "new-smtp-secret" not in response.text
+
+
+def test_authorization_settings_reject_unknown_json_field(authenticated_client):
+    response = authenticated_client.post(
+        "/sources/articles/authorization/settings",
+        json={"unexpected": "secret"},
+        headers={"X-CSRF-Token": "csrf-token"},
+    )
+    assert response.status_code == 422
+
+
+def test_authorization_setting_connection_tests_require_csrf(authenticated_client):
+    for path in (
+        "/sources/articles/authorization/settings/test-werss",
+        "/sources/articles/authorization/settings/test-email",
+    ):
+        assert authenticated_client.post(path).status_code == 403
+        response = authenticated_client.post(
+            path, headers={"X-CSRF-Token": "csrf-token"}
+        )
+        assert response.status_code == 200
 
 
 def test_unknown_article_source_is_rendered_as_pending_binding(
@@ -816,7 +928,7 @@ def test_all_source_service_calls_run_in_threadpool(
     monkeypatch.setattr(source_routes, "run_in_threadpool", recording_threadpool)
     response = authenticated_client.get("/sources/articles")
     assert response.status_code == 200
-    assert calls == ["list_page"]
+    assert calls == ["list_page", "get_state", "public_settings"]
 
 
 @pytest.mark.parametrize(

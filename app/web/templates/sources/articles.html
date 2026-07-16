@@ -3,6 +3,40 @@
 {% block content %}
 <div class="article-downstream">
 <section class="page-heading"><div><h1>公众号状态</h1><p>公众号采集由 WeRSS 统一管理；WeInsight 不修改上游采集状态，仅管理清洗、分析等下游处理。状态每 {{ sync_interval_minutes }} 分钟更新。</p></div><a class="button secondary" href="/sources/articles">刷新</a></section>
+<section class="content-panel authorization-panel" id="authorization-management" aria-labelledby="authorization-title" data-scan-configured="{{ 'true' if authorization_scan_configured else 'false' }}">
+<div class="authorization-heading"><div><h2 id="authorization-title">授权管理</h2><p>状态来自本机 WeRSS；敏感 Token、Cookie 和管理凭据不会在本页面展示。</p></div><div class="authorization-actions">{% if authorization_settings %}<button class="button secondary" id="authorization-settings-open" type="button">配置授权与邮件提醒</button>{% endif %}<button class="button secondary" id="authorization-refresh" type="button">刷新状态</button><button class="button" id="authorization-scan" type="button"{% if not authorization_scan_configured %} disabled title="请先配置 WERSS_AUTH_ADMIN_PASSWORD"{% endif %}>扫码授权</button></div></div>
+{% if authorization_state %}
+<div class="authorization-summary" data-authorization-status="{{ authorization_state.status }}">
+<div><span class="field-label">当前状态</span><strong class="authorization-badge status-{{ authorization_state.status }}">{{ {"valid":"有效", "expiring":"即将到期", "expired":"已过期", "unauthorized":"未授权", "unavailable":"状态不可用"}[authorization_state.status] }}</strong></div>
+<div><span class="field-label">公众号</span><strong>{{ authorization_state.account_name or "未知" }}</strong></div>
+<div><span class="field-label">到期时间</span><strong>{{ authorization_state.expires_at.strftime("%Y-%m-%d %H:%M:%S") if authorization_state.expires_at else "未知" }}</strong></div>
+<div><span class="field-label">最近检查</span><strong>{{ authorization_state.last_checked_at.strftime("%Y-%m-%d %H:%M:%S") }}</strong></div>
+</div>
+{% if authorization_state.status == "unavailable" %}<p class="authorization-warning" role="status">暂时无法连接 WeRSS；页面保留上一次成功状态，请稍后刷新。</p>{% endif %}
+{% else %}<div class="authorization-empty" role="status">尚无授权状态快照，点击“刷新状态”立即检查。</div>{% endif %}
+<p class="authorization-email-state">扫码授权：{{ "已启用" if authorization_scan_configured else "待配置 WeRSS 管理凭据" }} · 邮件提醒：{{ "已启用" if authorization_email_enabled else "未启用" }}</p>
+</section>
+{% if authorization_settings %}<dialog class="settings-dialog" id="authorization-settings-dialog" aria-labelledby="authorization-settings-title">
+<div class="settings-dialog-card"><div class="settings-dialog-heading"><div><h2 id="authorization-settings-title">配置授权与邮件提醒</h2><p>密码不会回显；留空保存将保留现有密码。</p></div><button class="dialog-close" id="authorization-settings-close" type="button" aria-label="关闭配置弹窗">×</button></div>
+<form id="authorization-settings-form" autocomplete="off">
+<fieldset><legend>WeRSS 扫码授权</legend><div class="settings-grid">
+<label>管理用户名<input name="werss_username" maxlength="100" value="{{ authorization_settings.werss_username }}" required></label>
+<label>重新设置管理密码<input name="werss_password" type="password" maxlength="1024" autocomplete="new-password" placeholder="留空则保留现有密码"></label>
+</div></fieldset>
+<fieldset><legend>到期邮件提醒</legend><label class="settings-checkbox"><input name="smtp_enabled" type="checkbox"{% if authorization_settings.smtp_enabled %} checked{% endif %}> 启用邮件提醒</label><div class="settings-grid">
+<label>SMTP 服务器<input name="smtp_host" maxlength="255" value="{{ authorization_settings.smtp_host }}" placeholder="smtp.example.com"></label>
+<label>端口<input name="smtp_port" type="number" min="1" max="65535" value="{{ authorization_settings.smtp_port }}"></label>
+<label>加密方式<select name="smtp_security"><option value="starttls"{% if authorization_settings.smtp_security == "starttls" %} selected{% endif %}>STARTTLS</option><option value="ssl"{% if authorization_settings.smtp_security == "ssl" %} selected{% endif %}>SSL/TLS</option><option value="plain"{% if authorization_settings.smtp_security == "plain" %} selected{% endif %}>不加密（仅测试）</option></select></label>
+<label>SMTP 用户名<input name="smtp_username" maxlength="255" value="{{ authorization_settings.smtp_username }}"></label>
+<label>重新设置 SMTP 密码<input name="smtp_password" type="password" maxlength="1024" autocomplete="new-password" placeholder="留空则保留现有密码"></label>
+<label>发件邮箱<input name="from_address" type="email" maxlength="320" value="{{ authorization_settings.from_address }}"></label>
+<label class="settings-wide">收件人<input name="recipients" type="text" value="{{ authorization_settings.recipients | join(', ') }}" placeholder="多个邮箱使用逗号或换行分隔"></label>
+</div></fieldset>
+<div class="settings-actions"><button class="button" type="submit">保存配置</button><button class="button secondary" id="authorization-test-werss" type="button">测试 WeRSS 连接</button><button class="button secondary" id="authorization-test-email" type="button">发送测试邮件</button><button class="button secondary" id="authorization-settings-cancel" type="button">取消</button><span id="authorization-settings-message" role="status" aria-live="polite"></span></div>
+</form></div></dialog>{% endif %}
+<dialog class="authorization-dialog" id="authorization-dialog" aria-labelledby="authorization-dialog-title">
+<div class="authorization-dialog-card"><h2 id="authorization-dialog-title">微信扫码授权</h2><p id="authorization-dialog-message">正在获取二维码…</p><img id="authorization-qr-image" alt="微信授权二维码" hidden><div class="authorization-dialog-actions"><button class="button secondary" id="authorization-cancel" type="button">取消</button></div></div>
+</dialog>
 <section class="content-panel downstream-panel" aria-labelledby="backfill-title">
 <div class="downstream-intro"><div><h2 id="backfill-title">补处理历史文章</h2><p>默认补最近 7 个自然日，单次最多 31 天。请求只排队，不会在页面内执行清洗或分析。</p></div></div>
 {% if backfill_summary %}<div class="downstream-summary" role="status"><strong>补处理任务已提交</strong><span>命中文章 {{ backfill_summary.matched_article_count }}</span><span>新建清洗 {{ backfill_summary.clean_task_created_count }}</span><span>恢复清洗 {{ backfill_summary.clean_task_recovered_count }}</span><span>新建分析 {{ backfill_summary.analyze_task_created_count }}</span><span>恢复分析 {{ backfill_summary.analyze_task_recovered_count }}</span><span>已有结果跳过 {{ backfill_summary.existing_result_skipped_count }}</span><span>运行中跳过 {{ backfill_summary.running_task_skipped_count }}</span><span>范围外跳过 {{ backfill_summary.out_of_scope_skipped_count }}</span></div>{% endif %}
@@ -29,7 +63,7 @@
 </div>
 <p id="downstream-switch-note" class="visually-hidden">开关只影响 WeInsight 下游处理，不改变 WeRSS 采集状态；提交前会要求确认。</p>
 {% endblock %}
-{% block scripts %}<script>
+{% block scripts %}<script src="/static/werss-authorization.js?v=20260716-qr-ready-retry" defer></script><script>
 (() => {
   const scope = document.getElementById("downstream-scope");
   const sourceSelect = document.getElementById("downstream-source");

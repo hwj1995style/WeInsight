@@ -149,6 +149,8 @@ def test_web_role_has_control_plane_crud_and_safe_read_policy() -> None:
         "wechat_collection_job_target": {"SELECT", "INSERT"},
         "wechat_report_generation_request": {"SELECT", "INSERT"},
         "wechat_collection_job_event": {"SELECT", "INSERT"},
+        "wechat_werss_authorization_state": {"SELECT", "INSERT", "UPDATE"},
+        "wechat_werss_authorization_settings": {"SELECT", "INSERT", "UPDATE"},
         **{
             table: {"SELECT"}
             for table in (
@@ -227,6 +229,9 @@ def test_pipeline_role_cannot_access_admin_ui_lock_or_job_runs() -> None:
         "wechat_article_egg_price_item": {"INSERT", "DELETE"},
         "wechat_worker_heartbeat": {"INSERT", "UPDATE"},
         "wechat_collection_job_event": {"INSERT"},
+        "wechat_werss_authorization_state": {"SELECT", "INSERT", "UPDATE"},
+        "wechat_werss_authorization_notice": {"SELECT", "INSERT", "UPDATE"},
+        "wechat_werss_authorization_settings": {"SELECT"},
     }
 
     assert pipeline == expected

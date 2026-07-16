@@ -9,7 +9,11 @@ from sqlalchemy.engine import Engine
 from app.services.event_retention_service import EventCleanupResult, EventRetentionPolicy
 
 
-AUDIT_EVENTS = ("job_created", "job_stop_requested", "job_deleted", "werss_catalog_sync_changed")
+AUDIT_EVENTS = (
+    "job_created", "job_stop_requested", "job_deleted", "werss_catalog_sync_changed",
+    "werss_authorization_settings_changed", "werss_authorization_settings_failed",
+    "werss_authorization_test_succeeded", "werss_authorization_test_failed",
+)
 VERBOSE_EVENTS = ("collection_target_started", "collection_target_finished", "collection_run_claimed")
 _LOCK_NAME = "weinsight_event_retention_v1"
 
