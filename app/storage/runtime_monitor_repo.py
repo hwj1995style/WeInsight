@@ -251,6 +251,7 @@ class MysqlRuntimeMonitorRepo:
                 for item in workers.workers
             ),
             total_worker_count=len(workers.workers),
+            workers=workers.workers,
             latest_wechat_status=(
                 None if latest_health is None else latest_health.status
             ),
@@ -655,12 +656,24 @@ _RUN_TARGETS = text(
 _WORKERS = text(
     """
     SELECT
-        worker_id, worker_type, hostname, process_id, version, status,
-        last_heartbeat_at, start_time, last_error_summary,
-        CASE WHEN last_heartbeat_at >= :cutoff THEN 1 ELSE 0 END AS within_ttl
-    FROM wechat_worker_heartbeat
-    ORDER BY within_ttl DESC, last_heartbeat_at DESC,
-             worker_type ASC, hostname ASC, worker_id ASC
+        ranked.worker_id, ranked.worker_type, ranked.hostname,
+        ranked.process_id, ranked.version, ranked.status,
+        ranked.last_heartbeat_at, ranked.start_time,
+        ranked.last_error_summary,
+        CASE WHEN ranked.last_heartbeat_at >= :cutoff
+             THEN 1 ELSE 0 END AS within_ttl
+    FROM (
+        SELECT heartbeat.*,
+               ROW_NUMBER() OVER (
+                   PARTITION BY worker_type
+                   ORDER BY last_heartbeat_at DESC, worker_id DESC
+               ) AS row_rank
+        FROM wechat_worker_heartbeat heartbeat
+        WHERE worker_type IN ('pipeline', 'collector')
+    ) ranked
+    WHERE ranked.row_rank = 1
+    ORDER BY CASE ranked.worker_type
+                 WHEN 'pipeline' THEN 1 ELSE 2 END
     """
 )
 

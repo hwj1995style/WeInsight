@@ -249,6 +249,7 @@ class TodayRunCounts:
 class RuntimeDashboardSnapshot:
     live_collector_count: int
     total_worker_count: int
+    workers: tuple[WorkerHeartbeatView, ...]
     latest_wechat_status: WechatHealthStatus | None
     latest_wechat_checked_at: datetime | None
     ui_lock_state: str
@@ -258,6 +259,10 @@ class RuntimeDashboardSnapshot:
     trend: tuple[RunTrendBucket, ...]
     generated_at: datetime
 
+    @property
+    def live_worker_count(self) -> int:
+        return sum(worker.is_live for worker in self.workers)
+
     @classmethod
     def empty(cls, now: datetime) -> "RuntimeDashboardSnapshot":
         ensure_schedule_datetime(now, field_name="now")
@@ -265,6 +270,7 @@ class RuntimeDashboardSnapshot:
         return cls(
             live_collector_count=0,
             total_worker_count=0,
+            workers=(),
             latest_wechat_status=None,
             latest_wechat_checked_at=None,
             ui_lock_state="unavailable",
@@ -438,7 +444,10 @@ class RuntimeMonitorService:
         )
         if len(snapshot.trend) != 24:
             raise ValueError("dashboard trend must contain 24 hourly buckets")
-        return snapshot
+        return replace(
+            snapshot,
+            workers=tuple(_safe_worker(worker) for worker in snapshot.workers),
+        )
 
     def get_job_history(self, job_id: int, limit: int = 10) -> JobRuntimeHistory:
         _positive_integer(job_id, "job_id")

@@ -26,6 +26,7 @@ from app.services.runtime_monitor_service import (
     runtime_event_summary,
 )
 from app.storage.collection_event_repo import CollectionEvent, sanitize_output
+from app.web.pagination import build_pagination
 
 
 TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "templates"
@@ -69,7 +70,7 @@ async def event_list(request: Request) -> Response:
             pipeline_type=_optional_pipeline(values.get("pipeline")),
             level=_optional_level(values.get("level")),
             subject_name=_optional_subject(values.get("subject")),
-            include_routine=_optional_checkbox(values.get("include_routine")),
+            include_routine=True,
             start_at=_optional_local_datetime(values.get("start"), zone),
             end_at=_optional_local_datetime(values.get("end"), zone),
         )
@@ -106,7 +107,6 @@ async def event_list(request: Request) -> Response:
             "pipeline",
             "level",
             "subject",
-            "include_routine",
             "start",
             "end",
         )
@@ -271,12 +271,6 @@ def _event_list_response(
     *,
     status_code: int = 200,
 ) -> Response:
-    previous_url = None
-    next_url = None
-    if result.page > 1:
-        previous_url = _event_list_url(values, result.page - 1)
-    if result.page * result.page_size < result.total_count:
-        next_url = _event_list_url(values, result.page + 1)
     return templates.TemplateResponse(
         request=request,
         name="events/index.html",
@@ -289,8 +283,11 @@ def _event_list_response(
             "page": result,
             "values": values,
             "error": error,
-            "previous_url": previous_url,
-            "next_url": next_url,
+            "pagination": build_pagination(
+                "/events", values, page=result.page,
+                page_size=result.page_size, total_count=result.total_count,
+            ),
+            "pagination_label": "日志分页",
         },
         status_code=status_code,
     )
@@ -394,7 +391,6 @@ def _empty_values() -> dict[str, str]:
         "pipeline": "",
         "level": "",
         "subject": "",
-        "include_routine": "",
         "start": "",
         "end": "",
         "page_size": "50",

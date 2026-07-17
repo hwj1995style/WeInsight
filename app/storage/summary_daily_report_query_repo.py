@@ -69,6 +69,24 @@ class MysqlSummaryDailyReportQueryRepo:
             ).mappings().all()
         return [self._article_report_from_row(row) for row in rows]
 
+    def count_group_reports(self, report_date: date) -> int:
+        return self._count("wechat_group_daily_report", report_date)
+
+    def count_article_reports(self, report_date: date) -> int:
+        return self._count("wechat_article_daily_report", report_date)
+
+    def _count(self, table_name: str, report_date: date) -> int:
+        if table_name not in {
+            "wechat_group_daily_report", "wechat_article_daily_report"
+        }:
+            raise ValueError("invalid report table")
+        with self.engine.begin() as connection:
+            value = connection.execute(
+                text(f"SELECT COUNT(*) FROM {table_name} WHERE report_date = :report_date"),
+                {"report_date": report_date},
+            ).scalar_one()
+        return int(value)
+
     def _group_report_from_row(self, row) -> SummaryGroupDailyReport:
         return SummaryGroupDailyReport(
             report_date=row["report_date"],

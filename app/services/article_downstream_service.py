@@ -74,14 +74,26 @@ class ArticleDownstreamService:
         cls, command: ArticleBackfillCommand, business_date: date
     ) -> None:
         if not isinstance(command.scope, str) or command.scope not in {
-            "single", "enabled"
+            "single", "selected", "enabled"
         }:
-            raise ArticleDownstreamValidationError("scope must be single or enabled")
+            raise ArticleDownstreamValidationError(
+                "scope must be single, selected or enabled"
+            )
         if command.scope == "single":
             cls._validate_source_id(command.source_id)
-        elif command.source_id is not None:
+            if command.source_ids:
+                raise ArticleDownstreamValidationError(
+                    "source_ids must be omitted for single scope"
+                )
+        elif command.scope == "selected":
+            if command.source_id is not None:
+                raise ArticleDownstreamValidationError(
+                    "source_id must be omitted for selected scope"
+                )
+            cls._validate_source_ids(command.source_ids)
+        elif command.source_id is not None or command.source_ids:
             raise ArticleDownstreamValidationError(
-                "source_id must be omitted for enabled scope"
+                "source_id and source_ids must be omitted for enabled scope"
             )
         if not isinstance(command.mode, str) or command.mode not in {
             "missing_only", "force_analyze"
@@ -120,3 +132,16 @@ class ArticleDownstreamService:
             raise ArticleDownstreamValidationError(
                 "source_id must be a positive integer"
             )
+
+    @classmethod
+    def _validate_source_ids(cls, source_ids: object) -> None:
+        if type(source_ids) is not tuple or not 1 <= len(source_ids) <= 50:
+            raise ArticleDownstreamValidationError(
+                "source_ids must contain between 1 and 50 source IDs"
+            )
+        if any(type(source_id) is not int or source_id < 1 for source_id in source_ids):
+            raise ArticleDownstreamValidationError(
+                "source_ids must contain positive integers"
+            )
+        if len(set(source_ids)) != len(source_ids):
+            raise ArticleDownstreamValidationError("source_ids must be unique")

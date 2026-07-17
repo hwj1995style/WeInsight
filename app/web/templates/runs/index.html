@@ -19,5 +19,5 @@
       </tbody></table></div>
     {% else %}<div class="empty-state"><h2>没有匹配的运行实例</h2><p>调整筛选条件后重试。</p></div>{% endif %}
   </section>
-  {% if previous_url or next_url %}<nav class="pagination" aria-label="运行分页">{% if previous_url %}<a class="button secondary" href="{{ previous_url }}">上一页</a>{% else %}<span></span>{% endif %}<span>第 {{ page.page }} 页 · 共 {{ page.total_count }} 条</span>{% if next_url %}<a class="button secondary" href="{{ next_url }}">下一页</a>{% endif %}</nav>{% endif %}
+  {% include "components/pagination.html" %}
 {% endblock %}

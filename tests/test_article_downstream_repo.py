@@ -108,6 +108,17 @@ def test_single_scope_explicitly_accepts_disabled_catalog_source():
     assert "upstream_status IN ('active', 'disabled')" in sql
 
 
+def test_selected_scope_uses_expanding_bound_source_ids():
+    engine = Engine()
+    selected = command(scope="selected", source_id=None, source_ids=(7, 9, 12))
+    MysqlArticleDownstreamRepo(engine).enqueue_backfill(selected, datetime(2026, 7, 14, 12))
+    sql, params = engine.connection.calls[0]
+    assert "config.id IN" in sql
+    assert "source_ids" in sql
+    assert params["source_ids"] == (7, 9, 12)
+    assert "config.downstream_clean_enabled = 1" not in sql
+
+
 class StatefulConnection(Connection):
     def __init__(self):
         super().__init__()

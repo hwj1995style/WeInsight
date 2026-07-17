@@ -232,13 +232,13 @@ def test_worker_expiry_boundary_is_fail_closed() -> None:
     assert worker.is_live is False
 
 
-def test_worker_query_prioritizes_live_and_recent_heartbeats() -> None:
+def test_worker_query_selects_only_latest_heartbeat_per_type() -> None:
     sql = " ".join(str(runtime_monitor_repo._WORKERS).split())
 
-    assert (
-        "ORDER BY within_ttl DESC, last_heartbeat_at DESC, "
-        "worker_type ASC, hostname ASC, worker_id ASC"
-    ) in sql
+    assert "ROW_NUMBER() OVER" in sql
+    assert "PARTITION BY worker_type" in sql
+    assert "ORDER BY last_heartbeat_at DESC, worker_id DESC" in sql
+    assert "WHERE ranked.row_rank = 1" in sql
 
 
 def test_event_query_aggregates_run_targets_without_duplicating_events() -> None:

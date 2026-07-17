@@ -295,6 +295,13 @@ class MysqlArticleAccountConfigRepo:
             ).mappings().all()
         return [self._record_from_row(row) for row in rows]
 
+    def count_accounts(self) -> int:
+        with self.engine.begin() as connection:
+            value = connection.execute(
+                text("SELECT COUNT(*) FROM wechat_public_account_config")
+            ).scalar_one()
+        return int(value)
+
     def list_enabled_articles_for_job(
         self, *, limit: int
     ) -> list[ArticleAccountConfigRecord]:

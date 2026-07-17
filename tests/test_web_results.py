@@ -312,7 +312,7 @@ def test_price_matrix_has_scroll_and_accessibility_hooks(
     assert 'data-column-index="0"' in response.text
     assert 'data-row-index="0"' in response.text
     assert 'data-column-start="0" data-column-end="1"' in response.text
-    assert '/static/app.css?v=20260716-price-crosshair-auth-settings-modal' in response.text
+    assert '/static/app.css?v=20260717-overview-compact' in response.text
     assert '<script src="/static/price-matrix.js?v=20260716-crosshair" defer></script>' in response.text
     assert 'aria-label="236，推算；依据 39码 214 与 40码 216，按每码 +2 向高码推算"' in response.text
     assert 'class="price-cell-note"' not in response.text

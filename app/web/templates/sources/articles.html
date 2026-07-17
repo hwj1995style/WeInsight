@@ -2,13 +2,24 @@
 {% block title %}公众号状态 · WeInsight{% endblock %}
 {% block content %}
 <div class="article-downstream">
-<section class="page-heading"><div><h1>公众号状态</h1><p>公众号采集由 WeRSS 统一管理；WeInsight 不修改上游采集状态，仅管理清洗、分析等下游处理。状态每 {{ sync_interval_minutes }} 分钟更新。</p></div><a class="button secondary" href="/sources/articles">刷新</a></section>
-<section class="content-panel authorization-panel" id="authorization-management" aria-labelledby="authorization-title" data-scan-configured="{{ 'true' if authorization_scan_configured else 'false' }}">
-<div class="authorization-heading"><div><h2 id="authorization-title">授权管理</h2><p>状态来自本机 WeRSS；敏感 Token、Cookie 和管理凭据不会在本页面展示。</p></div><div class="authorization-actions">{% if authorization_settings %}<button class="button secondary" id="authorization-settings-open" type="button">配置授权与邮件提醒</button>{% endif %}<button class="button secondary" id="authorization-refresh" type="button">刷新状态</button><button class="button" id="authorization-scan" type="button"{% if not authorization_scan_configured %} disabled title="请先配置 WERSS_AUTH_ADMIN_PASSWORD"{% endif %}>扫码授权</button></div></div>
+<section class="page-heading article-page-heading"><div><h1>公众号状态</h1><p>公众号采集由 WeRSS 统一管理；WeInsight 仅管理清洗与分析等下游处理。状态每 {{ sync_interval_minutes }} 分钟更新。</p></div></section>
+<section class="content-panel source-panel source-panel-primary" aria-label="公众号状态">
+<div class="source-panel-heading"><div><h2>公众号列表</h2><p>集中查看采集、处理和任务积压状态。</p></div><div class="source-panel-actions"><a class="button secondary" href="/sources/articles">刷新</a><button class="button" id="downstream-backfill-open" type="button">补处理历史文章</button></div></div>
+{% if backfill_summary %}<div class="downstream-summary" role="status"><strong>补处理任务已提交</strong><span>命中文章 {{ backfill_summary.matched_article_count }}</span><span>新建清洗 {{ backfill_summary.clean_task_created_count }}</span><span>恢复清洗 {{ backfill_summary.clean_task_recovered_count }}</span><span>新建分析 {{ backfill_summary.analyze_task_created_count }}</span><span>恢复分析 {{ backfill_summary.analyze_task_recovered_count }}</span><span>已有结果跳过 {{ backfill_summary.existing_result_skipped_count }}</span><span>运行中跳过 {{ backfill_summary.running_task_skipped_count }}</span><span>范围外跳过 {{ backfill_summary.out_of_scope_skipped_count }}</span></div>{% endif %}
+{% if articles %}<div class="table-scroll" tabindex="0" aria-label="公众号状态表，可横向滚动"><table class="data-table article-status-table">
+<thead><tr><th>公众号</th><th>综合状态</th><th><span class="column-heading">上游状态<small>采集</small></span></th><th><span class="column-heading">下游处理<small>清洗与分析</small></span></th><th>最近文章</th><th>最近成功采集</th><th>文章</th><th>待清洗</th><th>待分析</th><th>失败</th><th>最近错误</th><th>状态更新</th></tr></thead>
+<tbody>{% for article in articles %}<tr><th scope="row" class="source-name-cell">{{ article.account_name }}</th>
+<td><span class="status-text status-{{ article.display_status }}">{{ {"normal":"正常", "stale":"陈旧", "disabled":"上游停用", "missing":"上游缺失", "excluded":"已排除", "unknown":"待绑定", "collect_error":"采集异常", "waiting_first_run":"等待首轮"}[article.display_status] }}</span></td>
+<td>{{ {"active":"正常", "disabled":"停用", "missing":"缺失", "excluded":"排除", "unknown":"未知"}.get(article.upstream_status, "未知") }}</td>
+<td><div class="processing-state">{% if article.downstream_processing_mutable %}<form method="post" action="/sources/articles/{{ article.source_id }}/downstream-processing" onsubmit="return confirm('确认{{ '关闭' if article.downstream_processing_enabled else '开启' }}下游处理？此操作不会改变 WeRSS 采集状态。')"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="enabled" value="{{ '0' if article.downstream_processing_enabled else '1' }}"><button class="processing-toggle{% if article.downstream_processing_enabled %} is-enabled{% endif %}" type="submit" role="switch" aria-checked="{{ 'true' if article.downstream_processing_enabled else 'false' }}" aria-label="{{ '关闭' if article.downstream_processing_enabled else '开启' }} {{ article.account_name }} 的自动清洗与分析" aria-describedby="downstream-switch-note"><span class="processing-toggle-knob" aria-hidden="true"></span><span class="visually-hidden">{{ "关闭" if article.downstream_processing_enabled else "开启" }}</span></button></form>{% endif %}</div></td>
+<td>{{ article.last_article_time.strftime("%Y-%m-%d %H:%M:%S") if article.last_article_time else "—" }}</td><td>{{ article.last_success_collect_time.strftime("%Y-%m-%d %H:%M:%S") if article.last_success_collect_time else "—" }}</td><td>{{ article.article_count }}</td><td>{{ article.pending_parse_count }}</td><td>{{ article.pending_analyze_count }}</td><td>{{ article.failed_count }}</td><td class="error-cell">{{ article.last_error or "—" }}</td><td>{{ article.status_updated_at.strftime("%Y-%m-%d %H:%M:%S") if article.status_updated_at else "—" }}</td></tr>{% endfor %}</tbody></table></div>
+{% else %}<div class="empty-state"><h2>暂无公众号状态</h2><p>等待下一轮 WeRSS 清单同步。</p></div>{% endif %}</section>
+{% include "components/pagination.html" %}
+<section class="content-panel authorization-panel authorization-strip" id="authorization-management" aria-labelledby="authorization-title" data-scan-configured="{{ 'true' if authorization_scan_configured else 'false' }}">
+<div class="authorization-heading"><div><h2 id="authorization-title">授权管理</h2><p>状态来自本机 WeRSS，敏感 Token、Cookie 和管理凭据不会在页面展示。</p></div><div class="authorization-actions">{% if authorization_settings %}<button class="button secondary" id="authorization-settings-open" type="button">配置授权与邮件提醒</button>{% endif %}<button class="button secondary" id="authorization-refresh" type="button">刷新状态</button><button class="button" id="authorization-scan" type="button"{% if not authorization_scan_configured %} disabled title="请先配置 WERSS_AUTH_ADMIN_PASSWORD"{% endif %}>扫码授权</button></div></div>
 {% if authorization_state %}
 <div class="authorization-summary" data-authorization-status="{{ authorization_state.status }}">
 <div><span class="field-label">当前状态</span><strong class="authorization-badge status-{{ authorization_state.status }}">{{ {"valid":"有效", "expiring":"即将到期", "expired":"已过期", "unauthorized":"未授权", "unavailable":"状态不可用"}[authorization_state.status] }}</strong></div>
-<div><span class="field-label">公众号</span><strong>{{ authorization_state.account_name or "未知" }}</strong></div>
 <div><span class="field-label">到期时间</span><strong>{{ authorization_state.expires_at.strftime("%Y-%m-%d %H:%M:%S") if authorization_state.expires_at else "未知" }}</strong></div>
 <div><span class="field-label">最近检查</span><strong>{{ authorization_state.last_checked_at.strftime("%Y-%m-%d %H:%M:%S") }}</strong></div>
 </div>
@@ -16,6 +27,20 @@
 {% else %}<div class="authorization-empty" role="status">尚无授权状态快照，点击“刷新状态”立即检查。</div>{% endif %}
 <p class="authorization-email-state">扫码授权：{{ "已启用" if authorization_scan_configured else "待配置 WeRSS 管理凭据" }} · 邮件提醒：{{ "已启用" if authorization_email_enabled else "未启用" }}</p>
 </section>
+<dialog class="settings-dialog backfill-dialog" id="downstream-backfill-dialog" aria-labelledby="backfill-title">
+<div class="settings-dialog-card"><div class="settings-dialog-heading"><div><h2 id="backfill-title">补处理历史文章</h2><p>选择处理对象、日期和模式后提交排队；单次最多 31 天。</p></div><button class="dialog-close" id="downstream-backfill-close" type="button" aria-label="关闭补处理弹窗">×</button></div>
+<form method="post" action="/sources/articles/downstream-processing/backfill" class="downstream-form" id="downstream-backfill-form">
+<input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+<input id="downstream-scope" name="scope" type="hidden" value="single">
+<input id="downstream-source" name="source_id" type="hidden" value="">
+<input id="downstream-sources" name="source_ids" type="hidden" value="">
+<div class="aligned-form-field target-picker-field"><span class="form-field-label" id="downstream-target-label">处理对象</span><div class="target-picker"><button class="target-picker-toggle" id="downstream-target-toggle" type="button" aria-labelledby="downstream-target-label downstream-target-summary" aria-controls="downstream-target-options" aria-expanded="false" aria-required="true"><span id="downstream-target-summary">请选择处理对象</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></button><div class="target-picker-options" id="downstream-target-options" role="group" aria-labelledby="downstream-target-label" hidden><label class="target-picker-option target-picker-all"><input type="checkbox" data-target-kind="enabled"> <span>全部已开启公众号</span></label><div class="target-picker-divider" aria-hidden="true"></div>{% for article in articles %}{% if article.downstream_processing_mutable %}<label class="target-picker-option"><input type="checkbox" value="{{ article.source_id }}" data-target-kind="source" data-target-label="{{ article.account_name }}"> <span>{{ article.account_name }}{% if not article.downstream_processing_enabled %}<small>仅补历史</small>{% endif %}</span></label>{% endif %}{% endfor %}</div></div><small>可选择多个公众号；“全部已开启公众号”与具体公众号互斥。</small><span class="target-picker-error" id="downstream-target-error" role="alert" hidden>请至少选择一个处理对象。</span></div>
+<label class="aligned-form-field">开始日期<input type="date" name="start_date" value="{{ backfill_start_date }}" required></label>
+<label class="aligned-form-field">结束日期<input type="date" name="end_date" value="{{ backfill_end_date }}" required></label>
+<label class="aligned-form-field" for="downstream-mode">处理模式<select id="downstream-mode" name="mode" required><option value="missing_only">只补缺失环节</option><option value="force_analyze">强制重新分析</option></select></label>
+<label class="force-confirm" id="force-confirm-field" hidden><input id="force-confirm" type="checkbox" name="confirm_force" value="1"> 我确认强制分析会重新排队，但不会提前删除旧结果</label>
+<div class="backfill-actions"><button class="button" type="submit">提交补处理</button><button class="button secondary" id="downstream-backfill-cancel" type="button">取消</button></div>
+</form></div></dialog>
 {% if authorization_settings %}<dialog class="settings-dialog" id="authorization-settings-dialog" aria-labelledby="authorization-settings-title">
 <div class="settings-dialog-card"><div class="settings-dialog-heading"><div><h2 id="authorization-settings-title">配置授权与邮件提醒</h2><p>密码不会回显；留空保存将保留现有密码。</p></div><button class="dialog-close" id="authorization-settings-close" type="button" aria-label="关闭配置弹窗">×</button></div>
 <form id="authorization-settings-form" autocomplete="off">
@@ -37,45 +62,70 @@
 <dialog class="authorization-dialog" id="authorization-dialog" aria-labelledby="authorization-dialog-title">
 <div class="authorization-dialog-card"><h2 id="authorization-dialog-title">微信扫码授权</h2><p id="authorization-dialog-message">正在获取二维码…</p><img id="authorization-qr-image" alt="微信授权二维码" hidden><div class="authorization-dialog-actions"><button class="button secondary" id="authorization-cancel" type="button">取消</button></div></div>
 </dialog>
-<section class="content-panel downstream-panel" aria-labelledby="backfill-title">
-<div class="downstream-intro"><div><h2 id="backfill-title">补处理历史文章</h2><p>默认补最近 7 个自然日，单次最多 31 天。请求只排队，不会在页面内执行清洗或分析。</p></div></div>
-{% if backfill_summary %}<div class="downstream-summary" role="status"><strong>补处理任务已提交</strong><span>命中文章 {{ backfill_summary.matched_article_count }}</span><span>新建清洗 {{ backfill_summary.clean_task_created_count }}</span><span>恢复清洗 {{ backfill_summary.clean_task_recovered_count }}</span><span>新建分析 {{ backfill_summary.analyze_task_created_count }}</span><span>恢复分析 {{ backfill_summary.analyze_task_recovered_count }}</span><span>已有结果跳过 {{ backfill_summary.existing_result_skipped_count }}</span><span>运行中跳过 {{ backfill_summary.running_task_skipped_count }}</span><span>范围外跳过 {{ backfill_summary.out_of_scope_skipped_count }}</span></div>{% endif %}
-<form method="post" action="/sources/articles/downstream-processing/backfill" class="downstream-form" id="downstream-backfill-form">
-<input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-<label class="aligned-form-field" for="downstream-scope">处理范围<select id="downstream-scope" name="scope" required><option value="single">单个公众号</option><option value="enabled">全部已开启公众号</option></select></label>
-<label class="aligned-form-field" for="downstream-source">单个公众号<select id="downstream-source" name="source_id" required><option value="">请选择</option>{% for article in articles %}{% if article.downstream_processing_mutable %}<option value="{{ article.source_id }}">{{ article.account_name }}{% if not article.downstream_processing_enabled %}（仅补历史）{% endif %}</option>{% endif %}{% endfor %}</select><small>选择已关闭账号只补历史，不改变未来自动处理。</small></label>
-<label class="aligned-form-field">开始日期<input type="date" name="start_date" value="{{ backfill_start_date }}" required></label>
-<label class="aligned-form-field">结束日期<input type="date" name="end_date" value="{{ backfill_end_date }}" required></label>
-<label class="aligned-form-field" for="downstream-mode">处理模式<select id="downstream-mode" name="mode" required><option value="missing_only">只补缺失环节</option><option value="force_analyze">强制重新分析</option></select></label>
-<label class="force-confirm" id="force-confirm-field" hidden><input id="force-confirm" type="checkbox" name="confirm_force" value="1"> 我确认强制分析会重新排队，但不会提前删除旧结果</label>
-<div class="aligned-form-action"><button class="button" type="submit">提交补处理</button></div>
-</form></section>
-<section class="content-panel source-panel" aria-label="公众号状态">
-{% if articles %}<div class="table-scroll" tabindex="0" aria-label="公众号状态表，可横向滚动"><table class="data-table article-status-table">
-<thead><tr><th>公众号</th><th>综合状态</th><th><span class="column-heading">上游状态<small>采集</small></span></th><th><span class="column-heading">下游处理<small>清洗与分析</small></span></th><th>最近文章</th><th>最近成功采集</th><th>文章</th><th>待清洗</th><th>待分析</th><th>失败</th><th>最近错误</th><th>状态更新</th></tr></thead>
-<tbody>{% for article in articles %}<tr><th scope="row" class="source-name-cell">{{ article.account_name }}</th>
-<td><span class="status-text status-{{ article.display_status }}">{{ {"normal":"正常", "stale":"陈旧", "disabled":"上游停用", "missing":"上游缺失", "excluded":"已排除", "unknown":"待绑定", "collect_error":"采集异常", "waiting_first_run":"等待首轮"}[article.display_status] }}</span></td>
-<td>{{ {"active":"正常", "disabled":"停用", "missing":"缺失", "excluded":"排除", "unknown":"未知"}.get(article.upstream_status, "未知") }}</td>
-<td><div class="processing-state">{% if article.downstream_processing_mutable %}<form method="post" action="/sources/articles/{{ article.source_id }}/downstream-processing" onsubmit="return confirm('确认{{ '关闭' if article.downstream_processing_enabled else '开启' }}下游处理？此操作不会改变 WeRSS 采集状态。')"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><input type="hidden" name="enabled" value="{{ '0' if article.downstream_processing_enabled else '1' }}"><button class="processing-toggle{% if article.downstream_processing_enabled %} is-enabled{% endif %}" type="submit" role="switch" aria-checked="{{ 'true' if article.downstream_processing_enabled else 'false' }}" aria-label="{{ '关闭' if article.downstream_processing_enabled else '开启' }} {{ article.account_name }} 的自动清洗与分析" aria-describedby="downstream-switch-note"><span class="processing-toggle-knob" aria-hidden="true"></span><span class="visually-hidden">{{ "关闭" if article.downstream_processing_enabled else "开启" }}</span></button></form>{% endif %}</div></td>
-<td>{{ article.last_article_time.strftime("%Y-%m-%d %H:%M:%S") if article.last_article_time else "—" }}</td><td>{{ article.last_success_collect_time.strftime("%Y-%m-%d %H:%M:%S") if article.last_success_collect_time else "—" }}</td><td>{{ article.article_count }}</td><td>{{ article.pending_parse_count }}</td><td>{{ article.pending_analyze_count }}</td><td>{{ article.failed_count }}</td><td class="error-cell">{{ article.last_error or "—" }}</td><td>{{ article.status_updated_at.strftime("%Y-%m-%d %H:%M:%S") if article.status_updated_at else "—" }}</td></tr>{% endfor %}</tbody></table></div>
-{% else %}<div class="empty-state"><h2>暂无公众号状态</h2><p>等待下一轮 WeRSS 清单同步。</p></div>{% endif %}</section>
-{% if page.has_previous or page.has_next %}<nav class="pagination" aria-label="公众号状态分页">{% if page.has_previous %}<a class="button secondary" href="/sources/articles?page={{ page.page - 1 }}&amp;page_size={{ page.page_size }}">上一页</a>{% endif %}<span>第 {{ page.page }} 页</span>{% if page.has_next %}<a class="button secondary" href="/sources/articles?page={{ page.page + 1 }}&amp;page_size={{ page.page_size }}">下一页</a>{% endif %}</nav>{% endif %}
 </div>
 <p id="downstream-switch-note" class="visually-hidden">开关只影响 WeInsight 下游处理，不改变 WeRSS 采集状态；提交前会要求确认。</p>
 {% endblock %}
 {% block scripts %}<script src="/static/werss-authorization.js?v=20260716-qr-ready-retry" defer></script><script>
 (() => {
+  const dialog = document.getElementById("downstream-backfill-dialog");
+  const open = document.getElementById("downstream-backfill-open");
+  const close = document.getElementById("downstream-backfill-close");
+  const cancel = document.getElementById("downstream-backfill-cancel");
+  const form = document.getElementById("downstream-backfill-form");
+  const targetToggle = document.getElementById("downstream-target-toggle");
+  const targetOptions = document.getElementById("downstream-target-options");
+  const targetSummary = document.getElementById("downstream-target-summary");
+  const targetError = document.getElementById("downstream-target-error");
+  const allEnabledChoice = targetOptions.querySelector('[data-target-kind="enabled"]');
+  const sourceChoices = [...targetOptions.querySelectorAll('[data-target-kind="source"]')];
   const scope = document.getElementById("downstream-scope");
-  const sourceSelect = document.getElementById("downstream-source");
+  const source = document.getElementById("downstream-source");
+  const sources = document.getElementById("downstream-sources");
   const mode = document.getElementById("downstream-mode");
   const forceField = document.getElementById("force-confirm-field");
   const forceConfirm = document.getElementById("force-confirm");
-  const syncScope = () => {
-    const single = scope.value === "single";
-    sourceSelect.disabled = !single;
-    sourceSelect.required = single;
-    if (!single) sourceSelect.value = "";
+  const syncTarget = () => {
+    const selected = sourceChoices.filter((choice) => choice.checked);
+    const selectedIds = selected.map((choice) => choice.value);
+    source.value = "";
+    sources.value = "";
+    if (allEnabledChoice.checked) {
+      scope.value = "enabled";
+      targetSummary.textContent = "全部已开启公众号";
+    } else if (selectedIds.length === 1) {
+      scope.value = "single";
+      source.value = selectedIds[0];
+      targetSummary.textContent = selected[0].dataset.targetLabel;
+    } else if (selectedIds.length > 1) {
+      scope.value = "selected";
+      sources.value = selectedIds.join(",");
+      targetSummary.textContent = `已选择 ${selectedIds.length} 个公众号`;
+    } else {
+      scope.value = "single";
+      targetSummary.textContent = "请选择处理对象";
+    }
+    const hasSelection = allEnabledChoice.checked || selectedIds.length > 0;
+    targetToggle.classList.toggle("has-selection", hasSelection);
+    targetToggle.classList.toggle("is-invalid", !hasSelection && !targetError.hidden);
+    if (hasSelection) targetError.hidden = true;
   };
+  const closeTargetOptions = () => {
+    targetOptions.hidden = true;
+    targetToggle.setAttribute("aria-expanded", "false");
+  };
+  targetToggle.addEventListener("click", () => {
+    const opening = targetOptions.hidden;
+    targetOptions.hidden = !opening;
+    targetToggle.setAttribute("aria-expanded", String(opening));
+  });
+  allEnabledChoice.addEventListener("change", () => {
+    if (allEnabledChoice.checked) sourceChoices.forEach((choice) => { choice.checked = false; });
+    syncTarget();
+  });
+  sourceChoices.forEach((choice) => choice.addEventListener("change", () => {
+    if (choice.checked) allEnabledChoice.checked = false;
+    syncTarget();
+  }));
   const syncMode = () => {
     const force = mode.value === "force_analyze";
     forceField.hidden = !force;
@@ -83,8 +133,22 @@
     forceConfirm.required = force;
     if (!force) forceConfirm.checked = false;
   };
-  scope.addEventListener("change", syncScope);
+  open.addEventListener("click", () => { dialog.showModal(); targetToggle.focus(); });
+  close.addEventListener("click", () => { closeTargetOptions(); dialog.close(); });
+  cancel.addEventListener("click", () => { closeTargetOptions(); dialog.close(); });
+  dialog.addEventListener("click", (event) => { if (event.target === dialog) { closeTargetOptions(); dialog.close(); } });
+  document.addEventListener("click", (event) => {
+    if (!targetOptions.hidden && !event.target.closest(".target-picker")) closeTargetOptions();
+  });
+  form.addEventListener("submit", (event) => {
+    if (!allEnabledChoice.checked && !sourceChoices.some((choice) => choice.checked)) {
+      event.preventDefault();
+      targetError.hidden = false;
+      targetToggle.classList.add("is-invalid");
+      targetToggle.focus();
+    }
+  });
   mode.addEventListener("change", syncMode);
-  syncScope(); syncMode();
+  syncTarget(); syncMode();
 })();
 </script>{% endblock %}

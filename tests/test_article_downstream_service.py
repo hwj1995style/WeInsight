@@ -75,6 +75,12 @@ def test_set_translates_repo_lookup_without_leaking_details():
         ({"scope": "single", "source_id": None}, "source_id"),
         ({"scope": "single", "source_id": True}, "source_id"),
         ({"scope": "enabled", "source_id": 7}, "source_id"),
+        ({"scope": "selected", "source_id": 7, "source_ids": (7, 8)}, "source_id"),
+        ({"scope": "selected", "source_id": None, "source_ids": ()}, "source_ids"),
+        ({"scope": "selected", "source_id": None, "source_ids": (7, 7)}, "source_ids"),
+        ({"scope": "selected", "source_id": None, "source_ids": (7, True)}, "source_ids"),
+        ({"scope": "selected", "source_id": None, "source_ids": tuple(range(1, 52))}, "source_ids"),
+        ({"scope": "single", "source_ids": (7, 8)}, "source_ids"),
         ({"mode": "other"}, "mode"),
         ({"force_confirmed": 1}, "force_confirmed"),
         ({"mode": "force_analyze", "force_confirmed": False}, "confirmation"),
@@ -108,6 +114,14 @@ def test_backfill_rejects_non_string_scope_and_mode_as_stable_validation_error(f
 def test_backfill_accepts_inclusive_31_day_boundary_and_only_orchestrates_repo():
     repo = Repo()
     cmd = command(start_date=date(2026, 6, 14), end_date=date(2026, 7, 14))
+    now = datetime(2026, 7, 14, 12)
+    assert ArticleDownstreamService(repo).backfill(cmd, now) == SUMMARY
+    assert repo.calls == [("backfill", cmd, now)]
+
+
+def test_backfill_accepts_multiple_selected_sources_as_one_command():
+    repo = Repo()
+    cmd = command(scope="selected", source_id=None, source_ids=(7, 9, 12))
     now = datetime(2026, 7, 14, 12)
     assert ArticleDownstreamService(repo).backfill(cmd, now) == SUMMARY
     assert repo.calls == [("backfill", cmd, now)]

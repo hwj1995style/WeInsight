@@ -374,7 +374,7 @@ def test_article_page_is_read_only_and_refreshes_with_get(authenticated_client):
     assert 'href="/sources/articles"' in response.text
     assert "行业观察&lt;script&gt;" in response.text
     assert 'id="authorization-management"' in response.text
-    assert "测试公众号" in response.text
+    assert "测试公众号" not in response.text
     assert "即将到期" in response.text
     assert "敏感 Token、Cookie" in response.text
     assert "配置授权与邮件提醒" in response.text
@@ -1033,6 +1033,22 @@ def test_backfill_uses_prg_with_count_only_summary(authenticated_client, article
     assert "命中文章 9" not in authenticated_client.get("/sources/articles").text
 
 
+def test_backfill_accepts_multiple_selected_sources_in_one_request(authenticated_client, article_downstream_service):
+    response = authenticated_client.post(
+        "/sources/articles/downstream-processing/backfill",
+        data=_csrf_data(
+            scope="selected", source_id="", source_ids="7,9,12",
+            start_date="2026-07-08", end_date="2026-07-14", mode="missing_only",
+        ),
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    command = article_downstream_service.calls[-1][1]
+    assert command.scope == "selected"
+    assert command.source_id is None
+    assert command.source_ids == (7, 9, 12)
+
+
 def test_forged_backfill_summary_query_is_ignored(authenticated_client):
     query = "&".join(f"{name}=999" for name in (
         "matched_article_count", "clean_task_created_count", "clean_task_recovered_count",
@@ -1072,14 +1088,29 @@ def test_duplicate_csrf_is_rejected_before_downstream_service(authenticated_clie
     assert article_downstream_service.calls == []
 
 
-def test_downstream_form_exposes_accessible_scope_mode_and_confirmation_linkage(authenticated_client):
+def test_article_status_list_is_primary_and_authorization_omits_account_name(authenticated_client):
     html = authenticated_client.get("/sources/articles").text
-    assert 'id="downstream-scope"' in html
-    assert 'id="downstream-source"' in html
+    assert html.index('aria-label="公众号状态"') < html.index('id="authorization-management"')
+    assert '<span class="field-label">公众号</span>' not in html
+
+
+def test_downstream_form_uses_one_target_control_in_an_accessible_dialog(authenticated_client):
+    html = authenticated_client.get("/sources/articles").text
+    assert 'id="downstream-backfill-open"' in html
+    assert 'id="downstream-backfill-dialog"' in html
+    assert 'aria-labelledby="backfill-title"' in html
+    assert 'id="downstream-target-toggle"' in html
+    assert 'id="downstream-target-options"' in html
+    assert 'data-target-kind="source"' in html
+    assert 'id="downstream-scope" name="scope" type="hidden"' in html
+    assert 'id="downstream-source" name="source_id" type="hidden"' in html
+    assert 'id="downstream-sources" name="source_ids" type="hidden"' in html
     assert 'id="downstream-mode"' in html
     assert 'id="force-confirm"' in html
     assert 'onsubmit="return confirm(' in html
-    assert "downstream-scope" in html and "sourceSelect.required = single" in html
+    assert 'scope.value = "selected"' in html
+    assert 'sources.value = selectedIds.join(",")' in html
+    assert 'selectedIds.length === 1' in html
     assert "forceConfirm.required = force" in html
 
 

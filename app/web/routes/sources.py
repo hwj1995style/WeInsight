@@ -26,6 +26,7 @@ from app.services.article_downstream_service import (
 from app.integrations.werss_authorization import WeRSSAuthorizationError
 from app.domain.werss_authorization import AuthorizationSettingsCommand
 from app.storage.collection_event_repo import NewCollectionEvent
+from app.web.pagination import build_pagination
 
 
 TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "templates"
@@ -52,6 +53,12 @@ async def group_list(
             "section": "groups",
             "groups": result.items,
             "page": result,
+            "pagination": build_pagination(
+                "/sources/groups", {"page_size": str(result.page_size)},
+                page=result.page, page_size=result.page_size,
+                total_count=_page_total_count(result),
+            ),
+            "pagination_label": "微信群名单分页",
         },
     )
 
@@ -201,6 +208,12 @@ async def article_list(
             "section": "articles",
             "articles": result.items,
             "page": result,
+            "pagination": build_pagination(
+                "/sources/articles", {"page_size": str(result.page_size)},
+                page=result.page, page_size=result.page_size,
+                total_count=_page_total_count(result),
+            ),
+            "pagination_label": "公众号状态分页",
             "sync_interval_minutes": request.app.state.article_status_service.sync_interval_minutes,
             "backfill_start_date": start_date.isoformat(),
             "backfill_end_date": end_date.isoformat(),
@@ -469,16 +482,18 @@ async def article_downstream_processing(request: Request, source_id: int) -> Res
 async def article_downstream_backfill(request: Request) -> Response:
     try:
         values = await _strict_form_values(
-            request, {"scope", "source_id", "start_date", "end_date", "mode", "confirm_force"}
+            request, {"scope", "source_id", "source_ids", "start_date", "end_date", "mode", "confirm_force"}
         )
         scope = values.get("scope", "")
         source_id = _positive_optional_integer(values.get("source_id", "")) if scope == "single" else None
+        source_ids = _positive_integer_csv(values.get("source_ids", "")) if scope == "selected" else ()
         command = ArticleBackfillCommand(
             scope=scope, source_id=source_id,
             start_date=date.fromisoformat(values.get("start_date", "")),
             end_date=date.fromisoformat(values.get("end_date", "")),
             mode=values.get("mode", ""),
             force_confirmed=_strict_checkbox(values, "confirm_force"),
+            source_ids=source_ids,
         )
         if command.mode == "force_analyze" and not command.force_confirmed:
             raise ArticleDownstreamValidationError("force_analyze requires explicit confirmation")
@@ -583,6 +598,12 @@ def _positive_optional_integer(value: str) -> int:
     if parsed < 1:
         raise ValueError("invalid source_id")
     return parsed
+
+
+def _positive_integer_csv(value: str) -> tuple[int, ...]:
+    if not value:
+        raise ValueError("invalid source_ids")
+    return tuple(_positive_optional_integer(item) for item in value.split(","))
 
 
 def _strict_checkbox(values: dict[str, str], field: str) -> bool:
@@ -736,6 +757,17 @@ def _form_error_message(exc: ValueError) -> str:
 
 def _return_url(source_type: str) -> str:
     return "/sources/groups" if source_type == "group" else "/sources/articles"
+
+
+def _page_total_count(page_result) -> int:
+    reported = getattr(page_result, "total_count", None)
+    if reported is not None:
+        return int(reported)
+    visible_count = len(page_result.items)
+    inferred = (page_result.page - 1) * page_result.page_size + visible_count
+    if page_result.has_next:
+        inferred += page_result.page_size
+    return inferred
 
 
 _SOURCE_ERRORS = (

@@ -32,6 +32,9 @@ class GroupDailyReportQueryRepo(Protocol):
     def get_daily_report(self, report_date: date, group_name: str) -> DailyReportDetail | None:
         ...
 
+    def count_daily_reports(self, report_date: date, group_name: str | None) -> int:
+        ...
+
 
 class GroupDailyReportQueryService:
     def __init__(self, *, repo: GroupDailyReportQueryRepo) -> None:
@@ -59,6 +62,9 @@ class GroupDailyReportQueryService:
 
     def get_report(self, report_date: date, group_name: str) -> DailyReportDetail | None:
         return self.repo.get_daily_report(report_date=report_date, group_name=group_name)
+
+    def count_reports(self, report_date: date, group_name: str | None) -> int:
+        return self.repo.count_daily_reports(report_date, group_name)
 
     def export_report(self, report_date: date, group_name: str, output_path: Path) -> DailyReportExportResult:
         report = self.get_report(report_date=report_date, group_name=group_name)

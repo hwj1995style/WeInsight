@@ -150,6 +150,7 @@ class FakeRuntimeMonitorService:
         self.dashboard = RuntimeDashboardSnapshot(
             live_collector_count=1,
             total_worker_count=1,
+            workers=self.workers.workers,
             latest_wechat_status=WechatHealthStatus.OK,
             latest_wechat_checked_at=NOW,
             ui_lock_state="live",
@@ -411,37 +412,13 @@ def test_run_detail_invalid_path_never_echoes_original(
     assert "outside" not in response.text
 
 
-def test_workers_page_renders_live_health_and_lock(
+def test_workers_page_redirects_to_dashboard_worker_cards(
     authenticated_client: TestClient,
 ) -> None:
-    response = authenticated_client.get("/workers")
+    response = authenticated_client.get("/workers", follow_redirects=False)
 
-    assert response.status_code == 200
-    for value in (
-        "COLLECTOR-01",
-        "在线",
-        "WeChat healthy",
-        "group-31-9",
-        "占用中",
-    ):
-        assert value in response.text
-    assert "微信状态和 UI 锁仅影响微信群" in response.text
-
-
-def test_workers_page_marks_ui_lock_unavailable_under_minimum_privilege(
-    authenticated_client: TestClient,
-    runtime_service: FakeRuntimeMonitorService,
-) -> None:
-    runtime_service.workers = replace(
-        runtime_service.workers,
-        ui_lock=UiLockView("unavailable"),
-    )
-
-    response = authenticated_client.get("/workers")
-
-    assert response.status_code == 200
-    assert "最小权限下不可用" in response.text
-    assert "UI 锁状态未知，不代表空闲" in response.text
+    assert response.status_code == 303
+    assert response.headers["location"] == "/dashboard#worker-status"
 
 
 def test_runtime_pages_require_authentication(raw_client: TestClient) -> None:
@@ -454,7 +431,7 @@ def test_runtime_service_calls_use_threadpool(
     authenticated_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from app.web.routes import runs, workers
+    from app.web.routes import runs
 
     calls = []
 
@@ -463,12 +440,10 @@ def test_runtime_service_calls_use_threadpool(
         return function(*args, **kwargs)
 
     monkeypatch.setattr(runs, "run_in_threadpool", recording)
-    monkeypatch.setattr(workers, "run_in_threadpool", recording)
 
     assert authenticated_client.get("/runs").status_code == 200
     assert authenticated_client.get("/runs/31").status_code == 200
-    assert authenticated_client.get("/workers").status_code == 200
-    assert calls == ["list_runs", "get_run", "list_events", "get_workers"]
+    assert calls == ["list_runs", "get_run", "list_events"]
 
 
 def test_navigation_has_runtime_links_and_remains_scrollable(
@@ -476,7 +451,8 @@ def test_navigation_has_runtime_links_and_remains_scrollable(
 ) -> None:
     response = authenticated_client.get("/runs")
 
-    for path in ("/runs", "/events", "/workers"):
+    for path in ("/runs", "/events"):
         assert f'href="{path}"' in response.text
+    assert 'href="/workers"' not in response.text
     css = Path("app/web/static/app.css").read_text(encoding="utf-8")
     assert ".primary-nav" in css and "overflow-x: auto" in css

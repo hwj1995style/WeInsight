@@ -113,6 +113,18 @@ class MysqlGroupDailyReportQueryRepo:
             last_generated_by=lifecycle.last_generated_by,
         )
 
+    def count_daily_reports(self, report_date: date, group_name: str | None) -> int:
+        group_filter = "AND group_name = :group_name" if group_name else ""
+        statement = text(f"""
+            SELECT COUNT(*) FROM wechat_group_daily_report
+            WHERE report_date = :report_date {group_filter}
+        """)
+        with self.engine.begin() as connection:
+            value = connection.execute(
+                statement, {"report_date": report_date, "group_name": group_name}
+            ).scalar_one()
+        return int(value)
+
     def _summary_from_row(self, row) -> DailyReportSummary:
         lifecycle = _lifecycle_from_row(row)
         return DailyReportSummary(
