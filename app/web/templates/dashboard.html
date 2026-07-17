@@ -92,16 +92,16 @@
       chart.setOption({
         animation: false,
         aria: { enabled: true, description: document.getElementById('chart-summary').textContent },
-        color: ['#16855b', '#c23838', '#8b98aa'],
+        color: ['#1468f3', '#d14343', '#8b98ae'],
         grid: { left: 72, right: 28, top: 20, bottom: 32, containLabel: true },
-        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+        tooltip: { trigger: 'axis', backgroundColor: '#071a35', borderColor: '#1f4f8f', textStyle: { color: '#f7faff' }, axisPointer: { type: 'shadow', shadowStyle: { color: 'rgba(20, 104, 243, .08)' } } },
         legend: { bottom: 0, textStyle: { color: '#68758a' }, data: ['成功', '失败', '跳过'] },
         xAxis: { type: 'value', minInterval: 1, axisLabel: { color: '#68758a' }, splitLine: { lineStyle: { color: '#e6ebf2' } } },
         yAxis: { type: 'category', data: data.categories, axisLabel: { color: '#68758a' }, axisLine: { lineStyle: { color: '#e6ebf2' } } },
         series: [
-          { name: '成功', type: 'bar', data: data.success, label: { show: true, position: 'right' } },
-          { name: '失败', type: 'bar', data: data.failed, label: { show: true, position: 'right' } },
-          { name: '跳过', type: 'bar', data: data.skipped, label: { show: true, position: 'right' } }
+          { name: '成功', type: 'bar', data: data.success, itemStyle: { borderRadius: [0, 4, 4, 0] }, label: { show: true, position: 'right' } },
+          { name: '失败', type: 'bar', data: data.failed, itemStyle: { borderRadius: [0, 4, 4, 0] }, label: { show: true, position: 'right' } },
+          { name: '跳过', type: 'bar', data: data.skipped, itemStyle: { borderRadius: [0, 4, 4, 0] }, label: { show: true, position: 'right' } }
         ]
       });
       window.addEventListener('resize', () => chart.resize());
@@ -120,14 +120,14 @@
       chart.setOption({
         animation: false,
         aria: { enabled: true, description: document.getElementById('run-trend-summary').textContent },
-        color: ['#16855b', '#c23838', '#1769d2'],
+        color: ['#1468f3', '#d14343', '#7758ff'],
         grid: { left: 48, right: 20, top: 38, bottom: 72, containLabel: true },
-        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+        tooltip: { trigger: 'axis', backgroundColor: '#071a35', borderColor: '#1f4f8f', textStyle: { color: '#f7faff' }, axisPointer: { type: 'shadow', shadowStyle: { color: 'rgba(20, 104, 243, .08)' } } },
         legend: { top: 0, textStyle: { color: '#68758a' }, data: ['成功（含部分成功）', '失败（含异常终止）', '取消'] },
         xAxis: { type: 'category', data: data.categories, axisLabel: { color: '#68758a', rotate: 45, interval: 3 }, axisLine: { lineStyle: { color: '#e6ebf2' } } },
         yAxis: { type: 'value', min: 0, minInterval: 1, axisLabel: { color: '#68758a' }, splitLine: { lineStyle: { color: '#e6ebf2' } } },
         series: [
-          { name: '成功（含部分成功）', type: 'bar', stack: 'terminal', data: data.successful },
+          { name: '成功（含部分成功）', type: 'bar', stack: 'terminal', data: data.successful, itemStyle: { borderRadius: [3, 3, 0, 0] } },
           { name: '失败（含异常终止）', type: 'bar', stack: 'terminal', data: data.failed },
           { name: '取消', type: 'bar', stack: 'terminal', data: data.cancelled }
         ]

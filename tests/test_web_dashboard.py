@@ -259,8 +259,9 @@ def test_dashboard_uses_direction_a_echarts_theme(
 ) -> None:
     response = authenticated_client.get("/dashboard")
 
-    for color in ("#16855b", "#c23838", "#8b98aa", "#1769d2", "#e6ebf2", "#68758a"):
+    for color in ("#1468f3", "#d14343", "#8b98ae", "#7758ff", "#e6ebf2", "#68758a"):
         assert color in response.text
+    assert "#16855b" not in response.text
     assert "animation: false" in response.text
 
 
