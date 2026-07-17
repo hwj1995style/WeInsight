@@ -1,16 +1,151 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from app.domain.collection_jobs import PipelineType, RunStatus
-from app.services.runtime_monitor_service import EventListFilter, RunListFilter
+from app.services.runtime_monitor_service import (
+    EventListFilter,
+    RunDeletionNotAllowedError,
+    RunListFilter,
+)
 from app.storage import runtime_monitor_repo
 
 
 ZONE = ZoneInfo("Asia/Shanghai")
 NOW = datetime(2026, 7, 10, 12, 30, tzinfo=ZONE)
+
+
+class _DeleteResult:
+    def __init__(self, *, row=None, rowcount=0):
+        self.row = row
+        self.rowcount = rowcount
+
+    def mappings(self):
+        return self
+
+    def first(self):
+        return self.row
+
+
+class _DeleteConnection:
+    def __init__(self, results):
+        self.results = list(results)
+        self.executed = []
+
+    def execute(self, statement, params=None):
+        self.executed.append((" ".join(str(statement).split()), params or {}))
+        return self.results.pop(0)
+
+
+class _DeleteContext:
+    def __init__(self, connection):
+        self.connection = connection
+        self.exit_error = None
+
+    def __enter__(self):
+        return self.connection
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.exit_error = exc_value
+        return False
+
+
+class _DeleteEngine:
+    def __init__(self, results):
+        self.connection = _DeleteConnection(results)
+        self.context = _DeleteContext(self.connection)
+
+    def begin(self):
+        return self.context
+
+
+def test_delete_terminal_run_uses_locked_ordered_transaction_and_audit() -> None:
+    engine = _DeleteEngine(
+        [
+            _DeleteResult(row={"id": 31, "job_id": 7, "status": "failed"}),
+            _DeleteResult(rowcount=4),
+            _DeleteResult(rowcount=1),
+            _DeleteResult(rowcount=1),
+            _DeleteResult(rowcount=1),
+        ]
+    )
+
+    result = runtime_monitor_repo.MysqlRuntimeMonitorRepo(engine).delete_terminal_run(
+        31, "admin", NOW,
+    )
+
+    assert result.run_id == 31
+    assert result.job_id == 7
+    assert result.status is RunStatus.FAILED
+    assert result.deleted_event_count == 4
+    assert result.deleted_target_count == 1
+    sql = [statement.lower() for statement, _ in engine.connection.executed]
+    assert "for update" in sql[0]
+    assert "delete from wechat_collection_job_event" in sql[1]
+    assert "delete from wechat_collection_job_target_run" in sql[2]
+    assert "delete from wechat_collection_job_run" in sql[3]
+    assert "insert into wechat_collection_job_event" in sql[4]
+    audit_params = engine.connection.executed[4][1]
+    assert audit_params["job_id"] == 7
+    assert audit_params["event_type"] == "collection_run_deleted"
+    assert audit_params["actor"] == "admin"
+    assert json.loads(audit_params["metrics_json"]) == {
+        "deleted_event_count": 4,
+        "deleted_run_id": 31,
+        "deleted_target_count": 1,
+        "status": "failed",
+    }
+
+
+@pytest.mark.parametrize("status", ["queued", "running"])
+def test_delete_nonterminal_run_stops_after_lock(status: str) -> None:
+    engine = _DeleteEngine(
+        [_DeleteResult(row={"id": 31, "job_id": 7, "status": status})]
+    )
+
+    with pytest.raises(RunDeletionNotAllowedError) as caught:
+        runtime_monitor_repo.MysqlRuntimeMonitorRepo(engine).delete_terminal_run(
+            31, "admin", NOW,
+        )
+
+    assert caught.value.status is RunStatus(status)
+    assert len(engine.connection.executed) == 1
+    assert engine.context.exit_error is caught.value
+
+
+def test_delete_missing_run_returns_none_without_mutation() -> None:
+    engine = _DeleteEngine([_DeleteResult(row=None)])
+
+    result = runtime_monitor_repo.MysqlRuntimeMonitorRepo(engine).delete_terminal_run(
+        31, "admin", NOW,
+    )
+
+    assert result is None
+    assert len(engine.connection.executed) == 1
+
+
+def test_delete_terminal_run_rolls_back_when_audit_is_not_written() -> None:
+    engine = _DeleteEngine(
+        [
+            _DeleteResult(row={"id": 31, "job_id": 7, "status": "success"}),
+            _DeleteResult(rowcount=2),
+            _DeleteResult(rowcount=1),
+            _DeleteResult(rowcount=1),
+            _DeleteResult(rowcount=0),
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="audit was not written") as caught:
+        runtime_monitor_repo.MysqlRuntimeMonitorRepo(engine).delete_terminal_run(
+            31, "admin", NOW,
+        )
+
+    assert engine.context.exit_error is caught.value
 
 
 def test_run_filter_sql_uses_fixed_conditions_and_bound_values() -> None:

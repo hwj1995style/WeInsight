@@ -14,9 +14,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON `weinsight_prod`.`wechat_public_account_
 GRANT SELECT, INSERT, UPDATE ON `weinsight_prod`.`wechat_collection_job` TO 'weinsight_web_role';
 GRANT SELECT, INSERT, UPDATE ON `weinsight_prod`.`wechat_collection_job_target` TO 'weinsight_web_role';
 GRANT SELECT, INSERT ON `weinsight_prod`.`wechat_report_generation_request` TO 'weinsight_web_role';
-GRANT SELECT, INSERT ON `weinsight_prod`.`wechat_collection_job_event` TO 'weinsight_web_role';
-GRANT SELECT ON `weinsight_prod`.`wechat_collection_job_run` TO 'weinsight_web_role';
-GRANT SELECT ON `weinsight_prod`.`wechat_collection_job_target_run` TO 'weinsight_web_role';
+GRANT SELECT, INSERT, DELETE ON `weinsight_prod`.`wechat_collection_job_event` TO 'weinsight_web_role';
+GRANT SELECT, DELETE ON `weinsight_prod`.`wechat_collection_job_run` TO 'weinsight_web_role';
+GRANT SELECT, DELETE ON `weinsight_prod`.`wechat_collection_job_target_run` TO 'weinsight_web_role';
 GRANT SELECT ON `weinsight_prod`.`wechat_worker_heartbeat` TO 'weinsight_web_role';
 GRANT SELECT ON `weinsight_prod`.`wechat_client_health_check` TO 'weinsight_web_role';
 GRANT SELECT ON `weinsight_prod`.`wechat_group_collect_log` TO 'weinsight_web_role';
