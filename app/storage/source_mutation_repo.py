@@ -224,6 +224,20 @@ class MysqlSourceMutationRepo:
             )
             if jobs:
                 raise SourceMutationInUseError(jobs)
+            target_column = _source_target_column(source_type)
+            connection.execute(
+                text(
+                    f"""
+                    UPDATE wechat_collection_job_target AS target
+                    JOIN wechat_collection_job AS job
+                      ON job.id = target.job_id
+                    SET target.{target_column} = NULL
+                    WHERE target.{target_column} = :source_id
+                      AND job.status = 'deleted'
+                    """
+                ),
+                {"source_id": source_id},
+            )
             table = _source_table(source_type)
             connection.execute(
                 text(
@@ -291,6 +305,14 @@ def _source_lock_statement(source_type: str, *, by_name: bool, for_update: bool)
         {lock_clause}
         """
     )
+
+
+def _source_target_column(source_type: str) -> str:
+    if source_type == "group":
+        return "group_config_id"
+    if source_type == "article":
+        return "article_config_id"
+    raise ValueError("source_type must be group or article")
 
 
 def _source_table(source_type: str) -> str:

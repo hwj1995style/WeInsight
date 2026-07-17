@@ -710,6 +710,7 @@ def test_delete_in_use_source_returns_safe_409_with_escaped_job_name(
     assert "核心群晨间采集" in response.text
     assert "<script>" not in response.text
     assert "&lt;script&gt;bad&lt;/script&gt;" in response.text
+    assert "请先停止并删除以下任务后重试" in response.text
     assert "source is referenced" not in response.text
 
 

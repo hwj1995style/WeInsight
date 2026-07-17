@@ -557,7 +557,7 @@ def _source_error_response(
         message = "该名单已有采集历史或任务引用，不能改名。"
     else:
         job_names = exc.job_names  # type: ignore[union-attr]
-        message = "该名单正被采集任务引用，当前操作无法完成。"
+        message = "该名单仍被采集任务引用，请先停止并删除以下任务后重试。"
     return templates.TemplateResponse(
         request=request,
         name="sources/error.html",

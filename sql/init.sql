@@ -504,9 +504,8 @@ CREATE TABLE IF NOT EXISTS wechat_collection_job_target (
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uk_job_group_target (job_id, group_config_id),
     UNIQUE KEY uk_job_article_target (job_id, article_config_id),
-    CONSTRAINT ck_job_target_exactly_one CHECK (
-        (group_config_id IS NOT NULL AND article_config_id IS NULL)
-        OR (group_config_id IS NULL AND article_config_id IS NOT NULL)
+    CONSTRAINT ck_job_target_at_most_one CHECK (
+        group_config_id IS NULL OR article_config_id IS NULL
     ),
     CONSTRAINT fk_job_target_job FOREIGN KEY (job_id)
         REFERENCES wechat_collection_job(id) ON DELETE RESTRICT,
