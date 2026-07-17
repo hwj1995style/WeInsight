@@ -117,6 +117,15 @@ class RunDetail:
 
 
 @dataclass(frozen=True, slots=True)
+class RunDeletionResult:
+    run_id: int
+    job_id: int
+    status: RunStatus
+    deleted_event_count: int
+    deleted_target_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeEvent:
     id: int
     job_id: int | None
@@ -309,6 +318,10 @@ class RuntimeMonitorRepo(Protocol):
 
     def get_run(self, run_id: int) -> RunDetail | None: ...
 
+    def delete_terminal_run(
+        self, run_id: int, actor: str, now: datetime
+    ) -> RunDeletionResult | None: ...
+
     def list_events(
         self,
         filters: EventListFilter,
@@ -334,6 +347,12 @@ class RunNotFoundError(LookupError):
 
 class RunOutsideVisibilityError(LookupError):
     pass
+
+
+class RunDeletionNotAllowedError(RuntimeError):
+    def __init__(self, status: RunStatus) -> None:
+        self.status = status
+        super().__init__(f"run status does not allow deletion: {status.value}")
 
 
 class RuntimeMonitorService:
@@ -387,6 +406,19 @@ class RuntimeMonitorService:
             error_summary=_safe_optional(detail.error_summary),
             targets=tuple(self.safe_target(target) for target in detail.targets),
         )
+
+    def delete_terminal_run(
+        self, run_id: int, actor: str, now: datetime
+    ) -> RunDeletionResult:
+        _positive_integer(run_id, "run_id")
+        _required_text(actor, "actor", 100)
+        ensure_schedule_datetime(now, field_name="now")
+        result = self.repo.delete_terminal_run(run_id, actor, now)
+        if result is None:
+            raise RunNotFoundError(f"run not found: {run_id}")
+        if result.status not in TERMINAL_RUN_STATUSES:
+            raise RuntimeError("repository returned a nonterminal deletion result")
+        return result
 
     def list_events(
         self,
@@ -557,6 +589,7 @@ _EVENT_SUMMARIES = {
     "collection_run_started": "开始执行采集任务",
     "collection_run_finished": "本轮采集完成",
     "collection_run_lease_expired": "采集运行租约已过期",
+    "collection_run_deleted": "已删除运行实例",
     "collection_target_started": "开始处理目标",
     "collection_target_finished": "目标处理完成",
     "werss_authorization_settings_changed": "授权提醒配置已更新",
@@ -786,3 +819,9 @@ def _optional_text(value: object, field: str, maximum: int) -> None:
         or len(value) > maximum
     ):
         raise ValueError(f"{field} is invalid")
+
+
+def _required_text(value: object, field: str, maximum: int) -> None:
+    _optional_text(value, field, maximum)
+    if value is None:
+        raise ValueError(f"{field} is required")

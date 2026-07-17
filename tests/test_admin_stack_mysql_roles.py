@@ -148,14 +148,14 @@ def test_web_role_has_control_plane_crud_and_safe_read_policy() -> None:
         "wechat_collection_job": {"SELECT", "INSERT", "UPDATE"},
         "wechat_collection_job_target": {"SELECT", "INSERT"},
         "wechat_report_generation_request": {"SELECT", "INSERT"},
-        "wechat_collection_job_event": {"SELECT", "INSERT"},
+        "wechat_collection_job_event": {"SELECT", "INSERT", "DELETE"},
+        "wechat_collection_job_run": {"SELECT", "DELETE"},
+        "wechat_collection_job_target_run": {"SELECT", "DELETE"},
         "wechat_werss_authorization_state": {"SELECT", "INSERT", "UPDATE"},
         "wechat_werss_authorization_settings": {"SELECT", "INSERT", "UPDATE"},
         **{
             table: {"SELECT"}
             for table in (
-                "wechat_collection_job_run",
-                "wechat_collection_job_target_run",
                 "wechat_worker_heartbeat",
                 "wechat_client_health_check",
                 "wechat_group_collect_log",

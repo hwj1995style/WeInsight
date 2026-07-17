@@ -13,6 +13,8 @@ from app.services.runtime_monitor_service import (
     EventListFilter,
     RunListFilter,
     RunDetail,
+    RunDeletionNotAllowedError,
+    RunDeletionResult,
     RunNotFoundError,
     RunOutsideVisibilityError,
     RunSummary,
@@ -45,6 +47,8 @@ class Repo:
         self.run_page = PagedResult([], 1, 20, 0)
         self.event_page = PagedResult([], 1, 50, 0)
         self.detail = None
+        self.delete_result = None
+        self.delete_error = None
 
     def list_runs(self, filters, page, page_size, visible_since):
         self.calls.append(("list_runs", filters, page, page_size, visible_since))
@@ -57,6 +61,12 @@ class Repo:
     def get_run(self, run_id):
         self.calls.append(("get_run", run_id))
         return self.detail
+
+    def delete_terminal_run(self, run_id, actor, now):
+        self.calls.append(("delete_terminal_run", run_id, actor, now))
+        if self.delete_error is not None:
+            raise self.delete_error
+        return self.delete_result
 
 
 @pytest.mark.parametrize(
@@ -151,6 +161,65 @@ def test_get_run_enforces_visibility_boundary_without_leaking_detail(tmp_path: P
     repo.detail = None
     with pytest.raises(RunNotFoundError):
         service.get_run(31)
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        RunStatus.SUCCESS,
+        RunStatus.FAILED,
+        RunStatus.PARTIAL_SUCCESS,
+        RunStatus.CANCELLED,
+        RunStatus.ABORTED,
+    ],
+)
+def test_delete_terminal_run_delegates_validated_admin_mutation(
+    tmp_path: Path, status: RunStatus,
+) -> None:
+    repo = Repo()
+    repo.delete_result = RunDeletionResult(31, 7, status, 4, 1)
+    service = RuntimeMonitorService(repo, tmp_path, heartbeat_ttl_seconds=30)
+
+    result = service.delete_terminal_run(31, "admin", NOW)
+
+    assert result.status is status
+    assert repo.calls == [("delete_terminal_run", 31, "admin", NOW)]
+
+
+def test_delete_terminal_run_maps_missing_and_preserves_state_error(
+    tmp_path: Path,
+) -> None:
+    repo = Repo()
+    service = RuntimeMonitorService(repo, tmp_path, heartbeat_ttl_seconds=30)
+
+    with pytest.raises(RunNotFoundError):
+        service.delete_terminal_run(31, "admin", NOW)
+
+    repo.delete_error = RunDeletionNotAllowedError(RunStatus.RUNNING)
+    with pytest.raises(RunDeletionNotAllowedError) as caught:
+        service.delete_terminal_run(31, "admin", NOW)
+    assert caught.value.status is RunStatus.RUNNING
+
+
+@pytest.mark.parametrize(
+    ("run_id", "actor", "now"),
+    [
+        (0, "admin", NOW),
+        (31, "", NOW),
+        (31, " admin", NOW),
+        (31, "admin", datetime(2026, 7, 10, 12, 30)),
+    ],
+)
+def test_delete_terminal_run_rejects_invalid_input_without_repo_call(
+    tmp_path: Path, run_id, actor, now,
+) -> None:
+    repo = Repo()
+    service = RuntimeMonitorService(repo, tmp_path, heartbeat_ttl_seconds=30)
+
+    with pytest.raises(ValueError):
+        service.delete_terminal_run(run_id, actor, now)
+
+    assert repo.calls == []
 
 
 def test_run_and_event_filters_validate_allowlisted_types(tmp_path: Path) -> None:
@@ -368,6 +437,7 @@ def test_event_and_worker_control_labels_are_sanitized_on_read(tmp_path: Path) -
         ("job_created", "已创建采集任务"),
         ("job_stop_requested", "已请求停止采集任务"),
         ("job_deleted", "已删除采集任务"),
+        ("collection_run_deleted", "已删除运行实例"),
         ("misfire", "错过计划已合并执行"),
         ("pipeline_stage_failed", "后处理失败"),
         ("werss_catalog_sync_changed", "WeRSS 公众号清单已同步"),

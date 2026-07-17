@@ -31,6 +31,7 @@ def test_rules_are_disjoint_and_preserve_audit_events() -> None:
     assert "NOT IN" in info and "job_created" in info
     assert "level IN ('warning','error')" in error and "NOT IN" in error
     assert "event_type IN" in audit and "job_created" in audit
+    assert "collection_run_deleted" in audit
 
 
 def test_service_forwards_dry_run_without_mutating_policy() -> None:

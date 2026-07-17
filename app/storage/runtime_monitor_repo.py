@@ -17,6 +17,8 @@ from app.services.runtime_monitor_service import (
     EventListFilter,
     JobRuntimeHistory,
     RunDetail,
+    RunDeletionNotAllowedError,
+    RunDeletionResult,
     RunListFilter,
     RunSummary,
     RunTrendBucket,
@@ -113,6 +115,68 @@ class MysqlRuntimeMonitorRepo:
             error_code=_optional_text(row.get("error_code")),
             error_summary=_safe_optional(row.get("error_summary")),
             targets=tuple(_target_detail(item) for item in target_rows),
+        )
+
+    def delete_terminal_run(
+        self, run_id: int, actor: str, now: datetime
+    ) -> RunDeletionResult | None:
+        with self.engine.begin() as connection:
+            row = connection.execute(
+                _RUN_FOR_DELETE,
+                {"run_id": run_id},
+            ).mappings().first()
+            if row is None:
+                return None
+            status = RunStatus(str(row["status"]))
+            if status.value not in _TERMINAL_VALUES:
+                raise RunDeletionNotAllowedError(status)
+            job_id = int(row["job_id"])
+            event_result = connection.execute(
+                _DELETE_RUN_EVENTS,
+                {"run_id": run_id},
+            )
+            target_result = connection.execute(
+                _DELETE_RUN_TARGETS,
+                {"run_id": run_id},
+            )
+            run_result = connection.execute(
+                _DELETE_RUN,
+                {"run_id": run_id, "status": status.value},
+            )
+            if int(run_result.rowcount or 0) != 1:
+                raise RuntimeError("terminal run delete lost locked row")
+            deleted_event_count = int(event_result.rowcount or 0)
+            deleted_target_count = int(target_result.rowcount or 0)
+            metrics_json = json.dumps(
+                {
+                    "deleted_event_count": deleted_event_count,
+                    "deleted_run_id": run_id,
+                    "deleted_target_count": deleted_target_count,
+                    "status": status.value,
+                },
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            audit_result = connection.execute(
+                _INSERT_RUN_DELETE_AUDIT,
+                {
+                    "job_id": job_id,
+                    "event_type": "collection_run_deleted",
+                    "message": "terminal collection run physically deleted",
+                    "metrics_json": metrics_json,
+                    "actor": actor,
+                    "now": _to_db_datetime(now),
+                },
+            )
+            if int(audit_result.rowcount or 0) != 1:
+                raise RuntimeError("terminal run delete audit was not written")
+        return RunDeletionResult(
+            run_id,
+            job_id,
+            status,
+            deleted_event_count,
+            deleted_target_count,
         )
 
     def list_events(
@@ -603,6 +667,55 @@ def _optional_db_datetime(value: object) -> datetime | None:
 def _to_db_datetime(value: datetime) -> datetime:
     return value.astimezone(_ZONE).replace(tzinfo=None)
 
+
+_RUN_FOR_DELETE = text(
+    """
+    SELECT id, job_id, status
+    FROM wechat_collection_job_run
+    WHERE id = :run_id
+    FOR UPDATE
+    """
+)
+
+_DELETE_RUN_EVENTS = text(
+    """
+    DELETE FROM wechat_collection_job_event
+    WHERE run_id = :run_id
+       OR target_run_id IN (
+            SELECT id
+            FROM wechat_collection_job_target_run
+            WHERE run_id = :run_id
+       )
+    """
+)
+
+_DELETE_RUN_TARGETS = text(
+    """
+    DELETE FROM wechat_collection_job_target_run
+    WHERE run_id = :run_id
+    """
+)
+
+_DELETE_RUN = text(
+    """
+    DELETE FROM wechat_collection_job_run
+    WHERE id = :run_id AND status = :status
+    """
+)
+
+_INSERT_RUN_DELETE_AUDIT = text(
+    """
+    INSERT INTO wechat_collection_job_event (
+        job_id, run_id, target_run_id, worker_id,
+        level, event_type, stage, message, metrics_json,
+        actor_type, actor_name, create_time
+    ) VALUES (
+        :job_id, NULL, NULL, NULL,
+        'info', :event_type, 'run_admin', :message, :metrics_json,
+        'admin', :actor, :now
+    )
+    """
+)
 
 _RUN_DETAIL = text(
     """

@@ -18,6 +18,9 @@ from app.services.auth_service import AuthenticatedAdmin
 from app.services.runtime_monitor_service import (
     JobRuntimeHistory,
     RunDetail,
+    RunDeletionNotAllowedError,
+    RunDeletionResult,
+    RunNotFoundError,
     RunOutsideVisibilityError,
     RunSummary,
     RuntimeDashboardSnapshot,
@@ -44,6 +47,9 @@ class FakeAuthService:
 
     def authenticate(self, session_token, csrf_token, now):
         return self.admin if session_token == "session-token" else None
+
+    def verify_csrf(self, session_token, csrf_token, now):
+        return session_token == "session-token" and csrf_token == "csrf-token"
 
 
 def _run() -> RunSummary:
@@ -85,6 +91,7 @@ def _event(event_id: int = 101) -> RuntimeEvent:
 class FakeRuntimeMonitorService:
     def __init__(self, screenshot_path: str = "截图路径无效") -> None:
         self.calls = []
+        self.delete_error = None
         self.run_page = PagedResult([_run()], 1, 20, 1)
         self.event_page = PagedResult([_event()], 1, 50, 1)
         target = TargetRunDetail(
@@ -200,6 +207,14 @@ class FakeRuntimeMonitorService:
         self.calls.append(("get_job_history", job_id, limit))
         return JobRuntimeHistory((_run(),), (_event(),))
 
+    def delete_terminal_run(self, run_id, actor, now):
+        self.calls.append(("delete_terminal_run", run_id, actor, now))
+        if self.delete_error is not None:
+            raise self.delete_error
+        status = self.detail.run.status
+        self.detail = None
+        return RunDeletionResult(run_id, 7, status, 1, 1)
+
 
 @pytest.fixture
 def config() -> Config:
@@ -305,6 +320,141 @@ def test_run_detail_shows_local_path_as_text_only(
     assert "最近事件" in response.text
     assert "ERROR · 目标处理完成" in response.text
     assert 'id="target-51"' in response.text
+
+
+def test_terminal_run_detail_shows_physical_delete_action(
+    authenticated_client: TestClient,
+) -> None:
+    response = authenticated_client.get("/runs/31")
+
+    assert response.status_code == 200
+    assert 'action="/runs/31/delete"' in response.text
+    assert "删除运行实例" in response.text
+    assert "采集结果和采集日志仍会保留" in response.text
+
+
+@pytest.mark.parametrize("status", [RunStatus.QUEUED, RunStatus.RUNNING])
+def test_nonterminal_run_detail_hides_delete_action(
+    authenticated_client: TestClient,
+    runtime_service: FakeRuntimeMonitorService,
+    status: RunStatus,
+) -> None:
+    runtime_service.detail = replace(
+        runtime_service.detail,
+        run=replace(runtime_service.detail.run, status=status),
+    )
+
+    response = authenticated_client.get("/runs/31")
+
+    assert response.status_code == 200
+    assert 'action="/runs/31/delete"' not in response.text
+    assert "删除运行实例" not in response.text
+
+
+def test_delete_terminal_run_redirects_to_list(
+    authenticated_client: TestClient,
+    runtime_service: FakeRuntimeMonitorService,
+) -> None:
+    response = authenticated_client.post(
+        "/runs/31/delete",
+        data={"csrf_token": "csrf-token", "confirm_delete": "1"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/runs"
+    call = runtime_service.calls[-1]
+    assert call[:3] == ("delete_terminal_run", 31, "admin")
+    assert call[3].tzinfo is not None
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"csrf_token": "csrf-token", "confirm_delete": "0"},
+        {"csrf_token": "csrf-token"},
+        {
+            "csrf_token": "csrf-token",
+            "confirm_delete": "1",
+            "unknown": "x",
+        },
+    ],
+)
+def test_delete_run_rejects_invalid_form_without_service_call(
+    authenticated_client: TestClient,
+    runtime_service: FakeRuntimeMonitorService,
+    data,
+) -> None:
+    response = authenticated_client.post("/runs/31/delete", data=data)
+
+    assert response.status_code == 422
+    assert "请检查删除参数" in response.text
+    assert not any(call[0] == "delete_terminal_run" for call in runtime_service.calls)
+
+
+def test_delete_nonterminal_run_returns_refreshed_409(
+    authenticated_client: TestClient,
+    runtime_service: FakeRuntimeMonitorService,
+) -> None:
+    runtime_service.detail = replace(
+        runtime_service.detail,
+        run=replace(runtime_service.detail.run, status=RunStatus.RUNNING),
+    )
+    runtime_service.delete_error = RunDeletionNotAllowedError(RunStatus.RUNNING)
+
+    response = authenticated_client.post(
+        "/runs/31/delete",
+        data={"csrf_token": "csrf-token", "confirm_delete": "1"},
+    )
+
+    assert response.status_code == 409
+    assert "当前运行状态不允许删除" in response.text
+    assert "运行中" in response.text
+    assert 'action="/runs/31/delete"' not in response.text
+
+
+def test_delete_missing_run_returns_safe_404(
+    authenticated_client: TestClient,
+    runtime_service: FakeRuntimeMonitorService,
+) -> None:
+    runtime_service.delete_error = RunNotFoundError("secret internal detail")
+
+    response = authenticated_client.post(
+        "/runs/31/delete",
+        data={"csrf_token": "csrf-token", "confirm_delete": "1"},
+    )
+
+    assert response.status_code == 404
+    assert "运行实例不存在" in response.text
+    assert "secret internal detail" not in response.text
+
+
+def test_delete_run_does_not_accept_get(authenticated_client: TestClient) -> None:
+    assert authenticated_client.get("/runs/31/delete").status_code == 405
+
+
+def test_delete_run_requires_authentication(raw_client: TestClient) -> None:
+    response = raw_client.post(
+        "/runs/31/delete",
+        data={"csrf_token": "csrf-token", "confirm_delete": "1"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/login")
+
+
+def test_delete_run_rejects_invalid_csrf(
+    authenticated_client: TestClient,
+    runtime_service: FakeRuntimeMonitorService,
+) -> None:
+    response = authenticated_client.post(
+        "/runs/31/delete",
+        data={"csrf_token": "wrong-token", "confirm_delete": "1"},
+    )
+
+    assert response.status_code == 403
+    assert not any(call[0] == "delete_terminal_run" for call in runtime_service.calls)
 
 
 def test_article_run_detail_shows_rss_metrics_without_rpa_presentation(
