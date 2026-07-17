@@ -11,11 +11,13 @@ from app.domain.collection_jobs import JobStatus, PipelineType, ScheduleSpec
 from app.services.collection_job_service import (
     CollectionJobService,
     CreateCollectionJobCommand,
+    UpdateCollectionJobCommand,
     JobListFilter,
     JobNotFoundError,
     JobValidationError,
     ManagedJobMutationError,
     CollectionJobDetail,
+    JobStateTransitionError,
 )
 
 
@@ -38,9 +40,26 @@ def command(**overrides) -> CreateCollectionJobCommand:
     return CreateCollectionJobCommand(**values)
 
 
+def update_command(**overrides) -> UpdateCollectionJobCommand:
+    values = {
+        "job_name": "更新后的群采集",
+        "pipeline_type": PipelineType.GROUP,
+        "target_ids": (9, 7, 9),
+        "effective_start_at": NOW,
+        "effective_end_at": datetime(2026, 7, 13, 18, 0, tzinfo=ZONE),
+        "daily_window_start": time(9, 0),
+        "daily_window_end": time(18, 0),
+        "interval_seconds": 900,
+    }
+    values.update(overrides)
+    return UpdateCollectionJobCommand(**values)
+
+
 class Repo:
     def __init__(self) -> None:
         self.create_calls = []
+        self.update_calls = []
+        self.start_calls = []
         self.stop_calls = []
         self.delete_calls = []
         self.list_calls = []
@@ -50,9 +69,16 @@ class Repo:
         self.create_calls.append((cmd, status, next_run_at, actor))
         return 41
 
+    def update_job(self, job_id, cmd, expected_version, actor, now):
+        self.update_calls.append((job_id, cmd, expected_version, actor, now))
+
     def request_stop(self, job_id, expected_version, actor, now):
         self.stop_calls.append((job_id, expected_version, actor, now))
         return JobStatus.STOP_REQUESTED
+
+    def start_job(self, job_id, expected_version, actor, now):
+        self.start_calls.append((job_id, expected_version, actor, now))
+        return JobStatus.ACTIVE
 
     def soft_delete(self, job_id, expected_version, actor, now):
         self.delete_calls.append((job_id, expected_version, actor, now))
@@ -87,7 +113,7 @@ def test_create_deduplicates_ids_and_allows_now_grid(service, repo) -> None:
     assert actor == "admin"
 
 
-def test_system_article_job_cannot_be_stopped_or_deleted(service, repo) -> None:
+def test_system_article_job_cannot_be_started_stopped_or_deleted(service, repo) -> None:
     repo.details[11] = CollectionJobDetail(
         id=11, job_name="system", pipeline_type=PipelineType.ARTICLE,
         target_names=(), schedule=ScheduleSpec(
@@ -98,9 +124,15 @@ def test_system_article_job_cannot_be_stopped_or_deleted(service, repo) -> None:
     )
 
     with pytest.raises(ManagedJobMutationError):
+        service.update_job(11, update_command(), 1, "admin", NOW)
+    with pytest.raises(ManagedJobMutationError):
+        service.start_job(11, 1, "admin", NOW)
+    with pytest.raises(ManagedJobMutationError):
         service.request_stop(11, 1, "admin", NOW)
     with pytest.raises(ManagedJobMutationError):
         service.delete_job(11, 1, "admin", NOW)
+    assert repo.update_calls == []
+    assert repo.start_calls == []
     assert repo.stop_calls == []
     assert repo.delete_calls == []
 
@@ -168,7 +200,7 @@ def test_create_validates_name_pipeline_targets_and_schedule(
 @pytest.mark.parametrize("actor", ["", " admin", "x" * 101, None])
 def test_mutations_reject_invalid_actor(service, actor) -> None:
     with pytest.raises(JobValidationError, match="actor"):
-        service.request_stop(
+        service.start_job(
             job_id=11,
             expected_version=3,
             actor=actor,
@@ -195,7 +227,106 @@ def test_expired_or_schedule_without_future_grid_is_rejected(service) -> None:
         )
 
 
-def test_stop_and_delete_delegate_validated_optimistic_version(service, repo) -> None:
+def test_update_stopped_job_reuses_create_validation_and_pipeline(service, repo) -> None:
+    repo.details[11] = CollectionJobDetail(
+        id=11,
+        job_name="旧任务",
+        pipeline_type=PipelineType.GROUP,
+        target_names=("核心群A",),
+        target_ids=(7,),
+        schedule=ScheduleSpec(
+            effective_start_at=NOW,
+            effective_end_at=datetime(2026, 7, 12, 18, 0, tzinfo=ZONE),
+            daily_window_start=time(9, 0),
+            daily_window_end=time(18, 0),
+            interval_seconds=600,
+        ),
+        status=JobStatus.STOPPED,
+        next_run_at=None,
+        version=3,
+    )
+
+    service.update_job(11, update_command(), 3, "admin", NOW)
+
+    job_id, saved, version, actor, called_now = repo.update_calls[0]
+    assert job_id == 11
+    assert saved.pipeline_type is PipelineType.GROUP
+    assert saved.target_ids == (7, 9)
+    assert saved.job_name == "更新后的群采集"
+    assert (version, actor, called_now) == (3, "admin", NOW)
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        JobStatus.SCHEDULED,
+        JobStatus.ACTIVE,
+        JobStatus.STOP_REQUESTED,
+        JobStatus.COMPLETED,
+        JobStatus.DELETED,
+    ],
+)
+def test_update_only_allows_stopped_job(service, repo, status) -> None:
+    repo.details[11] = CollectionJobDetail(
+        id=11,
+        job_name="旧任务",
+        pipeline_type=PipelineType.GROUP,
+        target_names=("核心群A",),
+        schedule=ScheduleSpec(
+            effective_start_at=NOW,
+            effective_end_at=datetime(2026, 7, 12, 18, 0, tzinfo=ZONE),
+            daily_window_start=time(9, 0),
+            daily_window_end=time(18, 0),
+            interval_seconds=600,
+        ),
+        status=status,
+        next_run_at=None,
+        version=3,
+    )
+
+    with pytest.raises(JobStateTransitionError):
+        service.update_job(11, update_command(), 3, "admin", NOW)
+
+    assert repo.update_calls == []
+
+
+def test_update_rejects_schedule_without_future_run(service, repo) -> None:
+    repo.details[11] = CollectionJobDetail(
+        id=11,
+        job_name="旧任务",
+        pipeline_type=PipelineType.GROUP,
+        target_names=("核心群A",),
+        schedule=ScheduleSpec(
+            effective_start_at=NOW,
+            effective_end_at=datetime(2026, 7, 12, 18, 0, tzinfo=ZONE),
+            daily_window_start=time(9, 0),
+            daily_window_end=time(18, 0),
+            interval_seconds=600,
+        ),
+        status=JobStatus.STOPPED,
+        next_run_at=None,
+        version=3,
+    )
+
+    with pytest.raises(JobValidationError, match="no future run"):
+        service.update_job(
+            11,
+            update_command(
+                effective_start_at=datetime(2026, 7, 8, 9, 0, tzinfo=ZONE),
+                effective_end_at=datetime(2026, 7, 9, 18, 0, tzinfo=ZONE),
+            ),
+            3,
+            "admin",
+            NOW,
+        )
+
+    assert repo.update_calls == []
+
+
+def test_start_stop_and_delete_delegate_validated_optimistic_version(service, repo) -> None:
+    started = service.start_job(
+        job_id=11, expected_version=2, actor="admin", now=NOW
+    )
     result = service.request_stop(
         job_id=11, expected_version=3, actor="admin", now=NOW
     )
@@ -203,8 +334,10 @@ def test_stop_and_delete_delegate_validated_optimistic_version(service, repo) ->
         job_id=11, expected_version=4, actor="admin", now=NOW
     )
 
+    assert started is JobStatus.ACTIVE
     assert result is JobStatus.STOP_REQUESTED
     assert deleted is True
+    assert repo.start_calls == [(11, 2, "admin", NOW)]
     assert repo.stop_calls == [(11, 3, "admin", NOW)]
     assert repo.delete_calls == [(11, 4, "admin", NOW)]
 
@@ -217,7 +350,7 @@ def test_mutations_require_positive_integer_ids_and_versions(
     service, job_id, version
 ) -> None:
     with pytest.raises(JobValidationError, match="positive integer"):
-        service.request_stop(job_id, version, "admin", NOW)
+        service.start_job(job_id, version, "admin", NOW)
 
 
 def test_list_validates_page_and_page_size_and_passes_same_filter(service, repo) -> None:

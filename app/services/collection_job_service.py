@@ -29,6 +29,18 @@ class CreateCollectionJobCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class UpdateCollectionJobCommand:
+    job_name: str
+    pipeline_type: PipelineType
+    target_ids: tuple[int, ...]
+    effective_start_at: datetime
+    effective_end_at: datetime
+    daily_window_start: time
+    daily_window_end: time
+    interval_seconds: int
+
+
+@dataclass(frozen=True, slots=True)
 class SourceSnapshot:
     source_id: int
     source_name: str
@@ -53,6 +65,7 @@ class CollectionJobSummary:
     next_run_at: datetime | None
     target_count: int
     version: int
+    managed_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +78,7 @@ class CollectionJobDetail:
     status: JobStatus
     next_run_at: datetime | None
     version: int
+    target_ids: tuple[int, ...] = ()
     managed_key: str | None = None
 
 
@@ -102,6 +116,10 @@ class ManagedJobMutationError(RuntimeError):
     pass
 
 
+class JobScheduleExpiredError(RuntimeError):
+    pass
+
+
 class JobStateTransitionError(RuntimeError):
     def __init__(self, status: JobStatus, action: str) -> None:
         self.status = status
@@ -119,6 +137,23 @@ class CollectionJobRepo(Protocol):
     ) -> int: ...
 
     def request_stop(
+        self,
+        job_id: int,
+        expected_version: int,
+        actor: str,
+        now: datetime,
+    ) -> JobStatus: ...
+
+    def update_job(
+        self,
+        job_id: int,
+        command: CreateCollectionJobCommand,
+        expected_version: int,
+        actor: str,
+        now: datetime,
+    ) -> None: ...
+
+    def start_job(
         self,
         job_id: int,
         expected_version: int,
@@ -190,6 +225,68 @@ class CollectionJobService:
         self._validate_now(now)
         self._reject_managed_mutation(job_id)
         return self.repo.request_stop(job_id, expected_version, actor, now)
+
+    def update_job(
+        self,
+        job_id: int,
+        command: UpdateCollectionJobCommand,
+        expected_version: int,
+        actor: str,
+        now: datetime,
+    ) -> None:
+        self._validate_identity(job_id, "job_id")
+        self._validate_identity(expected_version, "expected_version")
+        self._validate_actor(actor)
+        self._validate_now(now)
+        if not isinstance(command, UpdateCollectionJobCommand):
+            raise JobValidationError(
+                "command must be UpdateCollectionJobCommand"
+            )
+        detail = self.get_job(job_id)
+        if detail.managed_key == "article_global":
+            raise ManagedJobMutationError("system-managed job cannot be mutated")
+        if detail.status is not JobStatus.STOPPED:
+            raise JobStateTransitionError(detail.status, "update")
+        if command.pipeline_type is not detail.pipeline_type:
+            raise JobValidationError("pipeline_type cannot be changed")
+        create_command = CreateCollectionJobCommand(
+            job_name=command.job_name,
+            pipeline_type=command.pipeline_type,
+            target_ids=command.target_ids,
+            effective_start_at=command.effective_start_at,
+            effective_end_at=command.effective_end_at,
+            daily_window_start=command.daily_window_start,
+            daily_window_end=command.daily_window_end,
+            interval_seconds=command.interval_seconds,
+        )
+        normalized, schedule = self._validated_create_command(create_command)
+        if next_run_at(
+            schedule,
+            after=now - timedelta(microseconds=1),
+            anchor=schedule.effective_start_at,
+        ) is None:
+            raise JobValidationError("schedule has no future run")
+        self.repo.update_job(
+            job_id,
+            normalized,
+            expected_version,
+            actor,
+            now,
+        )
+
+    def start_job(
+        self,
+        job_id: int,
+        expected_version: int,
+        actor: str,
+        now: datetime,
+    ) -> JobStatus:
+        self._validate_identity(job_id, "job_id")
+        self._validate_identity(expected_version, "expected_version")
+        self._validate_actor(actor)
+        self._validate_now(now)
+        self._reject_managed_mutation(job_id)
+        return self.repo.start_job(job_id, expected_version, actor, now)
 
     def delete_job(
         self,

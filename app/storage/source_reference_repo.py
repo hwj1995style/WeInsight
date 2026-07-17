@@ -79,6 +79,7 @@ def _referencing_jobs_statement(
         JOIN wechat_collection_job job
           ON job.id = target.job_id
         WHERE {source_predicate}
+          AND target.is_active = 1
           {active_predicate}
         ORDER BY job.job_name ASC
         {lock_clause}

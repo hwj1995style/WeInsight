@@ -517,8 +517,10 @@ class RuntimeMonitorService:
         )
 
 
-def runtime_event_summary(event_type: str, level: str) -> str:
-    summary = _EVENT_SUMMARIES.get(event_type, "未分类事件")
+def runtime_event_summary(
+    event_type: str, level: str, metrics_summary: str | None = None,
+) -> str:
+    summary = _event_summary(event_type, metrics_summary)
     alert = {"warning": "WARN", "error": "ERROR"}.get(level)
     return f"{alert} · {summary}" if alert else summary
 
@@ -583,6 +585,8 @@ def _safe_event(event: RuntimeEvent) -> RuntimeEvent:
 
 _EVENT_SUMMARIES = {
     "job_created": "已创建采集任务",
+    "job_started": "已启动采集任务",
+    "job_updated": "已更新采集任务",
     "job_stop_requested": "已请求停止采集任务",
     "job_deleted": "已删除采集任务",
     "collection_run_claimed": "已领取采集运行",
@@ -600,6 +604,13 @@ _EVENT_SUMMARIES = {
     "pipeline_stage_failed": "后处理失败",
     "werss_catalog_sync_changed": "WeRSS 公众号清单已同步",
 }
+
+_AUTHORIZATION_TEST_SUMMARIES = {
+    ("werss_authorization_test_succeeded", "werss"): "WeRSS 管理凭据测试成功",
+    ("werss_authorization_test_succeeded", "email"): "授权提醒测试邮件发送成功",
+    ("werss_authorization_test_failed", "werss"): "WeRSS 管理凭据测试失败",
+    ("werss_authorization_test_failed", "email"): "授权提醒测试邮件发送失败",
+}
 _METRIC_FIELDS = (
     (("executed_target_count", "target_total_count"), "目标"),
     (("target_success_count",), "成功"),
@@ -613,7 +624,9 @@ _METRIC_FIELDS = (
 
 
 def _event_view(event: RuntimeEvent) -> RuntimeEventView:
-    summary = runtime_event_summary(event.event_type, event.level)
+    summary = runtime_event_summary(
+        event.event_type, event.level, event.metrics_summary,
+    )
     id_subjects = tuple(
         f"{label} #{value}"
         for label, value in (
@@ -660,6 +673,25 @@ def _event_view(event: RuntimeEvent) -> RuntimeEventView:
         event, summary, subject, tuple(items),
         technical_metrics,
     )
+
+
+def _event_summary(event_type: str, metrics_summary: str | None) -> str:
+    fallback = _EVENT_SUMMARIES.get(event_type, "未分类事件")
+    if event_type not in {
+        "werss_authorization_test_succeeded",
+        "werss_authorization_test_failed",
+    }:
+        return fallback
+    try:
+        metrics = json.loads(metrics_summary or "")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return fallback
+    if not isinstance(metrics, dict):
+        return fallback
+    target = metrics.get("target")
+    if not isinstance(target, str):
+        return fallback
+    return _AUTHORIZATION_TEST_SUMMARIES.get((event_type, target), fallback)
 
 
 def _is_primary_metric(value: object) -> bool:

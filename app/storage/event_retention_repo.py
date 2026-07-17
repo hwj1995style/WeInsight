@@ -10,7 +10,12 @@ from app.services.event_retention_service import EventCleanupResult, EventRetent
 
 
 AUDIT_EVENTS = (
-    "job_created", "job_stop_requested", "job_deleted", "collection_run_deleted",
+    "job_created",
+    "job_started",
+    "job_updated",
+    "job_stop_requested",
+    "job_deleted",
+    "collection_run_deleted",
     "werss_catalog_sync_changed",
     "werss_authorization_settings_changed", "werss_authorization_settings_failed",
     "werss_authorization_test_succeeded", "werss_authorization_test_failed",

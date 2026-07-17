@@ -435,6 +435,8 @@ def test_event_and_worker_control_labels_are_sanitized_on_read(tmp_path: Path) -
         ("collection_target_started", "开始处理目标"),
         ("collection_target_finished", "目标处理完成"),
         ("job_created", "已创建采集任务"),
+        ("job_started", "已启动采集任务"),
+        ("job_updated", "已更新采集任务"),
         ("job_stop_requested", "已请求停止采集任务"),
         ("job_deleted", "已删除采集任务"),
         ("collection_run_deleted", "已删除运行实例"),
@@ -469,6 +471,43 @@ def test_event_view_preserves_alert_level_in_summary(
 
     assert text in view.summary
     assert view.subject == "系统事件"
+
+
+@pytest.mark.parametrize(
+    ("event_type", "level", "target", "summary"),
+    [
+        (
+            "werss_authorization_test_succeeded", "info", "werss",
+            "WeRSS 管理凭据测试成功",
+        ),
+        (
+            "werss_authorization_test_succeeded", "info", "email",
+            "授权提醒测试邮件发送成功",
+        ),
+        (
+            "werss_authorization_test_failed", "warning", "werss",
+            "WARN · WeRSS 管理凭据测试失败",
+        ),
+        (
+            "werss_authorization_test_failed", "warning", "email",
+            "WARN · 授权提醒测试邮件发送失败",
+        ),
+        (
+            "werss_authorization_test_succeeded", "info", "unknown",
+            "授权提醒连接测试成功",
+        ),
+    ],
+)
+def test_authorization_test_event_summary_distinguishes_target(
+    tmp_path: Path, event_type: str, level: str, target: str, summary: str,
+) -> None:
+    service = RuntimeMonitorService(Repo(), tmp_path, heartbeat_ttl_seconds=30)
+    event = RuntimeEvent(
+        1, None, None, None, None, None, level, event_type, None, "safe",
+        json.dumps({"target": target}), "admin", "admin", NOW,
+    )
+
+    assert service.to_event_view(event).summary == summary
 
 
 def test_misfire_event_shows_missed_schedule_count(tmp_path: Path) -> None:

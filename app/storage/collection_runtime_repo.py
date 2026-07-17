@@ -585,7 +585,8 @@ _LOCK_NEXT_DUE = text(
         effective_end_at, daily_window_start, daily_window_end,
         interval_seconds, next_run_at,
         (SELECT COUNT(*) FROM wechat_collection_job_target target
-         WHERE target.job_id = wechat_collection_job.id) AS target_total_count
+         WHERE target.job_id = wechat_collection_job.id
+           AND target.is_active = 1) AS target_total_count
     FROM wechat_collection_job
     WHERE status IN ('scheduled', 'active')
       AND next_run_at <= :now
@@ -625,6 +626,7 @@ _SELECT_TARGET_SNAPSHOTS = text(
         config_snapshot_json
     FROM wechat_collection_job_target
     WHERE job_id = :job_id
+      AND is_active = 1
     ORDER BY priority_snapshot ASC, target_name_snapshot ASC, id ASC
     """
 )

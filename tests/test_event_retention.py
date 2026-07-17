@@ -28,9 +28,11 @@ def test_rules_are_disjoint_and_preserve_audit_events() -> None:
     error, _ = _rule("warning_error", cutoff)
     audit, _ = _rule("audit", cutoff)
     assert "collection_target_started" in verbose
-    assert "NOT IN" in info and "job_created" in info
+    assert "NOT IN" in info and "job_created" in info and "job_started" in info
+    assert "job_updated" in info
     assert "level IN ('warning','error')" in error and "NOT IN" in error
-    assert "event_type IN" in audit and "job_created" in audit
+    assert "event_type IN" in audit and "job_created" in audit and "job_started" in audit
+    assert "job_updated" in audit
     assert "collection_run_deleted" in audit
 
 

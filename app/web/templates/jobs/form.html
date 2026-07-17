@@ -1,13 +1,17 @@
 {% extends "base.html" %}
-{% block title %}创建采集任务 · WeInsight{% endblock %}
+{% block title %}{{ "编辑" if mode == "edit" else "创建" }}采集任务 · WeInsight{% endblock %}
 {% block content %}
   <section class="content-panel source-form-panel job-form-panel">
     <div class="page-heading form-heading"><div><a class="back-link" href="/jobs">返回采集任务</a>
-    <h1>创建采集任务</h1>
-    <p class="muted">一个任务只能选择同一采集链路中的一个或多个目标。</p></div></div>
-    <nav class="section-tabs job-pipeline-tabs" aria-label="选择采集链路">
-      <a href="/jobs/new?pipeline=group" {% if pipeline.value == "group" %}aria-current="page"{% endif %}>微信群任务</a>
-    </nav>
+    <h1>{{ "编辑" if mode == "edit" else "创建" }}采集任务</h1>
+    <p class="muted">{% if mode == "edit" %}保存后任务仍保持已停止，确认配置后可重新启动。{% else %}一个任务只能选择同一采集链路中的一个或多个目标。{% endif %}</p></div></div>
+    {% if mode != "edit" %}
+      <nav class="section-tabs job-pipeline-tabs" aria-label="选择采集链路">
+        <a href="/jobs/new?pipeline=group" {% if pipeline.value == "group" %}aria-current="page"{% endif %}>微信群任务</a>
+      </nav>
+    {% else %}
+      <p class="schedule-note">采集链路：{{ "微信群" if pipeline.value == "group" else "公众号" }}。编辑时不可修改链路。</p>
+    {% endif %}
     {% if error %}<p class="notice error" role="alert">{{ error }}</p>{% endif %}
     {% if job_names %}
       <h2 class="section-title">发生重叠的任务</h2>
@@ -15,9 +19,10 @@
         {% for name in job_names %}<li>{{ name }}</li>{% endfor %}
       </ul>
     {% endif %}
-    <form method="post" action="/jobs" class="source-form">
+    <form method="post" action="{% if mode == 'edit' %}/jobs/{{ job_id }}/edit{% else %}/jobs{% endif %}" class="source-form">
       <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
       <input type="hidden" name="pipeline_type" value="{{ pipeline.value }}">
+      {% if mode == "edit" %}<input type="hidden" name="version" value="{{ version }}">{% endif %}
       <label for="job-name">任务名称</label>
       <input id="job-name" name="job_name" maxlength="200" value="{{ values.job_name }}" required>
       <fieldset class="target-fieldset">
@@ -72,8 +77,8 @@
       </div>
       <p class="schedule-note">每日窗口开始时间等于结束时间表示全天；开始时间晚于结束时间表示跨午夜。所有时间均按 Asia/Shanghai 解释。</p>
       <div class="form-actions">
-        <button type="submit" {% if not targets %}disabled{% endif %}>创建任务</button>
-        <a class="button secondary" href="/jobs">取消</a>
+        <button type="submit" {% if not targets %}disabled{% endif %}>{{ "保存修改" if mode == "edit" else "创建任务" }}</button>
+        <a class="button secondary" href="{% if mode == 'edit' %}/jobs/{{ job_id }}{% else %}/jobs{% endif %}">取消</a>
       </div>
     </form>
   </section>
