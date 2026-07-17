@@ -120,11 +120,12 @@ def test_group_rename_locks_and_rechecks_in_one_transaction() -> None:
     assert "WHERE id = :source_id" in statements[-1]
 
 
-def test_delete_locks_and_rechecks_disabled_and_all_references() -> None:
+def test_delete_detaches_only_deleted_job_targets_before_deleting_source() -> None:
     engine = Engine(
         [
             Result(rows=[{"id": 7, "source_name": "旧群名", "enabled": 0}]),
             Result(rows=[]),
+            Result(),
             Result(),
         ]
     )
@@ -135,9 +136,13 @@ def test_delete_locks_and_rechecks_disabled_and_all_references() -> None:
     statements = [sql for sql, _ in engine.connection.executions]
     assert "FOR UPDATE" in statements[0]
     assert "job.status IN" not in statements[1]
+    assert "job.status <> 'deleted'" in statements[1]
     assert "FOR SHARE" in statements[1]
-    assert "DELETE FROM wechat_group_config" in statements[2]
-    assert "enabled = 0" in statements[2]
+    assert "UPDATE wechat_collection_job_target AS target" in statements[2]
+    assert "SET target.group_config_id = NULL" in statements[2]
+    assert "job.status = 'deleted'" in statements[2]
+    assert "DELETE FROM wechat_group_config" in statements[3]
+    assert "enabled = 0" in statements[3]
 
 
 def test_article_rename_checks_article_raw_with_current_locking_read() -> None:

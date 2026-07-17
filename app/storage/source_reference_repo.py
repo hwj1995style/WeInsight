@@ -68,7 +68,7 @@ def _referencing_jobs_statement(
     active_predicate = (
         "AND job.status IN ('scheduled', 'active', 'stop_requested')"
         if active_only
-        else ""
+        else "AND job.status <> 'deleted'"
     )
     lock_clause = "FOR SHARE" if lock_rows else ""
     return text(

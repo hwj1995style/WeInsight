@@ -122,7 +122,7 @@ TABLE_RULES = {
     "wechat_collection_job_target": (
         "UNIQUE KEY uk_job_group_target (job_id, group_config_id)",
         "UNIQUE KEY uk_job_article_target (job_id, article_config_id)",
-        "CONSTRAINT ck_job_target_exactly_one CHECK ((group_config_id IS NOT NULL AND article_config_id IS NULL) OR (group_config_id IS NULL AND article_config_id IS NOT NULL))",
+        "CONSTRAINT ck_job_target_at_most_one CHECK (group_config_id IS NULL OR article_config_id IS NULL)",
         "CONSTRAINT fk_job_target_job FOREIGN KEY (job_id) REFERENCES wechat_collection_job(id) ON DELETE RESTRICT",
         "CONSTRAINT fk_job_target_group FOREIGN KEY (group_config_id) REFERENCES wechat_group_config(id) ON DELETE RESTRICT",
         "CONSTRAINT fk_job_target_article FOREIGN KEY (article_config_id) REFERENCES wechat_public_account_config(id) ON DELETE RESTRICT",
@@ -319,8 +319,8 @@ def test_schema_validation_rejects_removed_contract_fragment(
             "CONSTRAINT ck_collection_job_pipeline CHECK (pipeline_type IS NOT NULL)",
         ),
         (
-            "CONSTRAINT ck_job_target_exactly_one CHECK (\n        (group_config_id IS NOT NULL AND article_config_id IS NULL)\n        OR (group_config_id IS NULL AND article_config_id IS NOT NULL)\n    )",
-            "CONSTRAINT ck_job_target_exactly_one CHECK (group_config_id IS NOT NULL OR article_config_id IS NOT NULL)",
+            "CONSTRAINT ck_job_target_at_most_one CHECK (\n        group_config_id IS NULL OR article_config_id IS NULL\n    )",
+            "CONSTRAINT ck_job_target_at_most_one CHECK (\n        group_config_id IS NULL OR article_config_id IS NULL OR group_config_id IS NOT NULL\n    )",
         ),
     ],
 )

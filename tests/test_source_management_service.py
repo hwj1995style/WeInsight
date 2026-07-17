@@ -512,7 +512,7 @@ def test_reference_repo_uses_fixed_columns_and_active_statuses() -> None:
     assert params == {"source_id": 7}
 
 
-def test_reference_repo_supports_article_and_all_statuses() -> None:
+def test_reference_repo_supports_article_and_excludes_deleted_jobs() -> None:
     engine = QueryEngine([QueryResult(rows=[{"job_name": "历史任务"}])])
     repo = MysqlSourceReferenceRepo(engine)
 
@@ -520,6 +520,7 @@ def test_reference_repo_supports_article_and_all_statuses() -> None:
     sql, params = engine.connection.executions[0]
     assert "target.article_config_id = :source_id" in sql
     assert "job.status IN" not in sql
+    assert "job.status <> 'deleted'" in sql
     assert params == {"source_id": 9}
 
 

@@ -99,3 +99,19 @@ def test_legacy_article_daily_report_task_migration_retires_without_deleting() -
     assert "status IN ('pending', 'running', 'failed')" in sql
     for destructive in ("DELETE FROM", "DROP TABLE", "TRUNCATE TABLE"):
         assert destructive not in sql.upper()
+
+
+def test_deleted_job_source_reference_migration_is_idempotent_and_preserves_history() -> None:
+    path = Path(
+        "sql/migrations/20260717_001_release_deleted_job_source_references.sql"
+    )
+    sql = path.read_text(encoding="utf-8")
+
+    assert "information_schema.TABLE_CONSTRAINTS" in sql
+    assert "DROP CHECK ck_job_target_exactly_one" in sql
+    assert "ADD CONSTRAINT ck_job_target_at_most_one" in sql
+    assert "CHECK (group_config_id IS NULL OR article_config_id IS NULL)" in sql
+    assert "DROP FOREIGN KEY" not in sql
+    assert "ON DELETE SET NULL" not in sql
+    for destructive in ("DELETE FROM", "DROP TABLE", "TRUNCATE TABLE"):
+        assert destructive not in sql.upper()
