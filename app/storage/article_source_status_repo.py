@@ -55,8 +55,21 @@ class MysqlArticleSourceStatusRepo:
             latest_collect_log_time=row["latest_collect_log_time"],
         ) for row in rows]
 
+    def count_status_sources(self) -> int:
+        with self.engine.begin() as connection:
+            value = connection.execute(_COUNT_STATUS_SQL).scalar_one()
+        return int(value)
+
 
 # Every one-to-many table is reduced to one row per account before joining.
+_COUNT_STATUS_SQL = text("""
+SELECT COUNT(*)
+FROM wechat_public_account_config
+WHERE werss_source_id IS NOT NULL
+  AND upstream_status IN ('active', 'disabled')
+""")
+
+
 _LIST_STATUS_SQL = text("""
 WITH raw_stats AS (
     SELECT account_name, COUNT(*) AS article_count,

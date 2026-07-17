@@ -23,6 +23,7 @@ from app.services.runtime_monitor_service import (
     RunTrendBucket,
     RuntimeDashboardSnapshot,
     TodayRunCounts,
+    WorkerHeartbeatView,
 )
 from app.storage import dashboard_repo
 from app.storage.dashboard_repo import MysqlDashboardRepo
@@ -54,6 +55,18 @@ class FakeRuntimeDashboardService:
         self.snapshot = RuntimeDashboardSnapshot(
             live_collector_count=1,
             total_worker_count=2,
+            workers=(
+                WorkerHeartbeatView(
+                    "pipeline-current", "pipeline", "HOST-A", 101,
+                    "pipeline-worker-v1", "running", current,
+                    current - timedelta(hours=1), "safe pipeline error", True,
+                ),
+                WorkerHeartbeatView(
+                    "collector-current", "collector", "HOST-A", 102,
+                    "managed-collector-v1", "running", current,
+                    current - timedelta(hours=2), None, True,
+                ),
+            ),
             latest_wechat_status=WechatHealthStatus.OK,
             latest_wechat_checked_at=current,
             ui_lock_state="live",
@@ -154,7 +167,7 @@ def authenticated_client(raw_client: TestClient) -> TestClient:
     return raw_client
 
 
-def test_dashboard_renders_aggregated_kpis_and_conserving_fallback_table(
+def test_dashboard_renders_grouped_overview_cards_without_duplicate_tables(
     authenticated_client: TestClient,
     dashboard_service: FakeDashboardService,
 ) -> None:
@@ -167,11 +180,12 @@ def test_dashboard_renders_aggregated_kpis_and_conserving_fallback_table(
         "日报", "report_generation",
     ):
         assert text in response.text
-    assert 'data-success="12"' in response.text
-    assert 'data-failed="2"' in response.text
-    assert 'data-skipped="1"' in response.text
-    assert 'data-total="15"' in response.text
-    assert "12 + 2 + 1 = 15" in response.text
+    assert response.text.count('<article class="overview-card ') == 2
+    assert response.text.count('class="overview-card-group') == 3
+    for heading in ("系统运行", "任务运行", "采集结果", "配置与产出"):
+        assert heading in response.text
+    assert "逐小时运行终态守恒表" not in response.text
+    assert "采集结果文本明细" not in response.text
     for forbidden in (
         "raw_content",
         "wechat_group_msg_raw",
@@ -187,13 +201,57 @@ def test_dashboard_uses_direction_a_layout(authenticated_client: TestClient) -> 
 
     assert response.status_code == 200
     for class_name in (
-        "dashboard-primary-kpis",
-        "dashboard-secondary-kpis",
+        "dashboard-overview-grid",
+        "overview-card",
+        "overview-metric-grid",
+        "overview-system-grid",
+        "overview-business-grid",
         "dashboard-chart-grid",
         "dashboard-backlog",
     ):
         assert class_name in response.text
     assert "管理控制台" not in response.text
+
+
+def test_dashboard_renders_latest_workers_as_cards_with_error_dialog(
+    authenticated_client: TestClient,
+) -> None:
+    response = authenticated_client.get("/dashboard")
+
+    assert response.status_code == 200
+    assert 'id="worker-status"' in response.text
+    assert response.text.count('<section class="overview-worker ') == 2
+    assert 'class="worker-status-section"' not in response.text
+    assert 'class="worker-status-card' not in response.text
+    assert "Pipeline" in response.text
+    assert "Collector" in response.text
+    assert "最近心跳" in response.text
+    assert "启动时间" in response.text
+    assert "无当前错误" in response.text
+    assert "查看错误" in response.text
+    assert "safe pipeline error" in response.text
+    assert '<dialog class="worker-error-dialog"' in response.text
+    assert 'href="/workers"' not in response.text
+
+
+def test_dashboard_keeps_missing_worker_type_visible(
+    authenticated_client: TestClient,
+    runtime_service: FakeRuntimeDashboardService,
+) -> None:
+    runtime_service.snapshot = replace(
+        runtime_service.snapshot,
+        workers=tuple(
+            worker
+            for worker in runtime_service.snapshot.workers
+            if worker.worker_type == "collector"
+        ),
+    )
+
+    response = authenticated_client.get("/dashboard")
+
+    assert response.status_code == 200
+    assert "Pipeline" in response.text
+    assert "未注册" in response.text
 
 
 def test_dashboard_uses_direction_a_echarts_theme(
@@ -206,7 +264,7 @@ def test_dashboard_uses_direction_a_echarts_theme(
     assert "animation: false" in response.text
 
 
-def test_dashboard_has_one_accessible_horizontal_chart_and_text_fallback(
+def test_dashboard_has_one_accessible_horizontal_chart_without_duplicate_table(
     authenticated_client: TestClient,
 ) -> None:
     response = authenticated_client.get("/dashboard")
@@ -219,10 +277,10 @@ def test_dashboard_has_one_accessible_horizontal_chart_and_text_fallback(
     assert "show: true" in response.text
     assert "animation: false" in response.text
     assert "window.addEventListener('resize'" in response.text
-    assert "采集结果文本明细" in response.text
+    assert "采集结果文本明细" not in response.text
 
 
-def test_dashboard_renders_live_runtime_kpis_and_24_hour_terminal_conservation(
+def test_dashboard_renders_grouped_runtime_metrics_and_24_hour_trend(
     authenticated_client: TestClient,
     runtime_service: FakeRuntimeDashboardService,
 ) -> None:
@@ -230,15 +288,15 @@ def test_dashboard_renders_live_runtime_kpis_and_24_hour_terminal_conservation(
 
     assert response.status_code == 200
     assert len(runtime_service.calls) == 1
-    for text in ("1 / 2", "微信状态", "UI 锁", "运行中 2", "停止中 1"):
+    for text in ("Pipeline", "Collector", "微信状态", "正常", "UI 锁", "运行中 2", "停止中 1"):
         assert text in response.text
-    assert response.text.count('data-trend-total="') == 24
-    assert 'data-trend-success="3"' in response.text
-    assert 'data-trend-failed="2"' in response.text
-    assert 'data-trend-cancelled="1"' in response.text
-    assert 'data-trend-total="6"' in response.text
+    assert "2 / 2" not in response.text
+    assert ">ok<" not in response.text
+    assert "查看 Worker 状态" not in response.text
+    assert 'href="#worker-status"' not in response.text
     assert response.text.count('id="run-trend-chart"') == 1
     assert "24 小时运行终态趋势" in response.text
+    assert "逐小时运行终态守恒表" not in response.text
     assert "运行中" not in response.text.split(
         'id="run-trend-chart-data"', 1
     )[-1].split("</script>", 1)[0]
@@ -283,9 +341,8 @@ def test_dashboard_zero_data_is_safe_and_kpis_survive_chart_failure(
 
     assert response.status_code == 200
     assert "当前没有待处理任务" in response.text
-    assert "0 + 0 + 0 = 0" in response.text
     assert "if (!window.echarts" in response.text
-    assert "采集结果图表未加载；上方指标和下方文本表仍可使用。" in response.text
+    assert "采集结果图表未加载；请稍后刷新。" in response.text
 
 
 def test_dashboard_requires_authentication(raw_client: TestClient) -> None:

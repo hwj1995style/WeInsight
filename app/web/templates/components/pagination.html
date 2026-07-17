@@ -1,0 +1,16 @@
+{% if pagination.total_pages > 1 %}
+<nav class="pagination" aria-label="{{ pagination_label }}">
+  <span class="pagination-status">第 {{ pagination.page }} / {{ pagination.total_pages }} 页，共 {{ pagination.total_count }} 条</span>
+  <form class="pagination-jump" method="get" action="{{ pagination.action }}">
+    {% for name, value in pagination.query.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+    <label>跳至 <input type="number" name="page" min="1" max="{{ pagination.total_pages }}" value="{{ pagination.page }}" required aria-label="指定页码"> 页</label>
+    <button class="button secondary compact" type="submit">跳转</button>
+  </form>
+  <div class="pagination-links">
+    {% if pagination.first_url %}<a class="button secondary compact" href="{{ pagination.first_url }}">首页</a>{% else %}<span class="button compact is-disabled" aria-disabled="true">首页</span>{% endif %}
+    {% if pagination.previous_url %}<a class="button secondary compact" href="{{ pagination.previous_url }}">上一页</a>{% else %}<span class="button compact is-disabled" aria-disabled="true">上一页</span>{% endif %}
+    {% if pagination.next_url %}<a class="button secondary compact" href="{{ pagination.next_url }}">下一页</a>{% else %}<span class="button compact is-disabled" aria-disabled="true">下一页</span>{% endif %}
+    {% if pagination.last_url %}<a class="button secondary compact" href="{{ pagination.last_url }}">尾页</a>{% else %}<span class="button compact is-disabled" aria-disabled="true">尾页</span>{% endif %}
+  </div>
+</nav>
+{% endif %}

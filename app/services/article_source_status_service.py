@@ -10,6 +10,7 @@ from app.storage.collection_event_repo import sanitize_output
 
 class ArticleSourceStatusRepo(Protocol):
     def list_status_page(self, *, limit: int, offset: int) -> list[ArticleSourceStatusRecord]: ...
+    def count_status_sources(self) -> int: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +40,7 @@ class ArticleSourceStatusPage:
     page_size: int
     has_previous: bool
     has_next: bool
+    total_count: int = 0
 
 
 class ArticleSourceStatusService:
@@ -49,10 +51,15 @@ class ArticleSourceStatusService:
     def list_page(self, page: int, page_size: int, now: datetime) -> ArticleSourceStatusPage:
         self._validate_page(page, page_size)
         records = self.repo.list_status_page(limit=page_size + 1, offset=(page - 1) * page_size)
+        counter = getattr(self.repo, "count_status_sources", None)
+        inferred_count = (page - 1) * page_size + min(len(records), page_size)
+        if len(records) > page_size:
+            inferred_count += 1
+        total_count = max(counter() if callable(counter) else 0, inferred_count)
         return ArticleSourceStatusPage(
             items=tuple(self.to_status(item, now) for item in records[:page_size]),
             page=page, page_size=page_size, has_previous=page > 1,
-            has_next=len(records) > page_size,
+            has_next=page * page_size < total_count, total_count=total_count,
         )
 
     def to_status(self, record: ArticleSourceStatusRecord, now: datetime) -> ArticleSourceStatusRow:

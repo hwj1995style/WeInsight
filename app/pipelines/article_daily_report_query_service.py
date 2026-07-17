@@ -64,6 +64,9 @@ class ArticleDailyReportQueryRepo(Protocol):
     def get_daily_report(self, report_date: date, account_name: str) -> ArticleDailyReportDetail | None:
         ...
 
+    def count_daily_reports(self, report_date: date, account_name: str | None) -> int:
+        ...
+
 
 class ArticleDailyReportQueryService:
     def __init__(
@@ -97,6 +100,9 @@ class ArticleDailyReportQueryService:
 
     def get_report(self, report_date: date, account_name: str) -> ArticleDailyReportDetail | None:
         return self.repo.get_daily_report(report_date=report_date, account_name=account_name)
+
+    def count_reports(self, report_date: date, account_name: str | None) -> int:
+        return self.repo.count_daily_reports(report_date, account_name)
 
     def export_report(
         self,

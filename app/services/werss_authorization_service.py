@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Protocol
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
+from app.domain.collection_jobs import APPLICATION_TIMEZONE
 from app.domain.werss_authorization import (
     AuthorizationNotice,
     WeRSSAuthorizationSnapshot,
@@ -18,6 +20,9 @@ from app.integrations.werss_authorization import (
     WeRSSAuthorizationError,
 )
 from app.domain.werss_authorization import AuthorizationSettingsCommand
+
+
+_ZONE = ZoneInfo(APPLICATION_TIMEZONE)
 
 
 class AuthorizationRepo(Protocol):
@@ -129,13 +134,13 @@ class WeRSSAuthorizationService:
         with self._lock:
             if self._cache and now - self._cache[0] < timedelta(seconds=30):
                 return self._cache[1]
-        state = self.repo.get_state()
+        state = self._normalize_snapshot(self.repo.get_state())
         with self._lock:
             self._cache = (now, state)
         return state
 
     def refresh(self, now: datetime) -> WeRSSAuthorizationSnapshot:
-        previous = self.repo.get_state()
+        previous = self._normalize_snapshot(self.repo.get_state())
         try:
             upstream = self.client.fetch_status()
             snapshot = self._snapshot_from_upstream(upstream, now)
@@ -173,10 +178,17 @@ class WeRSSAuthorizationService:
             return None
         stale = snapshot.status == "unavailable"
         effective_status = snapshot.status
+        expires_at = (
+            None
+            if snapshot.expires_at is None
+            else _authorization_datetime(snapshot.expires_at)
+        )
         if stale and snapshot.expires_at:
-            effective_status = self._status_for_expiry(snapshot.expires_at, now)
-        if effective_status == "expiring" and snapshot.expires_at:
-            remaining = max(snapshot.expires_at - now, timedelta())
+            effective_status = self._status_for_expiry(expires_at, now)
+        if effective_status == "expiring" and expires_at:
+            remaining = max(
+                expires_at - _authorization_datetime(now), timedelta()
+            )
             hours = int(remaining.total_seconds() // 3600)
             minutes = int((remaining.total_seconds() % 3600) // 60)
             return AuthorizationAlert(f"公众号授权将在 {hours}小时{minutes}分 后到期", "expiring", stale)
@@ -222,18 +234,23 @@ class WeRSSAuthorizationService:
 
     def _snapshot_from_upstream(self, upstream: WeRSSAuthorizationUpstreamState, now: datetime) -> WeRSSAuthorizationSnapshot:
         status = "unauthorized"
-        if upstream.expires_at is not None:
-            status = self._status_for_expiry(upstream.expires_at, now)
+        expires_at = (
+            None
+            if upstream.expires_at is None
+            else _authorization_datetime(upstream.expires_at)
+        )
+        if expires_at is not None:
+            status = self._status_for_expiry(expires_at, now)
         elif upstream.logged_in:
             status = "unavailable"
         return WeRSSAuthorizationSnapshot(
             status=status,
             account_name=upstream.account_name,
-            expires_at=upstream.expires_at,
+            expires_at=expires_at,
             last_checked_at=now,
             last_successful_check_at=now,
             last_error_code=None if status != "unavailable" else "werss_expiry_missing",
-            authorization_version=authorization_version(upstream.account_name, upstream.expires_at),
+            authorization_version=authorization_version(upstream.account_name, expires_at),
         )
 
     def _apply_management_credentials(self) -> None:
@@ -246,12 +263,23 @@ class WeRSSAuthorizationService:
         self.client.set_management_credentials(username, password)
 
     def _status_for_expiry(self, expires_at: datetime, now: datetime) -> str:
-        remaining = expires_at - now
+        remaining = (
+            _authorization_datetime(expires_at)
+            - _authorization_datetime(now)
+        )
         if remaining <= timedelta():
             return "expired"
         if remaining <= self.warning_threshold:
             return "expiring"
         return "valid"
+
+    def _normalize_snapshot(
+        self, snapshot: WeRSSAuthorizationSnapshot | None
+    ) -> WeRSSAuthorizationSnapshot | None:
+        if snapshot is None or snapshot.expires_at is None:
+            return snapshot
+        normalized = _authorization_datetime(snapshot.expires_at)
+        return replace(snapshot, expires_at=normalized)
 
     def _deliver_one(self, now: datetime, snapshot: WeRSSAuthorizationSnapshot) -> None:
         if not self.email_enabled:
@@ -303,3 +331,9 @@ class DisabledWeRSSAuthorizationService:
 
     def public_settings(self):
         return None
+
+
+def _authorization_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=_ZONE)
+    return value.astimezone(_ZONE)

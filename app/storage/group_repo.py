@@ -384,6 +384,13 @@ class MysqlGroupConfigRepo:
             ).mappings().all()
         return [self._record_from_row(row) for row in rows]
 
+    def count_groups(self) -> int:
+        with self.engine.begin() as connection:
+            value = connection.execute(
+                text("SELECT COUNT(*) FROM wechat_group_config")
+            ).scalar_one()
+        return int(value)
+
     def list_enabled_groups_for_job(
         self, *, limit: int
     ) -> list[GroupConfigRecord]:

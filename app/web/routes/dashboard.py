@@ -70,6 +70,30 @@ async def dashboard(request: Request) -> Response:
         f"失败或异常终止 {sum(trend_data['failed'])}，"
         f"取消 {sum(trend_data['cancelled'])}。"
     )
+    workers_by_type = {worker.worker_type: worker for worker in runtime.workers}
+    wechat_status_label = (
+        {
+            "ok": "正常",
+            "not_running": "未运行",
+            "not_logged_in": "未登录",
+            "version_mismatch": "版本不匹配",
+            "window_unavailable": "窗口不可用",
+            "rpa_unavailable": "自动化不可用",
+        }.get(runtime.latest_wechat_status.value, "异常")
+        if runtime.latest_wechat_status
+        else "暂无"
+    )
+    worker_cards = tuple(
+        {
+            "worker_type": worker_type,
+            "label": label,
+            "worker": workers_by_type.get(worker_type),
+        }
+        for worker_type, label in (
+            ("pipeline", "Pipeline"),
+            ("collector", "Collector"),
+        )
+    )
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
@@ -80,6 +104,8 @@ async def dashboard(request: Request) -> Response:
             "chart_summary": chart_summary,
             "runtime": runtime,
             "runtime_available": runtime_available,
+            "wechat_status_label": wechat_status_label,
+            "worker_cards": worker_cards,
             "trend_data": trend_data,
             "trend_summary": trend_summary,
         },

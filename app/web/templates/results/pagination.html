@@ -1,4 +1,1 @@
-<nav class="pagination" aria-label="分页">
-  <span>第 {{ page.page }} / {{ total_pages }} 页，共 {{ page.total_count }} 条</span>
-  <div>{% if previous_url %}<a class="button secondary compact" href="{{ previous_url }}">上一页</a>{% endif %} {% if next_url %}<a class="button secondary compact" href="{{ next_url }}">下一页</a>{% endif %}</div>
-</nav>
+{% include "components/pagination.html" %}

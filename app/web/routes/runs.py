@@ -18,6 +18,7 @@ from app.services.runtime_monitor_service import (
     RunNotFoundError,
     RunOutsideVisibilityError,
 )
+from app.web.pagination import build_pagination
 
 
 TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "templates"
@@ -150,12 +151,6 @@ def _list_response(
     *,
     status_code: int = 200,
 ) -> Response:
-    previous_url = None
-    next_url = None
-    if result.page > 1:
-        previous_url = _list_url(values, result.page - 1)
-    if result.page * result.page_size < result.total_count:
-        next_url = _list_url(values, result.page + 1)
     return templates.TemplateResponse(
         request=request,
         name="runs/index.html",
@@ -167,8 +162,11 @@ def _list_response(
             "error": error,
             "pipeline_labels": PIPELINE_LABELS,
             "run_status_labels": RUN_STATUS_LABELS,
-            "previous_url": previous_url,
-            "next_url": next_url,
+            "pagination": build_pagination(
+                "/runs", values, page=result.page,
+                page_size=result.page_size, total_count=result.total_count,
+            ),
+            "pagination_label": "运行分页",
         },
         status_code=status_code,
     )

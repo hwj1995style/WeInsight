@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from math import ceil
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -14,6 +13,7 @@ from app.domain.admin_results import (
     ArticleDetailFilter,
     GroupDetailFilter,
 )
+from app.web.pagination import build_pagination
 
 
 TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "templates"
@@ -159,7 +159,6 @@ def _results_response(
     values: dict[str, str],
     **context,
 ) -> Response:
-    total_pages = max(1, ceil(result.total_count / result.page_size))
     return templates.TemplateResponse(
         request=request,
         name=template_name,
@@ -167,13 +166,11 @@ def _results_response(
             "section": "results",
             "values": values,
             "page": result,
-            "total_pages": total_pages,
-            "previous_url": _page_url(request.url.path, values, result.page - 1)
-            if result.page > 1
-            else None,
-            "next_url": _page_url(request.url.path, values, result.page + 1)
-            if result.page < total_pages
-            else None,
+            "pagination": build_pagination(
+                request.url.path, values, page=result.page,
+                page_size=result.page_size, total_count=result.total_count,
+            ),
+            "pagination_label": "结果分页",
             **context,
         },
     )

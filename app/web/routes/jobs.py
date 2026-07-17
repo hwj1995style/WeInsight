@@ -29,6 +29,7 @@ from app.services.collection_job_service import (
     JobVersionConflictError,
 )
 from app.services.runtime_monitor_service import JobRuntimeHistory
+from app.web.pagination import build_pagination
 
 
 TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "templates"
@@ -382,12 +383,6 @@ def _job_list_response(
     *,
     status_code: int = 200,
 ) -> Response:
-    previous_url = None
-    next_url = None
-    if page.page > 1:
-        previous_url = _job_list_url(values, page.page - 1)
-    if page.page * page.page_size < page.total_count:
-        next_url = _job_list_url(values, page.page + 1)
     return templates.TemplateResponse(
         request=request,
         name="jobs/index.html",
@@ -398,8 +393,11 @@ def _job_list_response(
             "values": values,
             "pipeline_labels": PIPELINE_LABELS,
             "status_labels": STATUS_LABELS,
-            "previous_url": previous_url,
-            "next_url": next_url,
+            "pagination": build_pagination(
+                "/jobs", values, page=page.page,
+                page_size=page.page_size, total_count=page.total_count,
+            ),
+            "pagination_label": "采集任务分页",
             "error": error,
         },
         status_code=status_code,

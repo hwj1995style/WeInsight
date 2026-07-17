@@ -73,11 +73,5 @@
       </div>
     {% endif %}
   </section>
-  {% if previous_url or next_url %}
-    <nav class="pagination" aria-label="采集任务分页">
-      {% if previous_url %}<a class="button secondary" href="{{ previous_url }}">上一页</a>{% endif %}
-      <span>第 {{ page.page }} 页 · 共 {{ page.total_count }} 条</span>
-      {% if next_url %}<a class="button secondary" href="{{ next_url }}">下一页</a>{% endif %}
-    </nav>
-  {% endif %}
+  {% include "components/pagination.html" %}
 {% endblock %}

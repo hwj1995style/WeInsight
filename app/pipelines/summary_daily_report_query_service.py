@@ -47,6 +47,10 @@ class SummaryDailyReportQueryRepo(Protocol):
     ) -> list[SummaryArticleDailyReport]:
         ...
 
+    def count_group_reports(self, report_date: date) -> int: ...
+
+    def count_article_reports(self, report_date: date) -> int: ...
+
 
 class SummaryDailyReportQueryService:
     def __init__(self, *, repo: SummaryDailyReportQueryRepo) -> None:
@@ -73,4 +77,10 @@ class SummaryDailyReportQueryService:
             report_date=report_date,
             group_reports=group_reports,
             article_reports=article_reports,
+        )
+
+    def count_sources(self, report_date: date) -> tuple[int, int]:
+        return (
+            self.repo.count_group_reports(report_date),
+            self.repo.count_article_reports(report_date),
         )

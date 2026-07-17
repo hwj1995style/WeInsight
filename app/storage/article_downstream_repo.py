@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.engine import Engine
 
 from app.domain.article_downstream import ArticleBackfillCommand, ArticleBackfillSummary
@@ -37,14 +37,17 @@ class MysqlArticleDownstreamRepo:
     def enqueue_backfill(
         self, command: ArticleBackfillCommand, now: datetime
     ) -> ArticleBackfillSummary:
-        scope_clause = (
-            "config.id = :source_id"
-            if command.scope == "single"
-            else "config.downstream_clean_enabled = 1"
-        )
+        if command.scope == "single":
+            scope_clause = "config.id = :source_id"
+        elif command.scope == "selected":
+            scope_clause = "config.id IN :source_ids"
+        else:
+            scope_clause = "config.downstream_clean_enabled = 1"
         params = {"start_date": command.start_date, "end_date": command.end_date}
         if command.scope == "single":
             params["source_id"] = command.source_id
+        elif command.scope == "selected":
+            params["source_ids"] = command.source_ids
 
         select_statement = text(
             f"""
@@ -74,6 +77,10 @@ class MysqlArticleDownstreamRepo:
             FOR UPDATE
             """
         )
+        if command.scope == "selected":
+            select_statement = select_statement.bindparams(
+                bindparam("source_ids", expanding=True)
+            )
 
         created_clean = recovered_clean = created_analyze = recovered_analyze = 0
         existing_skipped = running_skipped = out_of_scope = 0

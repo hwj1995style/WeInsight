@@ -7,12 +7,13 @@ from typing import Literal
 
 @dataclass(frozen=True)
 class ArticleBackfillCommand:
-    scope: Literal["single", "enabled"]
+    scope: Literal["single", "selected", "enabled"]
     source_id: int | None
     start_date: date
     end_date: date
     mode: Literal["missing_only", "force_analyze"]
     force_confirmed: bool
+    source_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)

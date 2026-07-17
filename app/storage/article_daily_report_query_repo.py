@@ -106,6 +106,18 @@ class MysqlArticleDailyReportQueryRepo:
             last_generated_by=lifecycle.last_generated_by,
         )
 
+    def count_daily_reports(self, report_date: date, account_name: str | None) -> int:
+        account_filter = "AND account_name = :account_name" if account_name else ""
+        statement = text(f"""
+            SELECT COUNT(*) FROM wechat_article_daily_report
+            WHERE report_date = :report_date {account_filter}
+        """)
+        with self.engine.begin() as connection:
+            value = connection.execute(
+                statement, {"report_date": report_date, "account_name": account_name}
+            ).scalar_one()
+        return int(value)
+
     def _summary_from_row(self, row) -> ArticleDailyReportSummary:
         lifecycle = _lifecycle_from_row(row)
         return ArticleDailyReportSummary(

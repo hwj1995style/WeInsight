@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -15,7 +16,8 @@ from app.integrations.werss_authorization import (
 from app.services.werss_authorization_service import WeRSSAuthorizationService
 
 
-NOW = datetime(2026, 7, 16, 10, 0, 0)
+ZONE = ZoneInfo("Asia/Shanghai")
+NOW = datetime(2026, 7, 16, 10, 0, 0, tzinfo=ZONE)
 
 
 def _client(handler, password=None):
@@ -221,3 +223,49 @@ def test_unavailable_refresh_retains_last_good_expiry_without_misclassifying() -
     assert snapshot.status == "unavailable"
     assert snapshot.expires_at == NOW + timedelta(days=2)
     assert snapshot.last_error_code == "werss_authorization_timeout"
+
+
+def test_service_normalizes_naive_upstream_expiry_to_shanghai() -> None:
+    repo = Repo()
+    client = Client(
+        WeRSSAuthorizationUpstreamState(
+            True,
+            "测试公众号",
+            datetime(2026, 7, 17, 9, 0, 0),
+        )
+    )
+    service = WeRSSAuthorizationService(repo, client)
+
+    snapshot = service.refresh(NOW)
+
+    assert snapshot.status == "expiring"
+    assert snapshot.expires_at == datetime(
+        2026, 7, 17, 9, 0, 0, tzinfo=ZONE
+    )
+
+    first_monitor_snapshot = service.monitor_now(NOW)
+    second_snapshot = service.monitor_now(NOW + timedelta(minutes=5))
+
+    assert first_monitor_snapshot is not None
+    assert second_snapshot is not None
+    assert second_snapshot.status == "expiring"
+    assert second_snapshot.expires_at == snapshot.expires_at
+
+
+def test_alert_normalizes_naive_expiry_loaded_from_database() -> None:
+    repo = Repo()
+    repo.state = WeRSSAuthorizationSnapshot(
+        "unavailable",
+        "测试公众号",
+        datetime(2026, 7, 17, 9, 0, 0),
+        NOW,
+        NOW,
+        "werss_authorization_timeout",
+        "v1",
+    )
+    service = WeRSSAuthorizationService(repo, Client(None))
+
+    alert = service.alert(NOW)
+
+    assert alert is not None
+    assert alert.status == "expiring"

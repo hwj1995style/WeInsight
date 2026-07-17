@@ -190,6 +190,18 @@ def test_events_page_does_not_link_target_without_run(
     assert 'href="/runs/' not in response.text
 
 
+def test_events_page_always_includes_routine_events_without_a_toggle(
+    authenticated_client: TestClient,
+    runtime_service: RuntimeService,
+) -> None:
+    response = authenticated_client.get("/events")
+
+    assert response.status_code == 200
+    assert runtime_service.calls[-1][0].include_routine is True
+    assert "日志默认展示正常轮次、运维、故障和审计事件" in response.text
+    assert "包含正常轮次" not in response.text
+
+
 def test_run_level_event_lists_specific_collection_targets(
     authenticated_client: TestClient,
     runtime_service: RuntimeService,

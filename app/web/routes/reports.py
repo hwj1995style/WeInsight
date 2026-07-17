@@ -21,6 +21,7 @@ from app.storage.report_request_repo import (
     ReportType,
 )
 from app.domain.report_lifecycle import GenerationTrigger, ReportStatus
+from app.web.pagination import build_pagination
 
 
 TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "templates"
@@ -95,9 +96,14 @@ async def reports(request: Request) -> Response:
             "source": source,
             "page": page,
             "page_size": page_size,
-            "previous_url": _page_url(values, report_date, report_type, page - 1)
-            if page > 1
-            else None,
+            "pagination": build_pagination(
+                "/reports", {
+                    "date": report_date.isoformat(), "type": report_type,
+                    "source": source or "", "page_size": str(page_size),
+                }, page=page, page_size=page_size,
+                total_count=int(context["total_count"]),
+            ),
+            "pagination_label": "日报分页",
             **context,
         },
     )
@@ -122,6 +128,15 @@ async def _load_report_context(
             len(bundle.group_reports) > page_size
             or len(bundle.article_reports) > page_size
         )
+        counter = getattr(request.app.state.summary_report_service, "count_sources", None)
+        if callable(counter):
+            group_count, article_count = await run_in_threadpool(counter, report_date)
+            total_count = max(group_count, article_count)
+        else:
+            total_count = max(
+                offset + min(len(bundle.group_reports), page_size),
+                offset + min(len(bundle.article_reports), page_size),
+            ) + (1 if has_next else 0)
         return {
             "group_reports": bundle.group_reports[:page_size],
             "article_reports": bundle.article_reports[:page_size],
@@ -129,6 +144,7 @@ async def _load_report_context(
             "detail": None,
             "safe_markdown": None,
             "source_options": (),
+            "total_count": total_count,
             "next_url": _next_url(has_next, report_date, report_type, source, page_size, offset),
             "idempotency_key": secrets.token_urlsafe(32),
             "lifecycle_labels": _LIFECYCLE_LABELS,
@@ -158,6 +174,12 @@ async def _load_report_context(
     source_options = tuple(
         sorted({str(getattr(item, source_field)) for item in source_reports})
     )
+    counter = getattr(service, "count_reports", None)
+    total_count = (
+        await run_in_threadpool(counter, report_date, source)
+        if callable(counter)
+        else len(source_reports) if source is None else len(reports[:page_size])
+    )
     has_next = len(reports) > page_size
     detail = None
     safe_markdown = None
@@ -172,6 +194,7 @@ async def _load_report_context(
         "detail": detail,
         "safe_markdown": safe_markdown,
         "source_options": source_options,
+        "total_count": total_count,
         "next_url": _next_url(
             has_next,
             report_date,

@@ -33,6 +33,7 @@ class SourcePage(Generic[SourceRecord]):
     page_size: int
     has_previous: bool
     has_next: bool
+    total_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -187,12 +188,19 @@ class SourceManagementService:
             limit=page_size + 1,
             offset=(page - 1) * page_size,
         )
+        counter = getattr(self.group_repo, "count_groups", None)
+        reported_count = counter() if callable(counter) else len(self.group_repo.list_groups())
+        inferred_count = (page - 1) * page_size + min(len(rows), page_size)
+        if len(rows) > page_size:
+            inferred_count += 1
+        total_count = max(reported_count, inferred_count)
         return SourcePage(
             items=tuple(rows[:page_size]),
             page=page,
             page_size=page_size,
             has_previous=page > 1,
-            has_next=len(rows) > page_size,
+            has_next=page * page_size < total_count,
+            total_count=total_count,
         )
 
     def list_articles_page(
@@ -203,12 +211,19 @@ class SourceManagementService:
             limit=page_size + 1,
             offset=(page - 1) * page_size,
         )
+        counter = getattr(self.article_repo, "count_accounts", None)
+        reported_count = counter() if callable(counter) else len(self.article_repo.list_accounts())
+        inferred_count = (page - 1) * page_size + min(len(rows), page_size)
+        if len(rows) > page_size:
+            inferred_count += 1
+        total_count = max(reported_count, inferred_count)
         return SourcePage(
             items=tuple(rows[:page_size]),
             page=page,
             page_size=page_size,
             has_previous=page > 1,
-            has_next=len(rows) > page_size,
+            has_next=page * page_size < total_count,
+            total_count=total_count,
         )
 
     def list_enabled_groups_for_job(
