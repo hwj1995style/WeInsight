@@ -115,3 +115,17 @@ def test_deleted_job_source_reference_migration_is_idempotent_and_preserves_hist
     assert "ON DELETE SET NULL" not in sql
     for destructive in ("DELETE FROM", "DROP TABLE", "TRUNCATE TABLE"):
         assert destructive not in sql.upper()
+
+
+def test_job_target_activation_migration_is_additive_and_idempotent() -> None:
+    path = Path(
+        "sql/migrations/20260717_002_add_job_target_activation.sql"
+    )
+    sql = path.read_text(encoding="utf-8")
+
+    assert "information_schema.COLUMNS" in sql
+    assert "ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1" in sql
+    assert "information_schema.STATISTICS" in sql
+    assert "ADD KEY idx_job_target_active (job_id, is_active)" in sql
+    for destructive in ("DELETE FROM", "DROP TABLE", "TRUNCATE TABLE"):
+        assert destructive not in sql.upper()

@@ -551,6 +551,8 @@ def _safe_event(event: RuntimeEvent) -> RuntimeEvent:
 
 _EVENT_SUMMARIES = {
     "job_created": "已创建采集任务",
+    "job_started": "已启动采集任务",
+    "job_updated": "已更新采集任务",
     "job_stop_requested": "已请求停止采集任务",
     "job_deleted": "已删除采集任务",
     "collection_run_claimed": "已领取采集运行",

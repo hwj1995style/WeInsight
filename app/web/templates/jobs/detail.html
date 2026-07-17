@@ -32,7 +32,7 @@
         {% if history.runs %}<div class="table-scroll" tabindex="0" aria-label="任务运行历史"><table class="data-table compact-table"><thead><tr><th scope="col">运行</th><th scope="col">状态</th><th scope="col">计划时间</th><th scope="col">目标</th></tr></thead><tbody>{% for run in history.runs %}<tr><th scope="row"><a href="/runs/{{ run.id }}">#{{ run.id }}</a></th><td>{{ run.status.value }}</td><td>{{ run.scheduled_at.strftime("%Y-%m-%d %H:%M:%S") }}</td><td>{{ run.target_success_count }} / {{ run.target_total_count }} 成功</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state"><p>暂无运行历史。</p></div>{% endif %}
       </section>
       <section class="content-panel">
-        <div class="panel-heading"><div><h2>最近操作事件</h2><p class="muted">任务创建、停止和运行事件。</p></div><a href="/events?job_id={{ job.id }}">查看全部</a></div>
+        <div class="panel-heading"><div><h2>最近操作事件</h2><p class="muted">任务创建、编辑、启动、停止和运行事件。</p></div><a href="/events?job_id={{ job.id }}">查看全部</a></div>
         {% if history.events %}<ol class="event-list compact-events">{% for event in history.events %}<li><time>{{ event.create_time.strftime("%m-%d %H:%M:%S") }}</time><strong>{{ event.event_type }}</strong><span>{{ event.message }}</span></li>{% endfor %}</ol>{% else %}<p class="muted">暂无操作事件。</p>{% endif %}
       </section>
     </div>
@@ -42,7 +42,9 @@
         <h2>任务操作</h2>
         {% if job.status.value == "stop_requested" %}
           <p class="muted">停止中：Worker 会在安全检查点结束当前采集，不会强制中断微信操作。</p>
-        {% elif job.status.value in ("stopped", "completed") %}
+        {% elif job.status.value == "stopped" %}
+          <p class="muted">可恢复原调度计划；删除仅隐藏任务，运行历史和采集结果会保留。</p>
+        {% elif job.status.value == "completed" %}
           <p class="muted">删除仅隐藏任务，运行历史和采集结果会保留。</p>
         {% elif job.status.value in ("scheduled", "active") %}
           <p class="muted">停止请求会等待当前安全检查点，不会强杀 RPA。</p>
@@ -56,7 +58,21 @@
           <input type="hidden" name="version" value="{{ job.version }}">
           <button class="secondary-action" type="submit">停止任务</button>
         </form>
-      {% elif job.status.value in ("stopped", "completed") %}
+      {% elif job.status.value == "stopped" %}
+        <div class="row-actions">
+          <a class="button secondary" href="/jobs/{{ job.id }}/edit">编辑任务</a>
+          <form method="post" action="/jobs/{{ job.id }}/start">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+            <input type="hidden" name="version" value="{{ job.version }}">
+            <button type="submit">启动任务</button>
+          </form>
+          <form method="post" action="/jobs/{{ job.id }}/delete" onsubmit="return confirm('删除仅隐藏任务，运行历史和采集结果会保留。确定继续吗？')">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+            <input type="hidden" name="version" value="{{ job.version }}">
+            <button class="danger-action" type="submit">删除任务</button>
+          </form>
+        </div>
+      {% elif job.status.value == "completed" %}
         <form method="post" action="/jobs/{{ job.id }}/delete" onsubmit="return confirm('删除仅隐藏任务，运行历史和采集结果会保留。确定继续吗？')">
           <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
           <input type="hidden" name="version" value="{{ job.version }}">

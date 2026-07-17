@@ -55,12 +55,34 @@
           <tbody>
             {% for job in jobs %}
               <tr>
-                <th scope="row">{{ job.job_name }}{% if job.job_name == "公众号全局增量采集（系统）" %} <small>系统管理</small>{% endif %}</th>
+                <th scope="row">{{ job.job_name }}{% if job.managed_key == "article_global" %} <small>系统管理</small>{% endif %}</th>
                 <td>{{ pipeline_labels[job.pipeline_type] }}</td>
                 <td><span class="job-status status-{{ job.status.value }}">{{ status_labels[job.status] }}</span></td>
                 <td>{{ job.target_count }}</td>
                 <td>{{ job.next_run_at.strftime("%Y-%m-%d %H:%M") if job.next_run_at else "—" }}</td>
-                <td><a class="button compact secondary" href="/jobs/{{ job.id }}">查看详情</a></td>
+                <td>
+                  <div class="row-actions">
+                    <a class="button compact secondary" href="/jobs/{{ job.id }}">查看详情</a>
+                    {% if job.managed_key != "article_global" %}
+                      {% if job.status.value in ("scheduled", "active") %}
+                        <form method="post" action="/jobs/{{ job.id }}/stop">
+                          <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                          <input type="hidden" name="version" value="{{ job.version }}">
+                          <input type="hidden" name="return_to" value="list">
+                          <button class="compact secondary-action" type="submit">停止</button>
+                        </form>
+                      {% elif job.status.value == "stopped" %}
+                        <a class="button compact secondary" href="/jobs/{{ job.id }}/edit">编辑</a>
+                        <form method="post" action="/jobs/{{ job.id }}/start">
+                          <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                          <input type="hidden" name="version" value="{{ job.version }}">
+                          <input type="hidden" name="return_to" value="list">
+                          <button class="compact" type="submit">启动</button>
+                        </form>
+                      {% endif %}
+                    {% endif %}
+                  </div>
+                </td>
               </tr>
             {% endfor %}
           </tbody>

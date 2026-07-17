@@ -17,11 +17,13 @@ from app.domain.collection_jobs import JobStatus, PipelineType
 from app.services.collection_job_service import (
     CollectionJobDetail,
     CreateCollectionJobCommand,
+    UpdateCollectionJobCommand,
     JobListFilter,
     JobMixedPipelineError,
     ManagedJobMutationError,
     JobNotFoundError,
     JobOverlapError,
+    JobScheduleExpiredError,
     JobStateTransitionError,
     JobTargetDisabledError,
     JobTargetNotFoundError,
@@ -53,6 +55,8 @@ _CREATE_COMMON_FIELDS = frozenset(
     }
 )
 _ACTION_FIELDS = frozenset({"csrf_token", "version"})
+_ACTION_OPTIONAL_FIELDS = frozenset({"return_to"})
+_EDIT_EXTRA_FIELDS = frozenset({"version"})
 _DATETIME_LOCAL_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}")
 _TIME_PATTERN = re.compile(r"[0-9]{2}:[0-9]{2}")
 _DATE_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
@@ -258,9 +262,166 @@ async def job_detail(request: Request, job_id: int) -> Response:
     return _job_detail_response(request, job, history=history)
 
 
+@router.get("/{job_id}/edit", response_class=HTMLResponse)
+async def job_edit(request: Request, job_id: int) -> Response:
+    try:
+        job = await run_in_threadpool(
+            request.app.state.job_service.get_job,
+            job_id,
+        )
+    except (JobNotFoundError, JobValidationError):
+        return _job_detail_response(
+            request,
+            None,
+            "采集任务不存在或已被删除。",
+            status_code=404,
+        )
+    if job.managed_key == "article_global":
+        return _job_detail_response(
+            request,
+            job,
+            "系统管理任务不允许人工编辑。",
+            status_code=403,
+        )
+    if job.status is not JobStatus.STOPPED:
+        return _job_detail_response(
+            request,
+            job,
+            "只有已停止任务可以编辑。",
+            status_code=409,
+        )
+    try:
+        targets = await _load_enabled_targets(request, job.pipeline_type)
+    except ValueError:
+        targets = ()
+    return _job_form_response(
+        request,
+        job.pipeline_type,
+        targets,
+        _job_edit_values(job),
+        None,
+        mode="edit",
+        job_id=job.id,
+        version=str(job.version),
+    )
+
+
+@router.post("/{job_id}/edit", response_class=HTMLResponse)
+async def job_update(request: Request, job_id: int) -> Response:
+    try:
+        values, pipeline, version = await _parse_edit_form(request)
+        command = _update_command(request, values, pipeline)
+    except ValueError as exc:
+        pipeline, values = await _create_form_echo(request)
+        return await _update_error_response(
+            request,
+            job_id,
+            pipeline,
+            values,
+            _form_validation_message(exc),
+            status_code=422,
+        )
+    service = request.app.state.job_service
+    try:
+        await run_in_threadpool(
+            service.update_job,
+            job_id,
+            command,
+            version,
+            request.state.admin.username,
+            _now(request.app.state.config.app.timezone),
+        )
+    except JobOverlapError as exc:
+        return await _update_error_response(
+            request,
+            job_id,
+            pipeline,
+            values,
+            "所选名单与现有任务的运行时间重叠。",
+            status_code=409,
+            job_names=exc.job_names,
+        )
+    except JobTargetNotFoundError:
+        return await _update_error_response(
+            request,
+            job_id,
+            pipeline,
+            values,
+            "所选名单已不存在，请刷新后重新选择。",
+            status_code=409,
+        )
+    except JobTargetDisabledError:
+        return await _update_error_response(
+            request,
+            job_id,
+            pipeline,
+            values,
+            "所选名单已停用，请刷新后重新选择。",
+            status_code=409,
+        )
+    except JobMixedPipelineError:
+        return await _update_error_response(
+            request,
+            job_id,
+            pipeline,
+            values,
+            "任务采集链路不允许修改。",
+            status_code=422,
+        )
+    except JobValidationError as exc:
+        return await _update_error_response(
+            request,
+            job_id,
+            pipeline,
+            values,
+            _job_validation_message(exc, pipeline),
+            status_code=422,
+        )
+    except JobNotFoundError:
+        return _job_detail_response(
+            request,
+            None,
+            "采集任务不存在或已被删除。",
+            status_code=404,
+        )
+    except (JobVersionConflictError, JobStateTransitionError) as exc:
+        try:
+            current = await run_in_threadpool(service.get_job, job_id)
+        except JobNotFoundError:
+            current = None
+        message = (
+            "任务状态已更新，请根据当前状态重新操作。"
+            if isinstance(exc, JobVersionConflictError)
+            else "只有已停止任务可以编辑，页面已刷新。"
+        )
+        return _job_detail_response(
+            request,
+            current,
+            message,
+            status_code=409,
+        )
+    except ManagedJobMutationError:
+        try:
+            current = await run_in_threadpool(service.get_job, job_id)
+        except JobNotFoundError:
+            current = None
+        return _job_detail_response(
+            request,
+            current,
+            "系统管理任务不允许人工编辑。",
+            status_code=403,
+        )
+    return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+
 @router.post("/{job_id}/stop", response_class=HTMLResponse)
 async def job_stop(request: Request, job_id: int) -> Response:
     return await _job_action(request, job_id, "stop")
+
+
+@router.post("/{job_id}/start", response_class=HTMLResponse)
+async def job_start(request: Request, job_id: int) -> Response:
+    return await _job_action(request, job_id, "start")
 
 
 @router.post("/{job_id}/delete", response_class=HTMLResponse)
@@ -272,10 +433,14 @@ async def _job_action(request: Request, job_id: int, action: str) -> Response:
     try:
         values = await _strict_form_values(
             request,
-            allowed=_ACTION_FIELDS,
+            allowed=_ACTION_FIELDS | _ACTION_OPTIONAL_FIELDS,
             repeated=frozenset(),
+            optional=_ACTION_OPTIONAL_FIELDS,
         )
         version = _positive_integer(values["version"], "version")
+        return_to = values.get("return_to")
+        if return_to not in {None, "list"}:
+            raise ValueError("invalid return target")
     except (KeyError, ValueError):
         return _job_detail_response(
             request,
@@ -286,7 +451,15 @@ async def _job_action(request: Request, job_id: int, action: str) -> Response:
 
     service = request.app.state.job_service
     try:
-        if action == "stop":
+        if action == "start":
+            await run_in_threadpool(
+                service.start_job,
+                job_id,
+                version,
+                request.state.admin.username,
+                _now(request.app.state.config.app.timezone),
+            )
+        elif action == "stop":
             await run_in_threadpool(
                 service.request_stop,
                 job_id,
@@ -330,6 +503,17 @@ async def _job_action(request: Request, job_id: int, action: str) -> Response:
             message,
             status_code=409,
         )
+    except JobScheduleExpiredError:
+        try:
+            current = await run_in_threadpool(service.get_job, job_id)
+        except JobNotFoundError:
+            current = None
+        return _job_detail_response(
+            request,
+            current,
+            "任务有效期已结束，无法重新启动。",
+            status_code=409,
+        )
     except ManagedJobMutationError:
         try:
             current = await run_in_threadpool(service.get_job, job_id)
@@ -338,7 +522,7 @@ async def _job_action(request: Request, job_id: int, action: str) -> Response:
         return _job_detail_response(
             request,
             current,
-            "系统管理任务不允许人工停止或删除。",
+            "系统管理任务不允许人工启动、停止或删除。",
             status_code=403,
         )
     except JobValidationError:
@@ -349,7 +533,7 @@ async def _job_action(request: Request, job_id: int, action: str) -> Response:
             status_code=422,
         )
 
-    if action == "delete":
+    if action == "delete" or return_to == "list":
         return RedirectResponse("/jobs", status_code=303)
     try:
         current = await run_in_threadpool(service.get_job, job_id)
@@ -413,6 +597,9 @@ def _job_form_response(
     *,
     status_code: int = 200,
     job_names: tuple[str, ...] = (),
+    mode: str = "create",
+    job_id: int | None = None,
+    version: str = "",
 ) -> Response:
     return templates.TemplateResponse(
         request=request,
@@ -424,6 +611,9 @@ def _job_form_response(
             "values": values,
             "error": error,
             "job_names": job_names,
+            "mode": mode,
+            "job_id": job_id,
+            "version": version,
         },
         status_code=status_code,
     )
@@ -473,6 +663,31 @@ async def _create_error_response(
     )
 
 
+async def _update_error_response(
+    request: Request,
+    job_id: int,
+    pipeline: PipelineType,
+    values: dict[str, object],
+    message: str,
+    *,
+    status_code: int,
+    job_names: tuple[str, ...] = (),
+) -> Response:
+    targets = await _safe_load_enabled_targets(request, pipeline)
+    return _job_form_response(
+        request,
+        pipeline,
+        targets,
+        values,
+        message,
+        status_code=status_code,
+        job_names=job_names,
+        mode="edit",
+        job_id=job_id,
+        version=str(values.get("version", "")),
+    )
+
+
 async def _load_enabled_targets(request: Request, pipeline: PipelineType):
     service = request.app.state.source_service
     if pipeline is PipelineType.GROUP:
@@ -508,9 +723,58 @@ def _job_form_defaults(pipeline: PipelineType, targets=()) -> dict[str, object]:
     }
 
 
+def _job_edit_values(job: CollectionJobDetail) -> dict[str, object]:
+    interval = (
+        job.schedule.interval_seconds
+        if job.pipeline_type is PipelineType.GROUP
+        else job.schedule.interval_seconds // 60
+    )
+    return {
+        "job_name": job.job_name,
+        "pipeline_type": job.pipeline_type.value,
+        "target_ids": tuple(str(value) for value in job.target_ids),
+        "effective_start_at": job.schedule.effective_start_at.strftime(
+            "%Y-%m-%dT%H:%M"
+        ),
+        "effective_end_at": job.schedule.effective_end_at.strftime(
+            "%Y-%m-%dT%H:%M"
+        ),
+        "daily_window_start": job.schedule.daily_window_start.strftime("%H:%M"),
+        "daily_window_end": job.schedule.daily_window_end.strftime("%H:%M"),
+        "interval_value": interval,
+        "version": str(job.version),
+    }
+
+
 async def _parse_create_form(
     request: Request,
 ) -> tuple[dict[str, object], PipelineType]:
+    values, pipeline, _ = await _parse_job_form(request, frozenset())
+    return values, pipeline
+
+
+async def _parse_edit_form(
+    request: Request,
+) -> tuple[dict[str, object], PipelineType, int]:
+    values, pipeline, parsed = await _parse_job_form(
+        request, _EDIT_EXTRA_FIELDS
+    )
+    version_value = parsed["version"]
+    if not isinstance(version_value, str):
+        raise ValueError("invalid version")
+    version = _positive_integer(version_value, "version")
+    values["version"] = version_value
+    return values, pipeline, version
+
+
+async def _parse_job_form(
+    request: Request,
+    extra_fields: frozenset[str],
+) -> tuple[
+    dict[str, object],
+    PipelineType,
+    dict[str, str | tuple[str, ...]],
+]:
     form = await request.form()
     pipeline_values = [
         value
@@ -527,7 +791,7 @@ async def _parse_create_form(
     )
     parsed = await _strict_form_values(
         request,
-        allowed=_CREATE_COMMON_FIELDS | {interval_field},
+        allowed=_CREATE_COMMON_FIELDS | {interval_field} | extra_fields,
         repeated=frozenset({"target_ids"}),
     )
     target_values = parsed["target_ids"]
@@ -548,7 +812,7 @@ async def _parse_create_form(
         "daily_window_end": parsed["daily_window_end"],
         "interval_value": parsed[interval_field],
     }
-    return values, pipeline
+    return values, pipeline, parsed
 
 
 async def _strict_form_values(
@@ -556,6 +820,7 @@ async def _strict_form_values(
     *,
     allowed: frozenset[str],
     repeated: frozenset[str],
+    optional: frozenset[str] = frozenset(),
 ) -> dict[str, str | tuple[str, ...]]:
     form = await request.form()
     collected: dict[str, list[str]] = {}
@@ -565,7 +830,10 @@ async def _strict_form_values(
         if not isinstance(value, str):
             raise ValueError("invalid form field")
         collected.setdefault(key, []).append(value)
-    if set(collected) != set(allowed):
+    if not optional.issubset(allowed):
+        raise ValueError("invalid optional field")
+    required = allowed - optional
+    if not required.issubset(collected) or not set(collected).issubset(allowed):
         raise ValueError("missing form field")
     result: dict[str, str | tuple[str, ...]] = {}
     for key, values in collected.items():
@@ -610,6 +878,9 @@ async def _create_form_echo(
         for value in form.getlist("target_ids")
         if isinstance(value, str)
     )
+    version = form.get("version")
+    if isinstance(version, str):
+        values["version"] = version
     return pipeline, values
 
 
@@ -633,6 +904,24 @@ def _create_command(
         daily_window_start=_local_time(str(values["daily_window_start"])),
         daily_window_end=_local_time(str(values["daily_window_end"])),
         interval_seconds=interval_seconds,
+    )
+
+
+def _update_command(
+    request: Request,
+    values: dict[str, object],
+    pipeline: PipelineType,
+) -> UpdateCollectionJobCommand:
+    created = _create_command(request, values, pipeline)
+    return UpdateCollectionJobCommand(
+        job_name=created.job_name,
+        pipeline_type=created.pipeline_type,
+        target_ids=created.target_ids,
+        effective_start_at=created.effective_start_at,
+        effective_end_at=created.effective_end_at,
+        daily_window_start=created.daily_window_start,
+        daily_window_end=created.daily_window_end,
+        interval_seconds=created.interval_seconds,
     )
 
 

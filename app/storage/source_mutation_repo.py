@@ -233,7 +233,7 @@ class MysqlSourceMutationRepo:
                       ON job.id = target.job_id
                     SET target.{target_column} = NULL
                     WHERE target.{target_column} = :source_id
-                      AND job.status = 'deleted'
+                      AND (job.status = 'deleted' OR target.is_active = 0)
                     """
                 ),
                 {"source_id": source_id},

@@ -21,6 +21,7 @@ from app.services.collection_job_service import (
     CreateCollectionJobCommand,
     JobListFilter,
     JobMixedPipelineError,
+    JobScheduleExpiredError,
     ManagedJobMutationError,
     JobNotFoundError,
     JobOverlapError,
@@ -30,7 +31,7 @@ from app.services.collection_job_service import (
     JobVersionConflictError,
     SourceSnapshot,
 )
-from app.services.collection_schedule import schedules_overlap
+from app.services.collection_schedule import next_run_at, schedules_overlap
 from app.storage.source_mutation_repo import (
     MysqlSourceWriteGuard,
     SourceGuardDisabledError,
@@ -274,6 +275,7 @@ class MysqlCollectionJobRepo:
             job_name=str(row["job_name"]),
             pipeline_type=PipelineType(str(row["pipeline_type"])),
             target_names=tuple(str(item["target_name_snapshot"]) for item in targets),
+            target_ids=tuple(int(item["source_id"]) for item in targets),
             schedule=_schedule_from_row(row),
             status=JobStatus(str(row["status"])),
             next_run_at=_optional_db_datetime(row.get("next_run_at")),
@@ -303,10 +305,12 @@ class MysqlCollectionJobRepo:
                 pipeline_type,
                 status,
                 next_run_at,
+                managed_key,
                 (
                     SELECT COUNT(*)
                     FROM wechat_collection_job_target target
                     WHERE target.job_id = wechat_collection_job.id
+                      AND target.is_active = 1
                 ) AS target_count,
                 version
             FROM wechat_collection_job
@@ -335,6 +339,161 @@ class MysqlCollectionJobRepo:
             page_size=page_size,
             total_count=total_count,
         )
+
+    def update_job(
+        self,
+        job_id: int,
+        command: CreateCollectionJobCommand,
+        expected_version: int,
+        actor: str,
+        now: datetime,
+    ) -> None:
+        source_type = command.pipeline_type.value
+        target_ids = tuple(sorted(set(command.target_ids)))
+        requested_schedule = _schedule_from_command(command)
+        with self.engine.begin() as connection:
+            row = self._lock_job(connection, job_id)
+            if row.get("managed_key") == "article_global":
+                raise ManagedJobMutationError("system-managed job cannot be mutated")
+            current = JobStatus(str(row["status"]))
+            if current is not JobStatus.STOPPED:
+                raise JobStateTransitionError(current, "update")
+            if int(row["version"]) != expected_version:
+                raise JobVersionConflictError(
+                    f"collection job version conflict: {job_id}"
+                )
+            if str(row["pipeline_type"]) != command.pipeline_type.value:
+                raise JobMixedPipelineError("collection job pipeline cannot change")
+            snapshots = [
+                self._lock_source_snapshot(
+                    connection,
+                    source_type,
+                    source_id,
+                )
+                for source_id in target_ids
+            ]
+            overlap_names = self._list_overlapping_jobs_on_connection(
+                connection,
+                command.pipeline_type,
+                target_ids,
+                requested_schedule,
+                exclude_job_id=job_id,
+            )
+            if overlap_names:
+                raise JobOverlapError(overlap_names)
+            result = connection.execute(
+                _UPDATE_JOB,
+                {
+                    "job_id": job_id,
+                    "expected_version": expected_version,
+                    "job_name": command.job_name,
+                    "effective_start_at": _to_db_datetime(
+                        command.effective_start_at
+                    ),
+                    "effective_end_at": _to_db_datetime(
+                        command.effective_end_at
+                    ),
+                    "daily_window_start": command.daily_window_start,
+                    "daily_window_end": command.daily_window_end,
+                    "interval_seconds": command.interval_seconds,
+                },
+            )
+            if int(result.rowcount or 0) != 1:
+                raise JobVersionConflictError(
+                    f"collection job version conflict: {job_id}"
+                )
+            connection.execute(_DEACTIVATE_JOB_TARGETS, {"job_id": job_id})
+            ordered_snapshots = sorted(
+                snapshots,
+                key=lambda item: (item.priority, item.source_name, item.source_id),
+            )
+            connection.execute(
+                _UPSERT_TARGET,
+                [
+                    {
+                        "job_id": job_id,
+                        "group_config_id": (
+                            snapshot.source_id
+                            if command.pipeline_type is PipelineType.GROUP
+                            else None
+                        ),
+                        "article_config_id": (
+                            snapshot.source_id
+                            if command.pipeline_type is PipelineType.ARTICLE
+                            else None
+                        ),
+                        "target_name_snapshot": snapshot.source_name,
+                        "priority_snapshot": snapshot.priority,
+                        "config_snapshot_json": snapshot.config_json,
+                        "is_active": 1,
+                    }
+                    for snapshot in ordered_snapshots
+                ],
+            )
+            self._insert_event(
+                connection,
+                job_id=job_id,
+                event_type="job_updated",
+                message="collection job configuration updated",
+                actor=actor,
+            )
+
+    def start_job(
+        self,
+        job_id: int,
+        expected_version: int,
+        actor: str,
+        now: datetime,
+    ) -> JobStatus:
+        with self.engine.begin() as connection:
+            row = self._lock_job(connection, job_id)
+            if row.get("managed_key") == "article_global":
+                raise ManagedJobMutationError("system-managed job cannot be mutated")
+            current = JobStatus(str(row["status"]))
+            if current in {JobStatus.SCHEDULED, JobStatus.ACTIVE}:
+                return current
+            if current is not JobStatus.STOPPED:
+                raise JobStateTransitionError(current, "start")
+            if int(row["version"]) != expected_version:
+                raise JobVersionConflictError(
+                    f"collection job version conflict: {job_id}"
+                )
+            schedule = _schedule_from_row(row)
+            scheduled_at = next_run_at(
+                schedule,
+                after=now - timedelta(microseconds=1),
+                anchor=schedule.effective_start_at,
+            )
+            if scheduled_at is None:
+                raise JobScheduleExpiredError(
+                    f"collection job schedule expired: {job_id}"
+                )
+            target = (
+                JobStatus.SCHEDULED
+                if now < schedule.effective_start_at
+                else JobStatus.ACTIVE
+            )
+            result = connection.execute(
+                _START_JOB,
+                {
+                    "job_id": job_id,
+                    "expected_version": expected_version,
+                    "status": target.value,
+                    "next_run_at": _to_db_datetime(scheduled_at),
+                },
+            )
+            if int(result.rowcount or 0) != 1:
+                raise JobVersionConflictError(
+                    f"collection job version conflict: {job_id}"
+                )
+            self._insert_event(
+                connection,
+                job_id=job_id,
+                event_type="job_started",
+                message=f"collection job moved to {target.value}",
+                actor=actor,
+            )
+            return target
 
     def request_stop(
         self,
@@ -495,6 +654,7 @@ class MysqlCollectionJobRepo:
         pipeline_type: PipelineType,
         target_ids: tuple[int, ...],
         schedule: ScheduleSpec,
+        exclude_job_id: int | None = None,
     ) -> list[str]:
         if not target_ids:
             return []
@@ -507,6 +667,10 @@ class MysqlCollectionJobRepo:
             f":target_id_{index}" for index in range(len(target_ids))
         )
         params: dict[str, Any] = {"pipeline_type": pipeline_type.value}
+        excluded_job_sql = ""
+        if exclude_job_id is not None:
+            params["exclude_job_id"] = exclude_job_id
+            excluded_job_sql = "AND job.id <> :exclude_job_id"
         params.update(
             {
                 f"target_id_{index}": source_id
@@ -529,6 +693,8 @@ class MysqlCollectionJobRepo:
                     ON target.job_id = job.id
                 WHERE job.pipeline_type = :pipeline_type
                   AND job.status IN ('scheduled', 'active', 'stop_requested')
+                  AND target.is_active = 1
+                  {excluded_job_sql}
                   AND target.{target_column} IN ({placeholders})
                 ORDER BY job.id ASC
                 """
@@ -604,6 +770,7 @@ def _summary_from_row(row) -> CollectionJobSummary:
         next_run_at=_optional_db_datetime(row.get("next_run_at")),
         target_count=int(row["target_count"]),
         version=int(row["version"]),
+        managed_key=row.get("managed_key"),
     )
 
 
@@ -697,7 +864,8 @@ _LOCK_SYSTEM_ARTICLE_JOB = text(
     SELECT job.id, job.status, job.next_run_at,
            GROUP_CONCAT(target.article_config_id ORDER BY target.article_config_id) AS target_ids
     FROM wechat_collection_job AS job
-    LEFT JOIN wechat_collection_job_target AS target ON target.job_id = job.id
+    LEFT JOIN wechat_collection_job_target AS target
+      ON target.job_id = job.id AND target.is_active = 1
     WHERE job.managed_key = :managed_key
       AND job.pipeline_type = 'article'
     GROUP BY job.id
@@ -859,9 +1027,12 @@ _GET_JOB = text(
 
 _GET_JOB_TARGET_NAMES = text(
     """
-    SELECT target_name_snapshot
+    SELECT
+        target_name_snapshot,
+        COALESCE(group_config_id, article_config_id) AS source_id
     FROM wechat_collection_job_target
     WHERE job_id = :job_id
+      AND is_active = 1
     ORDER BY priority_snapshot ASC, target_name_snapshot ASC, id ASC
     """
 )
@@ -869,7 +1040,16 @@ _GET_JOB_TARGET_NAMES = text(
 
 _LOCK_JOB = text(
     """
-    SELECT job.status, job.version, job.managed_key,
+    SELECT
+        job.status,
+        job.version,
+        job.managed_key,
+        job.pipeline_type,
+        job.effective_start_at,
+        job.effective_end_at,
+        job.daily_window_start,
+        job.daily_window_end,
+        job.interval_seconds,
         EXISTS(
             SELECT 1
             FROM wechat_collection_job_run run
@@ -878,6 +1058,78 @@ _LOCK_JOB = text(
     FROM wechat_collection_job job
     WHERE job.id = :job_id
     FOR UPDATE
+    """
+)
+
+
+_UPDATE_JOB = text(
+    """
+    UPDATE wechat_collection_job
+    SET job_name = :job_name,
+        effective_start_at = :effective_start_at,
+        effective_end_at = :effective_end_at,
+        daily_window_start = :daily_window_start,
+        daily_window_end = :daily_window_end,
+        interval_seconds = :interval_seconds,
+        next_run_at = NULL,
+        version = version + 1,
+        update_time = CURRENT_TIMESTAMP
+    WHERE id = :job_id
+      AND status = 'stopped'
+      AND version = :expected_version
+    """
+)
+
+
+_DEACTIVATE_JOB_TARGETS = text(
+    """
+    UPDATE wechat_collection_job_target
+    SET is_active = 0
+    WHERE job_id = :job_id
+      AND is_active = 1
+    """
+)
+
+
+_UPSERT_TARGET = text(
+    """
+    INSERT INTO wechat_collection_job_target (
+        job_id,
+        group_config_id,
+        article_config_id,
+        target_name_snapshot,
+        priority_snapshot,
+        config_snapshot_json,
+        is_active
+    ) VALUES (
+        :job_id,
+        :group_config_id,
+        :article_config_id,
+        :target_name_snapshot,
+        :priority_snapshot,
+        :config_snapshot_json,
+        :is_active
+    )
+    ON DUPLICATE KEY UPDATE
+        target_name_snapshot = VALUES(target_name_snapshot),
+        priority_snapshot = VALUES(priority_snapshot),
+        config_snapshot_json = VALUES(config_snapshot_json),
+        is_active = 1
+    """
+)
+
+
+_START_JOB = text(
+    """
+    UPDATE wechat_collection_job
+    SET status = :status,
+        next_run_at = :next_run_at,
+        stop_requested_at = NULL,
+        stop_requested_by = NULL,
+        version = version + 1,
+        update_time = CURRENT_TIMESTAMP
+    WHERE id = :job_id
+      AND version = :expected_version
     """
 )
 

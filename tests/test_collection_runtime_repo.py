@@ -155,6 +155,7 @@ def test_claim_prefers_group_uses_skip_locked_and_creates_owned_run() -> None:
     assert "next_run_at ASC, id ASC" in select_sql
     assert "status IN ('scheduled', 'active')" in select_sql
     assert "NOT EXISTS" in select_sql
+    assert "target.is_active = 1" in select_sql
     assert select_params == {
         "now": datetime(2026, 7, 10, 9, 25),
         "allow_group": True,
@@ -193,6 +194,7 @@ def test_claim_uses_persisted_target_snapshots_and_stable_order() -> None:
     assert "wechat_collection_job_target" in target_sql
     assert "target_name_snapshot" in target_sql
     assert "config_snapshot_json" in target_sql
+    assert "is_active = 1" in target_sql
     assert "wechat_group_config" not in target_sql
     assert "wechat_public_account_config" not in target_sql
     assert "ORDER BY priority_snapshot ASC, target_name_snapshot ASC, id ASC" in target_sql
