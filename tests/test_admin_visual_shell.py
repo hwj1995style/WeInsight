@@ -91,8 +91,52 @@ def test_direction_a_tokens_and_components_are_declared():
         "--color-danger:", "--radius-panel:", "--shadow-panel:",
     ):
         assert token in css
-    assert "linear-gradient" not in css
+    assert "linear-gradient" in css
     assert "backdrop-filter" not in css
+
+
+def test_tech_theme_uses_blue_violet_tokens_and_limits_green():
+    css = Path("app/web/static/app.css").read_text("utf-8")
+    for token in (
+        "--color-sidebar-deep: #051225;",
+        "--color-surface-muted: #f7faff;",
+        "--color-accent-2: #7758ff;",
+        "--color-focus: #45a6ff;",
+        "--color-success: #1677ff;",
+    ):
+        assert token in css
+
+    dashboard = Path("app/web/templates/dashboard.html").read_text("utf-8")
+    assert "#16855b" not in dashboard
+    assert "#1468f3" in dashboard
+    assert "#7758ff" in dashboard
+
+
+def test_price_matrix_and_enabled_toggle_do_not_use_green_surfaces():
+    css = Path("app/web/static/app.css").read_text("utf-8")
+    matrix = css.split(".price-matrix {", 1)[1].split(
+        "@media (prefers-reduced-motion: no-preference)", 1
+    )[0]
+    for legacy_green in (
+        "price-matrix-green", "#eaf6ee", "#f4faf6", "#d8e5dc",
+        "22 133 91", "#0b6845", "#0b5138", "#16855b",
+    ):
+        assert legacy_green not in matrix
+
+    enabled_toggle = css.split(
+        ".article-downstream .processing-toggle.is-enabled {", 1
+    )[1].split("}", 1)[0]
+    assert "var(--color-accent)" in enabled_toggle
+    assert "#2f9e5b" not in enabled_toggle
+
+
+def test_login_and_shell_include_tech_brand_treatment():
+    login = Path("app/web/templates/login.html").read_text("utf-8")
+    base = Path("app/web/templates/base.html").read_text("utf-8")
+    assert 'class="login-tech-mark"' in login
+    assert 'class="brand-signal"' in base
+    assert "20260717-tech-console" in login
+    assert "20260717-tech-console" in base
 
 
 def test_direction_a_shared_components_and_control_sizes_are_declared():
