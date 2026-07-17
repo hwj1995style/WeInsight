@@ -501,9 +501,11 @@ CREATE TABLE IF NOT EXISTS wechat_collection_job_target (
     target_name_snapshot VARCHAR(200) NOT NULL COMMENT '目标名称快照',
     priority_snapshot INT NOT NULL COMMENT '优先级快照',
     config_snapshot_json TEXT NOT NULL COMMENT '配置快照JSON',
+    is_active TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否为任务当前启用目标',
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uk_job_group_target (job_id, group_config_id),
     UNIQUE KEY uk_job_article_target (job_id, article_config_id),
+    KEY idx_job_target_active (job_id, is_active),
     CONSTRAINT ck_job_target_at_most_one CHECK (
         group_config_id IS NULL OR article_config_id IS NULL
     ),

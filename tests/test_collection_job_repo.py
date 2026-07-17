@@ -12,6 +12,7 @@ from app.services.collection_job_service import (
     CreateCollectionJobCommand,
     JobListFilter,
     JobMixedPipelineError,
+    JobScheduleExpiredError,
     ManagedJobMutationError,
     JobNotFoundError,
     JobOverlapError,
@@ -40,6 +41,23 @@ def command(**overrides) -> CreateCollectionJobCommand:
     }
     values.update(overrides)
     return CreateCollectionJobCommand(**values)
+
+
+def locked_job_row(status: JobStatus, version: int = 3, **changes):
+    row = {
+        "status": status.value,
+        "version": version,
+        "managed_key": None,
+        "has_active_run": False,
+        "pipeline_type": "group",
+        "effective_start_at": NOW.replace(tzinfo=None),
+        "effective_end_at": datetime(2026, 7, 12, 18, 0),
+        "daily_window_start": time(9, 0),
+        "daily_window_end": time(18, 0),
+        "interval_seconds": 600,
+    }
+    row.update(changes)
+    return row
 
 
 def group_row(source_id: int, name: str, priority: int, **changes):
@@ -231,6 +249,7 @@ def test_create_locks_deduplicated_sources_then_checks_overlap_before_insert() -
     assert all("FOR UPDATE" in executions[index][0] for index in (0, 1))
     assert [executions[index][1]["source_id"] for index in (0, 1)] == [7, 9]
     assert "status IN ('scheduled', 'active', 'stop_requested')" in executions[2][0]
+    assert "target.is_active = 1" in executions[2][0]
     assert "INSERT INTO wechat_collection_job" in executions[3][0]
     assert "INSERT INTO wechat_collection_job_target" in executions[4][0]
     target_params = executions[4][1]
@@ -457,6 +476,164 @@ def test_create_maps_missing_disabled_and_wrong_pipeline_to_safe_errors() -> Non
     assert "FOR SHARE" not in mixed.connection.executions[1][0]
 
 
+def test_update_stopped_job_preserves_history_and_replaces_active_targets() -> None:
+    engine = Engine([
+        Result(rows=[locked_job_row(JobStatus.STOPPED)]),
+        Result(rows=[group_row(7, "乙群", 2)]),
+        Result(rows=[group_row(9, "甲群", 1)]),
+        Result(rows=[]),
+        Result(rowcount=1),
+        Result(),
+        Result(),
+        Result(),
+    ])
+
+    MysqlCollectionJobRepo(engine).update_job(
+        11,
+        command(job_name="更新任务", target_ids=(9, 7, 9)),
+        3,
+        "admin",
+        NOW,
+    )
+
+    executions = engine.connection.executions
+    assert "FOR UPDATE" in executions[0][0]
+    assert [executions[index][1]["source_id"] for index in (1, 2)] == [7, 9]
+    assert "target.is_active = 1" in executions[3][0]
+    update_sql, update_params = executions[4]
+    assert "job_name = :job_name" in update_sql
+    assert "next_run_at = NULL" in update_sql
+    assert "version = version + 1" in update_sql
+    assert update_params["job_name"] == "更新任务"
+    deactivate_sql, deactivate_params = executions[5]
+    assert "SET is_active = 0" in deactivate_sql
+    assert deactivate_params == {"job_id": 11}
+    upsert_sql, target_params = executions[6]
+    assert "INSERT INTO wechat_collection_job_target" in upsert_sql
+    assert "ON DUPLICATE KEY UPDATE" in upsert_sql
+    assert "is_active = 1" in upsert_sql
+    assert [row["group_config_id"] for row in target_params] == [9, 7]
+    assert all(row["is_active"] == 1 for row in target_params)
+    assert not any("DELETE FROM wechat_collection_job_target" in sql for sql, _ in executions)
+    assert executions[7][1]["event_type"] == "job_updated"
+
+
+def test_update_rejects_non_stopped_version_conflict_managed_and_overlap() -> None:
+    active = Engine([Result(rows=[locked_job_row(JobStatus.ACTIVE)])])
+    with pytest.raises(JobStateTransitionError):
+        MysqlCollectionJobRepo(active).update_job(
+            11, command(), 3, "admin", NOW
+        )
+
+    conflict = Engine([Result(rows=[locked_job_row(JobStatus.STOPPED, version=4)])])
+    with pytest.raises(JobVersionConflictError):
+        MysqlCollectionJobRepo(conflict).update_job(
+            11, command(), 3, "admin", NOW
+        )
+
+    managed = Engine([Result(rows=[locked_job_row(
+        JobStatus.STOPPED, managed_key="article_global"
+    )])])
+    with pytest.raises(ManagedJobMutationError):
+        MysqlCollectionJobRepo(managed).update_job(
+            11, command(), 3, "admin", NOW
+        )
+
+    overlap = Engine([
+        Result(rows=[locked_job_row(JobStatus.STOPPED)]),
+        Result(rows=[group_row(7, "核心群", 1)]),
+        Result(rows=[group_row(9, "备用群", 2)]),
+        Result(rows=[{
+            "id": 12,
+            "job_name": "冲突任务",
+            "effective_start_at": datetime(2026, 7, 10, 9, 0),
+            "effective_end_at": datetime(2026, 7, 12, 18, 0),
+            "daily_window_start": time(9, 0),
+            "daily_window_end": time(18, 0),
+            "interval_seconds": 600,
+        }]),
+    ])
+    with pytest.raises(JobOverlapError):
+        MysqlCollectionJobRepo(overlap).update_job(
+            11, command(), 3, "admin", NOW
+        )
+    assert len(overlap.connection.executions) == 4
+
+
+def test_start_stopped_job_restores_active_schedule_and_clears_stop_metadata() -> None:
+    engine = Engine([
+        Result(rows=[locked_job_row(JobStatus.STOPPED)]),
+        Result(rowcount=1),
+        Result(),
+    ])
+
+    result = MysqlCollectionJobRepo(engine).start_job(11, 3, "admin", NOW)
+
+    assert result is JobStatus.ACTIVE
+    lock_sql, _ = engine.connection.executions[0]
+    update_sql, params = engine.connection.executions[1]
+    event_sql, event_params = engine.connection.executions[2]
+    assert "FOR UPDATE" in lock_sql
+    assert "effective_start_at" in lock_sql
+    assert "stop_requested_at = NULL" in update_sql
+    assert "stop_requested_by = NULL" in update_sql
+    assert "version = version + 1" in update_sql
+    assert params["status"] == JobStatus.ACTIVE.value
+    assert params["next_run_at"] == NOW.replace(tzinfo=None)
+    assert "wechat_collection_job_event" in event_sql
+    assert event_params["event_type"] == "job_started"
+
+
+def test_start_future_stopped_job_returns_scheduled() -> None:
+    future = datetime(2026, 7, 11, 9, 0)
+    engine = Engine([
+        Result(rows=[locked_job_row(
+            JobStatus.STOPPED,
+            effective_start_at=future,
+            effective_end_at=datetime(2026, 7, 12, 18, 0),
+        )]),
+        Result(rowcount=1),
+        Result(),
+    ])
+
+    result = MysqlCollectionJobRepo(engine).start_job(11, 3, "admin", NOW)
+
+    assert result is JobStatus.SCHEDULED
+    assert engine.connection.executions[1][1]["next_run_at"] == future
+
+
+@pytest.mark.parametrize("status", [JobStatus.SCHEDULED, JobStatus.ACTIVE])
+def test_repeated_start_is_idempotent_even_with_stale_version(status) -> None:
+    engine = Engine([Result(rows=[locked_job_row(status, version=9)])])
+
+    result = MysqlCollectionJobRepo(engine).start_job(11, 1, "admin", NOW)
+
+    assert result is status
+    assert len(engine.connection.executions) == 1
+
+
+def test_start_distinguishes_missing_conflict_illegal_and_expired_state() -> None:
+    missing = Engine([Result(rows=[])])
+    with pytest.raises(JobNotFoundError):
+        MysqlCollectionJobRepo(missing).start_job(11, 3, "admin", NOW)
+
+    conflict = Engine([Result(rows=[locked_job_row(JobStatus.STOPPED, version=4)])])
+    with pytest.raises(JobVersionConflictError):
+        MysqlCollectionJobRepo(conflict).start_job(11, 3, "admin", NOW)
+
+    illegal = Engine([Result(rows=[locked_job_row(JobStatus.STOP_REQUESTED)])])
+    with pytest.raises(JobStateTransitionError):
+        MysqlCollectionJobRepo(illegal).start_job(11, 3, "admin", NOW)
+
+    expired = Engine([Result(rows=[locked_job_row(
+        JobStatus.STOPPED,
+        effective_start_at=datetime(2026, 7, 8, 9, 0),
+        effective_end_at=datetime(2026, 7, 9, 18, 0),
+    )])])
+    with pytest.raises(JobScheduleExpiredError):
+        MysqlCollectionJobRepo(expired).start_job(11, 3, "admin", NOW)
+
+
 @pytest.mark.parametrize(
     ("current", "has_active_run", "expected", "target"),
     [
@@ -556,7 +733,7 @@ def test_repeated_delete_is_idempotent_and_active_delete_is_rejected() -> None:
         MysqlCollectionJobRepo(active).soft_delete(11, 4, "admin", NOW)
 
 
-@pytest.mark.parametrize("method", ["request_stop", "soft_delete"])
+@pytest.mark.parametrize("method", ["start_job", "request_stop", "soft_delete"])
 def test_repository_rejects_system_managed_job_mutation_under_row_lock(method) -> None:
     engine = Engine([Result(rows=[{
         "status": "active", "version": 1, "managed_key": "article_global"
@@ -589,7 +766,10 @@ def test_get_job_attaches_shanghai_timezone_and_normalizes_mysql_times() -> None
                     }
                 ]
             ),
-            Result(rows=[{"target_name_snapshot": "甲群"}, {"target_name_snapshot": "乙群"}]),
+            Result(rows=[
+                {"target_name_snapshot": "甲群", "source_id": 7},
+                {"target_name_snapshot": "乙群", "source_id": 9},
+            ]),
         ]
     )
 
@@ -601,8 +781,10 @@ def test_get_job_attaches_shanghai_timezone_and_normalizes_mysql_times() -> None
     assert detail.schedule.daily_window_end == time(18, 0)
     assert detail.next_run_at == datetime(2026, 7, 10, 9, 10, tzinfo=ZONE)
     assert detail.target_names == ("甲群", "乙群")
+    assert detail.target_ids == (7, 9)
     target_sql = engine.connection.executions[1][0]
     assert "ORDER BY priority_snapshot ASC, target_name_snapshot ASC, id ASC" in target_sql
+    assert "is_active = 1" in target_sql
     assert "raw" not in target_sql.lower()
 
 
@@ -620,6 +802,7 @@ def test_list_jobs_reuses_filter_params_escapes_like_and_has_stable_order() -> N
                         "next_run_at": datetime(2026, 7, 10, 9, 10),
                         "target_count": 2,
                         "version": 3,
+                        "managed_key": "article_global",
                     }
                 ]
             ),
@@ -641,6 +824,8 @@ def test_list_jobs_reuses_filter_params_escapes_like_and_has_stable_order() -> N
     assert "effective_start_at < :date_end_exclusive" in count_sql
     assert "effective_end_at > :date_start_inclusive" in count_sql
     assert "ORDER BY update_time DESC, id DESC" in data_sql
+    assert "managed_key" in data_sql
+    assert "target.is_active = 1" in data_sql
     assert "raw" not in data_sql.lower()
     assert count_params == {
         "pipeline_type": "group",
@@ -655,6 +840,7 @@ def test_list_jobs_reuses_filter_params_escapes_like_and_has_stable_order() -> N
         "offset": 20,
     }
     assert page.items[0].next_run_at.tzinfo == ZONE
+    assert page.items[0].managed_key == "article_global"
 
 
 def test_list_jobs_default_excludes_deleted_but_explicit_deleted_is_queryable() -> None:
