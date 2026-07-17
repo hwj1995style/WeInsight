@@ -403,6 +403,43 @@ def test_event_view_preserves_alert_level_in_summary(
     assert view.subject == "系统事件"
 
 
+@pytest.mark.parametrize(
+    ("event_type", "level", "target", "summary"),
+    [
+        (
+            "werss_authorization_test_succeeded", "info", "werss",
+            "WeRSS 管理凭据测试成功",
+        ),
+        (
+            "werss_authorization_test_succeeded", "info", "email",
+            "授权提醒测试邮件发送成功",
+        ),
+        (
+            "werss_authorization_test_failed", "warning", "werss",
+            "WARN · WeRSS 管理凭据测试失败",
+        ),
+        (
+            "werss_authorization_test_failed", "warning", "email",
+            "WARN · 授权提醒测试邮件发送失败",
+        ),
+        (
+            "werss_authorization_test_succeeded", "info", "unknown",
+            "授权提醒连接测试成功",
+        ),
+    ],
+)
+def test_authorization_test_event_summary_distinguishes_target(
+    tmp_path: Path, event_type: str, level: str, target: str, summary: str,
+) -> None:
+    service = RuntimeMonitorService(Repo(), tmp_path, heartbeat_ttl_seconds=30)
+    event = RuntimeEvent(
+        1, None, None, None, None, None, level, event_type, None, "safe",
+        json.dumps({"target": target}), "admin", "admin", NOW,
+    )
+
+    assert service.to_event_view(event).summary == summary
+
+
 def test_misfire_event_shows_missed_schedule_count(tmp_path: Path) -> None:
     service = RuntimeMonitorService(Repo(), tmp_path, heartbeat_ttl_seconds=30)
     event = RuntimeEvent(

@@ -242,7 +242,9 @@ def _format_sse_event(event: CollectionEvent) -> str:
             "run_id": event.run_id,
             "target_run_id": event.target_run_id,
             "create_time": event.create_time.isoformat(),
-            "summary": runtime_event_summary(event.event_type, event.level),
+            "summary": runtime_event_summary(
+                event.event_type, event.level, event.metrics_json,
+            ),
         },
         ensure_ascii=False,
         sort_keys=True,
