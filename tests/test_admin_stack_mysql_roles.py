@@ -146,7 +146,7 @@ def test_web_role_has_control_plane_crud_and_safe_read_policy() -> None:
             "SELECT", "INSERT", "UPDATE", "DELETE"
         },
         "wechat_collection_job": {"SELECT", "INSERT", "UPDATE"},
-        "wechat_collection_job_target": {"SELECT", "INSERT"},
+        "wechat_collection_job_target": {"SELECT", "INSERT", "UPDATE"},
         "wechat_report_generation_request": {"SELECT", "INSERT"},
         "wechat_collection_job_event": {"SELECT", "INSERT"},
         "wechat_werss_authorization_state": {"SELECT", "INSERT", "UPDATE"},

@@ -22,6 +22,7 @@ from app.services.collection_job_service import (
     ManagedJobMutationError,
     JobNotFoundError,
     JobOverlapError,
+    JobScheduleExpiredError,
     JobStateTransitionError,
     JobTargetDisabledError,
     JobTargetNotFoundError,
@@ -100,6 +101,7 @@ def _job_detail(status: JobStatus = JobStatus.ACTIVE, version: int = 3, managed_
         job_name="晨间群采集",
         pipeline_type=PipelineType.GROUP,
         target_names=("核心群A",),
+        target_ids=(7,),
         schedule=ScheduleSpec(
             effective_start_at=NOW,
             effective_end_at=datetime(2026, 7, 12, 18, 0, tzinfo=ZONE),
@@ -118,11 +120,15 @@ def test_system_article_job_detail_hides_actions_and_direct_posts_are_rejected(a
     job_service.detail = _job_detail(managed_key="article_global")
 
     detail = authenticated_client.get("/jobs/11")
+    assert "/jobs/11/edit" not in detail.text
+    assert "/jobs/11/start" not in detail.text
     assert "/jobs/11/stop" not in detail.text
     assert "/jobs/11/delete" not in detail.text
 
-    for action in ("stop", "delete"):
-        if action == "stop":
+    for action in ("start", "stop", "delete"):
+        if action == "start":
+            job_service.start_error = ManagedJobMutationError("managed")
+        elif action == "stop":
             job_service.stop_error = ManagedJobMutationError("managed")
         else:
             job_service.delete_error = ManagedJobMutationError("managed")
@@ -138,6 +144,8 @@ class FakeJobService:
         self.detail = _job_detail()
         self.calls: list[tuple] = []
         self.create_error: Exception | None = None
+        self.update_error: Exception | None = None
+        self.start_error: Exception | None = None
         self.stop_error: Exception | None = None
         self.delete_error: Exception | None = None
         self.list_error: Exception | None = None
@@ -165,6 +173,30 @@ class FakeJobService:
             raise JobValidationError("interval_seconds must be at least 600")
         return 41
 
+    def update_job(self, job_id, command, expected_version, actor, now):
+        self.calls.append(
+            ("update_job", job_id, command, expected_version, actor, now)
+        )
+        if self.update_error is not None:
+            raise self.update_error
+        if command.pipeline_type is not self.detail.pipeline_type:
+            raise JobValidationError("pipeline_type cannot be changed")
+        self.detail = replace(
+            self.detail,
+            job_name=command.job_name,
+            target_ids=command.target_ids,
+            schedule=ScheduleSpec(
+                effective_start_at=command.effective_start_at,
+                effective_end_at=command.effective_end_at,
+                daily_window_start=command.daily_window_start,
+                daily_window_end=command.daily_window_end,
+                interval_seconds=command.interval_seconds,
+            ),
+            status=JobStatus.STOPPED,
+            next_run_at=None,
+            version=self.detail.version + 1,
+        )
+
     def get_job(self, job_id):
         self.calls.append(("get_job", job_id))
         if job_id == 404:
@@ -183,6 +215,29 @@ class FakeJobService:
             version=self.detail.version + 1,
         )
         return JobStatus.STOP_REQUESTED
+
+    def start_job(self, job_id, expected_version, actor, now):
+        self.calls.append(("start_job", job_id, expected_version, actor, now))
+        if self.start_error is not None:
+            raise self.start_error
+        self.detail = replace(
+            self.detail,
+            status=JobStatus.ACTIVE,
+            next_run_at=now,
+            version=self.detail.version + 1,
+        )
+        self.summaries = [
+            replace(
+                item,
+                status=JobStatus.ACTIVE,
+                next_run_at=now,
+                version=item.version + 1,
+            )
+            if item.id == job_id
+            else item
+            for item in self.summaries
+        ]
+        return JobStatus.ACTIVE
 
     def delete_job(self, job_id, expected_version, actor, now):
         self.calls.append(
@@ -271,6 +326,20 @@ def _valid_article_form(**changes: object) -> dict[str, object]:
         "daily_window_end": "18:00",
         "interval_minutes": "10",
     }
+    values.update(changes)
+    return values
+
+
+def _valid_group_edit_form(**changes: object) -> dict[str, object]:
+    values = _valid_article_form(
+        job_name="更新后的群任务",
+        pipeline_type="group",
+        target_ids="7",
+        effective_end_at="2026-07-13T18:00",
+        interval_seconds="60",
+        version="3",
+    )
+    values.pop("interval_minutes")
     values.update(changes)
     return values
 
@@ -608,23 +677,194 @@ def test_create_target_races_are_safely_mapped(
     assert str(error) not in response.text
 
 
+def test_stopped_job_edit_form_prefills_current_configuration(
+    authenticated_client: TestClient,
+    job_service: FakeJobService,
+    source_service: FakeSourceService,
+) -> None:
+    job_service.detail = replace(
+        job_service.detail,
+        status=JobStatus.STOPPED,
+        next_run_at=None,
+    )
+
+    response = authenticated_client.get("/jobs/11/edit")
+
+    assert response.status_code == 200
+    assert "编辑采集任务" in response.text
+    assert 'action="/jobs/11/edit"' in response.text
+    assert 'name="version" value="3"' in response.text
+    assert 'name="job_name" maxlength="200" value="晨间群采集"' in response.text
+    assert 'name="target_ids" type="checkbox" value="7" checked' in response.text
+    assert 'name="effective_start_at" type="datetime-local" value="2026-07-10T09:00"' in response.text
+    assert 'name="interval_seconds" type="number"' in response.text
+    assert source_service.calls == [("list_enabled_groups_for_job", 100)]
+
+
 @pytest.mark.parametrize(
-    ("status", "expected_action", "missing_action", "text"),
+    "status",
+    [JobStatus.SCHEDULED, JobStatus.ACTIVE, JobStatus.STOP_REQUESTED, JobStatus.COMPLETED, JobStatus.DELETED],
+)
+def test_edit_page_rejects_non_stopped_status(
+    authenticated_client: TestClient,
+    job_service: FakeJobService,
+    source_service: FakeSourceService,
+    status: JobStatus,
+) -> None:
+    job_service.detail = replace(job_service.detail, status=status)
+
+    response = authenticated_client.get("/jobs/11/edit")
+
+    assert response.status_code == 409
+    assert "只有已停止任务可以编辑" in response.text
+    assert source_service.calls == []
+
+
+def test_edit_page_rejects_system_managed_job(
+    authenticated_client: TestClient,
+    job_service: FakeJobService,
+) -> None:
+    job_service.detail = replace(
+        job_service.detail,
+        status=JobStatus.STOPPED,
+        managed_key="article_global",
+    )
+
+    response = authenticated_client.get("/jobs/11/edit")
+
+    assert response.status_code == 403
+    assert "系统管理任务不允许人工编辑" in response.text
+
+    job_service.update_error = ManagedJobMutationError("private managed")
+    posted = authenticated_client.post(
+        "/jobs/11/edit", data=_valid_group_edit_form()
+    )
+    assert posted.status_code == 403
+    assert "系统管理任务不允许人工编辑" in posted.text
+    assert "private managed" not in posted.text
+
+
+def test_update_stopped_job_builds_command_and_redirects_to_detail(
+    authenticated_client: TestClient,
+    job_service: FakeJobService,
+) -> None:
+    job_service.detail = replace(job_service.detail, status=JobStatus.STOPPED)
+
+    response = authenticated_client.post(
+        "/jobs/11/edit",
+        data=_valid_group_edit_form(),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/jobs/11"
+    call = job_service.calls[0]
+    assert call[0] == "update_job"
+    assert call[1] == 11
+    command = call[2]
+    assert command.pipeline_type is PipelineType.GROUP
+    assert command.job_name == "更新后的群任务"
+    assert command.target_ids == (7,)
+    assert command.interval_seconds == 60
+    assert command.effective_end_at.tzinfo == ZONE
+    assert call[3] == 3
+
+
+def test_update_overlap_rerenders_edit_form_with_safe_message(
+    authenticated_client: TestClient,
+    job_service: FakeJobService,
+) -> None:
+    job_service.detail = replace(job_service.detail, status=JobStatus.STOPPED)
+    job_service.update_error = JobOverlapError(["冲突任务"])
+
+    response = authenticated_client.post(
+        "/jobs/11/edit",
+        data=_valid_group_edit_form(job_name="保留输入"),
+    )
+
+    assert response.status_code == 409
+    assert "所选名单与现有任务的运行时间重叠" in response.text
+    assert "冲突任务" in response.text
+    assert 'value="保留输入"' in response.text
+
+
+def test_update_version_conflict_refreshes_current_detail(
+    authenticated_client: TestClient,
+    job_service: FakeJobService,
+) -> None:
+    job_service.detail = replace(
+        job_service.detail,
+        status=JobStatus.STOPPED,
+        version=4,
+    )
+    job_service.update_error = JobVersionConflictError("private version")
+
+    response = authenticated_client.post(
+        "/jobs/11/edit", data=_valid_group_edit_form(version="3")
+    )
+
+    assert response.status_code == 409
+    assert "任务状态已更新" in response.text
+    assert "private version" not in response.text
+
+
+@pytest.mark.parametrize(
+    "payload",
     [
-        (JobStatus.SCHEDULED, "/jobs/11/stop", "/jobs/11/delete", "停止任务"),
-        (JobStatus.ACTIVE, "/jobs/11/stop", "/jobs/11/delete", "停止任务"),
-        (JobStatus.STOP_REQUESTED, None, "/jobs/11/delete", "停止中"),
-        (JobStatus.STOPPED, "/jobs/11/delete", "/jobs/11/stop", "删除任务"),
-        (JobStatus.COMPLETED, "/jobs/11/delete", "/jobs/11/stop", "删除任务"),
-        (JobStatus.DELETED, None, "/jobs/11/stop", "已删除"),
+        {**_valid_group_edit_form(), "force": "1"},
+        {**_valid_group_edit_form(), "pipeline_type": "article"},
+    ],
+)
+def test_update_rejects_unknown_fields_and_pipeline_tampering(
+    authenticated_client: TestClient,
+    job_service: FakeJobService,
+    payload: dict[str, object],
+) -> None:
+    job_service.detail = replace(job_service.detail, status=JobStatus.STOPPED)
+
+    response = authenticated_client.post("/jobs/11/edit", data=payload)
+
+    assert response.status_code == 422
+    assert not any(call[0] == "update_job" for call in job_service.calls)
+
+
+def test_update_rejects_duplicate_version(
+    authenticated_client: TestClient,
+    job_service: FakeJobService,
+) -> None:
+    job_service.detail = replace(job_service.detail, status=JobStatus.STOPPED)
+    response = authenticated_client.post(
+        "/jobs/11/edit",
+        content=(
+            "csrf_token=csrf-token&job_name=A&pipeline_type=group&target_ids=7&"
+            "effective_start_at=2026-07-10T09%3A00&"
+            "effective_end_at=2026-07-13T18%3A00&daily_window_start=09%3A00&"
+            "daily_window_end=18%3A00&interval_seconds=60&version=3&version=4"
+        ),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+
+    assert response.status_code == 422
+    assert not any(call[0] == "update_job" for call in job_service.calls)
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_actions", "missing_actions", "text"),
+    [
+        (JobStatus.SCHEDULED, {"/jobs/11/stop"}, {"/jobs/11/start", "/jobs/11/delete"}, "停止任务"),
+        (JobStatus.ACTIVE, {"/jobs/11/stop"}, {"/jobs/11/start", "/jobs/11/delete"}, "停止任务"),
+        (JobStatus.STOP_REQUESTED, set(), {"/jobs/11/start", "/jobs/11/delete"}, "停止中"),
+        (JobStatus.STOPPED, {"/jobs/11/start", "/jobs/11/delete"}, {"/jobs/11/stop"}, "启动任务"),
+        (JobStatus.COMPLETED, {"/jobs/11/delete"}, {"/jobs/11/start", "/jobs/11/stop"}, "删除任务"),
+        (JobStatus.DELETED, set(), {"/jobs/11/start", "/jobs/11/stop"}, "已删除"),
     ],
 )
 def test_job_detail_only_renders_legal_state_actions(
     authenticated_client: TestClient,
     job_service: FakeJobService,
     status: JobStatus,
-    expected_action: str | None,
-    missing_action: str,
+    expected_actions: set[str],
+    missing_actions: set[str],
     text: str,
 ) -> None:
     job_service.detail = replace(job_service.detail, status=status)
@@ -633,9 +873,40 @@ def test_job_detail_only_renders_legal_state_actions(
 
     assert response.status_code == 200
     assert text in response.text
-    if expected_action is not None:
+    for expected_action in expected_actions:
         assert f'action="{expected_action}"' in response.text
-    assert f'action="{missing_action}"' not in response.text
+    for missing_action in missing_actions:
+        assert f'action="{missing_action}"' not in response.text
+    if status is JobStatus.STOPPED:
+        assert 'href="/jobs/11/edit"' in response.text
+    else:
+        assert 'href="/jobs/11/edit"' not in response.text
+
+
+def test_job_list_renders_state_legal_controls_and_hides_managed_actions(
+    authenticated_client: TestClient,
+    job_service: FakeJobService,
+) -> None:
+    job_service.summaries = [
+        replace(job_service.summaries[0], id=11, status=JobStatus.ACTIVE),
+        replace(job_service.summaries[0], id=12, status=JobStatus.STOPPED),
+        replace(
+            job_service.summaries[0],
+            id=13,
+            status=JobStatus.ACTIVE,
+            managed_key="article_global",
+        ),
+    ]
+
+    response = authenticated_client.get("/jobs")
+
+    assert 'action="/jobs/11/stop"' in response.text
+    assert 'action="/jobs/12/start"' in response.text
+    assert 'href="/jobs/12/edit"' in response.text
+    assert 'href="/jobs/11/edit"' not in response.text
+    assert 'action="/jobs/13/stop"' not in response.text
+    assert 'href="/jobs/13/edit"' not in response.text
+    assert 'href="/jobs/13"' in response.text
 
 
 def test_stop_version_conflict_refreshes_current_detail(
@@ -664,6 +935,62 @@ def test_stop_version_conflict_refreshes_current_detail(
         "request_stop",
         "get_job",
     ]
+
+
+def test_start_stopped_job_refreshes_active_detail(
+    authenticated_client: TestClient,
+    job_service: FakeJobService,
+) -> None:
+    job_service.detail = replace(job_service.detail, status=JobStatus.STOPPED)
+
+    response = authenticated_client.post(
+        "/jobs/11/start",
+        data={"csrf_token": "csrf-token", "version": "3"},
+    )
+
+    assert response.status_code == 200
+    assert "运行中" in response.text
+    assert [call[0] for call in job_service.calls] == [
+        "start_job",
+        "get_job",
+    ]
+
+
+def test_start_from_list_redirects_back_to_list(
+    authenticated_client: TestClient,
+    job_service: FakeJobService,
+) -> None:
+    job_service.detail = replace(job_service.detail, status=JobStatus.STOPPED)
+
+    response = authenticated_client.post(
+        "/jobs/11/start",
+        data={
+            "csrf_token": "csrf-token",
+            "version": "3",
+            "return_to": "list",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/jobs"
+
+
+def test_start_expired_schedule_returns_actionable_409(
+    authenticated_client: TestClient,
+    job_service: FakeJobService,
+) -> None:
+    job_service.detail = replace(job_service.detail, status=JobStatus.STOPPED)
+    job_service.start_error = JobScheduleExpiredError("private schedule detail")
+
+    response = authenticated_client.post(
+        "/jobs/11/start",
+        data={"csrf_token": "csrf-token", "version": "3"},
+    )
+
+    assert response.status_code == 409
+    assert "任务有效期已结束，无法重新启动" in response.text
+    assert "private schedule detail" not in response.text
 
 
 def test_delete_version_conflict_refreshes_current_detail(
@@ -726,14 +1053,16 @@ def test_soft_deleted_job_is_hidden_by_default_and_available_for_audit(
     assert list_filters[1].status is JobStatus.DELETED
 
 
-@pytest.mark.parametrize("action", ["stop", "delete"])
+@pytest.mark.parametrize("action", ["start", "stop", "delete"])
 def test_illegal_state_action_returns_safe_refreshed_409(
     authenticated_client: TestClient,
     job_service: FakeJobService,
     action: str,
 ) -> None:
     error = JobStateTransitionError(JobStatus.ACTIVE, action)
-    if action == "stop":
+    if action == "start":
+        job_service.start_error = error
+    elif action == "stop":
         job_service.stop_error = error
     else:
         job_service.delete_error = error
@@ -750,7 +1079,7 @@ def test_illegal_state_action_returns_safe_refreshed_409(
 
 
 @pytest.mark.parametrize(
-    "path", ["/jobs/11/stop", "/jobs/11/delete"]
+    "path", ["/jobs/11/start", "/jobs/11/stop", "/jobs/11/delete"]
 )
 def test_job_mutation_rejects_duplicate_version_and_unknown_fields(
     authenticated_client: TestClient,
@@ -772,7 +1101,9 @@ def test_job_mutation_rejects_duplicate_version_and_unknown_fields(
     assert job_service.calls == []
 
 
-@pytest.mark.parametrize("path", ["/jobs/11/stop", "/jobs/11/delete"])
+@pytest.mark.parametrize(
+    "path", ["/jobs/11/start", "/jobs/11/stop", "/jobs/11/delete"]
+)
 def test_job_mutation_paths_do_not_accept_get(
     authenticated_client: TestClient,
     job_service: FakeJobService,
@@ -781,6 +1112,23 @@ def test_job_mutation_paths_do_not_accept_get(
     response = authenticated_client.get(path)
 
     assert response.status_code == 405
+    assert job_service.calls == []
+
+
+def test_job_mutation_rejects_forged_return_target(
+    authenticated_client: TestClient,
+    job_service: FakeJobService,
+) -> None:
+    response = authenticated_client.post(
+        "/jobs/11/start",
+        data={
+            "csrf_token": "csrf-token",
+            "version": "3",
+            "return_to": "https://example.invalid",
+        },
+    )
+
+    assert response.status_code == 422
     assert job_service.calls == []
 
 
@@ -851,6 +1199,50 @@ def test_each_job_write_form_is_post_with_exactly_one_csrf_and_version(
             assert versions == [
                 {"type": "hidden", "name": "version", "value": "3"}
             ]
+
+
+def test_job_list_action_form_has_fixed_list_return_target(
+    authenticated_client: TestClient,
+) -> None:
+    response = authenticated_client.get("/jobs")
+    parser = JobFormParser()
+    parser.feed(response.text)
+    action_form = next(
+        form for form in parser.forms if form["action"] == "/jobs/11/stop"
+    )
+
+    names = [item.get("name") for item in action_form["inputs"]]
+    assert names == ["csrf_token", "version", "return_to"]
+    assert action_form["inputs"][-1] == {
+        "type": "hidden",
+        "name": "return_to",
+        "value": "list",
+    }
+
+
+def test_edit_form_is_post_with_single_csrf_version_and_fixed_pipeline(
+    authenticated_client: TestClient,
+    job_service: FakeJobService,
+) -> None:
+    job_service.detail = replace(job_service.detail, status=JobStatus.STOPPED)
+    response = authenticated_client.get("/jobs/11/edit")
+    parser = JobFormParser()
+    parser.feed(response.text)
+    form = next(
+        item for item in parser.forms if item["action"] == "/jobs/11/edit"
+    )
+
+    assert str(form["method"]).lower() == "post"
+    inputs = form["inputs"]
+    assert [item for item in inputs if item.get("name") == "csrf_token"] == [
+        {"type": "hidden", "name": "csrf_token", "value": "csrf-token"}
+    ]
+    assert [item for item in inputs if item.get("name") == "version"] == [
+        {"type": "hidden", "name": "version", "value": "3"}
+    ]
+    assert [item for item in inputs if item.get("name") == "pipeline_type"] == [
+        {"type": "hidden", "name": "pipeline_type", "value": "group"}
+    ]
 
 
 def test_detail_explains_cross_midnight_and_history_retention(
@@ -928,8 +1320,21 @@ def test_all_job_and_source_calls_run_in_threadpool(
         job_service.detail, status=JobStatus.STOPPED, version=4
     )
     assert authenticated_client.post(
-        "/jobs/11/delete",
+        "/jobs/11/start",
         data={"csrf_token": "csrf-token", "version": "4"},
+    ).status_code == 200
+    job_service.detail = replace(
+        job_service.detail, status=JobStatus.STOPPED, version=5
+    )
+    assert authenticated_client.get("/jobs/11/edit").status_code == 200
+    assert authenticated_client.post(
+        "/jobs/11/edit",
+        data=_valid_group_edit_form(version="5"),
+        follow_redirects=False,
+    ).status_code == 303
+    assert authenticated_client.post(
+        "/jobs/11/delete",
+        data={"csrf_token": "csrf-token", "version": "6"},
         follow_redirects=False,
     ).status_code == 303
 
@@ -938,8 +1343,14 @@ def test_all_job_and_source_calls_run_in_threadpool(
         "list_enabled_groups_for_job",
         "get_job",
         "get_job_history",
-            "request_stop",
+        "request_stop",
         "get_job",
         "get_job_history",
+        "start_job",
+        "get_job",
+        "get_job_history",
+        "get_job",
+        "list_enabled_groups_for_job",
+        "update_job",
         "delete_job",
     ]

@@ -141,6 +141,7 @@ def test_delete_detaches_only_deleted_job_targets_before_deleting_source() -> No
     assert "UPDATE wechat_collection_job_target AS target" in statements[2]
     assert "SET target.group_config_id = NULL" in statements[2]
     assert "job.status = 'deleted'" in statements[2]
+    assert "target.is_active = 0" in statements[2]
     assert "DELETE FROM wechat_group_config" in statements[3]
     assert "enabled = 0" in statements[3]
 

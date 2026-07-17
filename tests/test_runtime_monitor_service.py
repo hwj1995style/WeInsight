@@ -366,6 +366,8 @@ def test_event_and_worker_control_labels_are_sanitized_on_read(tmp_path: Path) -
         ("collection_target_started", "开始处理目标"),
         ("collection_target_finished", "目标处理完成"),
         ("job_created", "已创建采集任务"),
+        ("job_started", "已启动采集任务"),
+        ("job_updated", "已更新采集任务"),
         ("job_stop_requested", "已请求停止采集任务"),
         ("job_deleted", "已删除采集任务"),
         ("misfire", "错过计划已合并执行"),

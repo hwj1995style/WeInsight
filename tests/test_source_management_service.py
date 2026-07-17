@@ -508,6 +508,7 @@ def test_reference_repo_uses_fixed_columns_and_active_statuses() -> None:
     assert repo.list_referencing_jobs("group", 7, active_only=True) == ["任务A"]
     sql, params = engine.connection.executions[0]
     assert "target.group_config_id = :source_id" in sql
+    assert "target.is_active = 1" in sql
     assert "scheduled" in sql and "active" in sql and "stop_requested" in sql
     assert params == {"source_id": 7}
 
@@ -519,6 +520,7 @@ def test_reference_repo_supports_article_and_excludes_deleted_jobs() -> None:
     assert repo.list_referencing_jobs("article", 9, active_only=False) == ["历史任务"]
     sql, params = engine.connection.executions[0]
     assert "target.article_config_id = :source_id" in sql
+    assert "target.is_active = 1" in sql
     assert "job.status IN" not in sql
     assert "job.status <> 'deleted'" in sql
     assert params == {"source_id": 9}
