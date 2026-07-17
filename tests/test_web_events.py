@@ -549,3 +549,21 @@ def test_sse_recursively_sanitizes_and_bounds_metrics_json() -> None:
     assert len(metrics["many"]) <= 21
     assert len(metrics["long"]) <= 200
     assert len(encoded.encode("utf-8")) <= 4096
+
+
+def test_sse_authorization_test_summary_distinguishes_target() -> None:
+    event = _collection_event()
+    event = CollectionEvent(
+        **{
+            **{field: getattr(event, field) for field in event.__dataclass_fields__},
+            "level": "info",
+            "event_type": "werss_authorization_test_succeeded",
+            "metrics_json": '{"target":"email"}',
+        }
+    )
+
+    payload = events._format_sse_event(event)
+    data_line = next(line for line in payload.splitlines() if line.startswith("data: "))
+    decoded = json.loads(data_line.removeprefix("data: "))
+
+    assert decoded["summary"] == "授权提醒测试邮件发送成功"

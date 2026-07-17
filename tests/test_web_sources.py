@@ -26,6 +26,7 @@ from app.services.source_management_service import (
 )
 from app.services.article_source_status_service import ArticleSourceStatusPage, ArticleSourceStatusRow
 from app.storage.article_config_repo import ArticleAccountConfigRecord
+from app.storage.collection_event_repo import NewCollectionEvent
 from app.storage.group_repo import GroupConfigRecord
 from app.web.app import create_app
 from app.web.routes import sources as source_routes
@@ -58,6 +59,15 @@ class FakeAuthService:
         now: datetime,
     ) -> bool:
         return session_token == "session-token" and csrf_token == "csrf-token"
+
+
+class RecordingEventRepo:
+    def __init__(self) -> None:
+        self.events: list[NewCollectionEvent] = []
+
+    def append_event(self, event: NewCollectionEvent) -> int:
+        self.events.append(event)
+        return len(self.events)
 
 
 class FakeSourceService:
@@ -320,12 +330,18 @@ def article_downstream_service() -> FakeArticleDownstreamService:
 
 
 @pytest.fixture
+def event_repo() -> RecordingEventRepo:
+    return RecordingEventRepo()
+
+
+@pytest.fixture
 def app(
     config: Config,
     auth_service: FakeAuthService,
     source_service: FakeSourceService,
     article_status_service: FakeArticleStatusService,
     article_downstream_service: FakeArticleDownstreamService,
+    event_repo: RecordingEventRepo,
 ) -> FastAPI:
     return create_app(
         config,
@@ -333,6 +349,7 @@ def app(
         source_service=source_service,
         article_status_service=article_status_service,
         article_downstream_service=article_downstream_service,
+        event_repo=event_repo,
         werss_authorization_service=FakeAuthorizationService(),
     )
 
@@ -390,7 +407,7 @@ def test_article_page_is_read_only_and_refreshes_with_get(authenticated_client):
 
 
 def test_authorization_settings_save_uses_json_csrf_and_never_echoes_passwords(
-    authenticated_client,
+    authenticated_client, event_repo,
 ):
     payload = {
         "werss_username": "controller",
@@ -416,18 +433,34 @@ def test_authorization_settings_save_uses_json_csrf_and_never_echoes_passwords(
     assert body["smtp_password_configured"] is True
     assert "new-werss-secret" not in response.text
     assert "new-smtp-secret" not in response.text
+    assert len(event_repo.events) == 1
+    event = event_repo.events[0]
+    assert event.level == "info"
+    assert event.event_type == "werss_authorization_settings_changed"
+    assert event.message == "授权提醒配置已更新"
+    assert event.metrics_json == '{"smtp_enabled":true,"recipient_count":1}'
 
 
-def test_authorization_settings_reject_unknown_json_field(authenticated_client):
+def test_authorization_settings_reject_unknown_json_field(
+    authenticated_client, event_repo,
+):
     response = authenticated_client.post(
         "/sources/articles/authorization/settings",
         json={"unexpected": "secret"},
         headers={"X-CSRF-Token": "csrf-token"},
     )
     assert response.status_code == 422
+    assert len(event_repo.events) == 1
+    event = event_repo.events[0]
+    assert event.level == "warning"
+    assert event.event_type == "werss_authorization_settings_failed"
+    assert event.message == "授权提醒配置保存失败"
+    assert event.metrics_json == '{"reason":"validation"}'
 
 
-def test_authorization_setting_connection_tests_require_csrf(authenticated_client):
+def test_authorization_setting_connection_tests_require_csrf(
+    authenticated_client, event_repo,
+):
     for path in (
         "/sources/articles/authorization/settings/test-werss",
         "/sources/articles/authorization/settings/test-email",
@@ -437,6 +470,18 @@ def test_authorization_setting_connection_tests_require_csrf(authenticated_clien
             path, headers={"X-CSRF-Token": "csrf-token"}
         )
         assert response.status_code == 200
+    assert [event.event_type for event in event_repo.events] == [
+        "werss_authorization_test_succeeded",
+        "werss_authorization_test_succeeded",
+    ]
+    assert [event.message for event in event_repo.events] == [
+        "WeRSS管理凭据测试成功",
+        "授权提醒测试邮件发送成功",
+    ]
+    assert [event.metrics_json for event in event_repo.events] == [
+        '{"target":"werss"}',
+        '{"target":"email"}',
+    ]
 
 
 def test_unknown_article_source_is_rendered_as_pending_binding(
