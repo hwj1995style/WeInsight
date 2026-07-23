@@ -20,8 +20,10 @@ from app.services.auth_service import (
 )
 
 
-LOGIN_CSRF_COOKIE = "login_csrf"
+LEGACY_LOGIN_CSRF_COOKIE = "login_csrf"
 LOGIN_CSRF_MAX_AGE_SECONDS = 20 * 60
+LOGIN_CSRF_TOKEN_BYTES = 32
+LOGIN_CSRF_TOKEN_LENGTH = 43
 MAX_CONCURRENT_LOGIN_HASHES = 2
 MAX_TRACKED_LOGIN_IPS = 4096
 LOGIN_LIMITER_CLEANUP_INTERVAL = timedelta(minutes=1)
@@ -97,35 +99,35 @@ async def favicon() -> Response:
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request) -> Response:
-    token = secrets.token_urlsafe(32)
+    cookie_name = request.app.state.config.auth.login_csrf_cookie_name
+    current_token = request.cookies.get(cookie_name)
+    token = (
+        current_token
+        if _valid_login_csrf_token(current_token)
+        else _new_login_csrf_token()
+    )
     response = _login_response(
         request,
         login_csrf=token,
         password_changed=request.query_params.get("password_changed") == "1",
     )
-    response.set_cookie(
-        LOGIN_CSRF_COOKIE,
-        token,
-        max_age=LOGIN_CSRF_MAX_AGE_SECONDS,
-        httponly=False,
-        secure=request.app.state.config.web.secure_cookie,
-        samesite="strict",
-        path="/",
-    )
+    _set_login_csrf_cookie(response, request, token)
+    _delete_legacy_login_csrf_cookie(response, cookie_name)
     return response
 
 
 @router.post("/login", response_class=HTMLResponse)
 async def login(request: Request) -> Response:
     form = await request.form()
-    cookie_token = request.cookies.get(LOGIN_CSRF_COOKIE)
+    cookie_name = request.app.state.config.auth.login_csrf_cookie_name
+    cookie_token = request.cookies.get(cookie_name)
     form_token = form.get("login_csrf")
     if (
-        not cookie_token
+        not _valid_login_csrf_token(cookie_token)
         or not isinstance(form_token, str)
         or not secrets.compare_digest(cookie_token, form_token)
     ):
-        return Response("CSRF validation failed", status_code=403)
+        return _login_csrf_failure_response(request)
 
     username = str(form.get("username", ""))
     password = str(form.get("password", ""))
@@ -183,7 +185,8 @@ async def login(request: Request) -> Response:
         samesite="strict",
         path="/",
     )
-    response.delete_cookie(LOGIN_CSRF_COOKIE, path="/")
+    response.delete_cookie(cookie_name, path="/")
+    _delete_legacy_login_csrf_cookie(response, cookie_name)
     return response
 
 
@@ -250,6 +253,59 @@ def _login_response(
         },
         status_code=status_code,
     )
+
+
+def _login_csrf_failure_response(request: Request) -> Response:
+    token = _new_login_csrf_token()
+    response = _login_response(
+        request,
+        login_csrf=token,
+        error="登录页面已过期或在其他窗口被刷新，请重新提交。",
+        status_code=403,
+    )
+    _set_login_csrf_cookie(response, request, token)
+    _delete_legacy_login_csrf_cookie(
+        response,
+        request.app.state.config.auth.login_csrf_cookie_name,
+    )
+    return response
+
+
+def _new_login_csrf_token() -> str:
+    return secrets.token_urlsafe(LOGIN_CSRF_TOKEN_BYTES)
+
+
+def _valid_login_csrf_token(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == LOGIN_CSRF_TOKEN_LENGTH
+        and value.isascii()
+        and all(character.isalnum() or character in "-_" for character in value)
+    )
+
+
+def _set_login_csrf_cookie(
+    response: Response,
+    request: Request,
+    token: str,
+) -> None:
+    response.set_cookie(
+        request.app.state.config.auth.login_csrf_cookie_name,
+        token,
+        max_age=LOGIN_CSRF_MAX_AGE_SECONDS,
+        httponly=False,
+        secure=request.app.state.config.web.secure_cookie,
+        samesite="strict",
+        path="/",
+    )
+
+
+def _delete_legacy_login_csrf_cookie(
+    response: Response,
+    current_cookie_name: str,
+) -> None:
+    if current_cookie_name != LEGACY_LOGIN_CSRF_COOKIE:
+        response.delete_cookie(LEGACY_LOGIN_CSRF_COOKIE, path="/")
 
 
 def _password_error(request: Request, message: str) -> Response:

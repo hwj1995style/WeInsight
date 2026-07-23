@@ -25,6 +25,7 @@ auth:
   default_username: admin
   session_cookie_name: weinsight_e2e_session
   csrf_cookie_name: weinsight_e2e_csrf
+  login_csrf_cookie_name: weinsight_e2e_login_csrf
   session_idle_minutes: 60
   session_absolute_minutes: 120
   login_failure_limit: 5

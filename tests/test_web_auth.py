@@ -27,6 +27,9 @@ from app.web.app import create_app
 from app.web.routes import auth as auth_routes
 
 
+DEV_LOGIN_CSRF_COOKIE = "weinsight_dev_login_csrf"
+
+
 class FakeAuthService:
     def __init__(self) -> None:
         self.admin = AuthenticatedAdmin(
@@ -143,7 +146,7 @@ def authenticated_client(client: TestClient) -> TestClient:
         data={
             "username": "admin",
             "password": "admin123456",
-            "login_csrf": client.cookies["login_csrf"],
+            "login_csrf": client.cookies[DEV_LOGIN_CSRF_COOKIE],
         },
         follow_redirects=False,
     )
@@ -165,7 +168,7 @@ def _login(client: TestClient, *, username: str, password: str) -> object:
         data={
             "username": username,
             "password": password,
-            "login_csrf": client.cookies["login_csrf"],
+            "login_csrf": client.cookies[DEV_LOGIN_CSRF_COOKIE],
         },
         follow_redirects=False,
     )
@@ -223,26 +226,84 @@ def test_favicon_request_does_not_rotate_login_csrf_cookie(
     raw_client: TestClient,
 ) -> None:
     raw_client.get("/login")
-    login_csrf = raw_client.cookies["login_csrf"]
+    login_csrf = raw_client.cookies[DEV_LOGIN_CSRF_COOKIE]
 
     response = raw_client.get("/favicon.ico", follow_redirects=False)
 
     assert response.status_code == 204
-    assert raw_client.cookies["login_csrf"] == login_csrf
+    assert raw_client.cookies[DEV_LOGIN_CSRF_COOKIE] == login_csrf
 
 
 def test_login_csrf_cookie_is_strict_readable_and_lasts_twenty_minutes(
     raw_client: TestClient,
 ) -> None:
     response = raw_client.get("/login")
-    cookie = _set_cookie_header(response, "login_csrf")
+    cookie = _set_cookie_header(response, DEV_LOGIN_CSRF_COOKIE)
 
     assert "max-age=1200" in cookie
     assert "path=/" in cookie
     assert "samesite=strict" in cookie
     assert "httponly" not in cookie
     assert "secure" not in cookie
-    assert raw_client.cookies["login_csrf"] in response.text
+    assert raw_client.cookies[DEV_LOGIN_CSRF_COOKIE] in response.text
+
+
+def test_login_get_reuses_token_across_tabs(raw_client: TestClient) -> None:
+    first = raw_client.get("/login")
+    first_token = raw_client.cookies[DEV_LOGIN_CSRF_COOKIE]
+
+    second = raw_client.get("/login")
+
+    assert raw_client.cookies[DEV_LOGIN_CSRF_COOKIE] == first_token
+    assert first_token in first.text
+    assert first_token in second.text
+
+
+def test_login_get_replaces_malformed_cookie_and_clears_legacy_cookie(
+    raw_client: TestClient,
+) -> None:
+    raw_client.cookies.set(
+        DEV_LOGIN_CSRF_COOKIE,
+        "malformed",
+        domain="testserver.local",
+        path="/",
+    )
+    raw_client.cookies.set(
+        "login_csrf",
+        "legacy-token",
+        domain="testserver.local",
+        path="/",
+    )
+
+    response = raw_client.get("/login")
+    token = raw_client.cookies[DEV_LOGIN_CSRF_COOKIE]
+
+    assert token != "malformed"
+    assert len(token) == 43
+    assert token in response.text
+    assert "login_csrf" not in raw_client.cookies
+
+
+def test_other_environment_login_cookie_does_not_invalidate_dev_login(
+    raw_client: TestClient,
+) -> None:
+    raw_client.get("/login")
+    dev_token = raw_client.cookies[DEV_LOGIN_CSRF_COOKIE]
+    raw_client.cookies.set("weinsight_e2e_login_csrf", "another-environment-token")
+
+    response = raw_client.post(
+        "/login",
+        data={
+            "username": "admin",
+            "password": "admin123456",
+            "login_csrf": dev_token,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert DEV_LOGIN_CSRF_COOKIE not in raw_client.cookies
+    assert "login_csrf" not in raw_client.cookies
 
 
 @pytest.mark.parametrize("secure_cookie", [False, True])
@@ -266,7 +327,7 @@ def test_session_and_csrf_cookie_security_flags_follow_config(
         base_url=f"{scheme}://testserver",
     ) as secure_client:
         login_page = secure_client.get("/login")
-        login_cookie = _set_cookie_header(login_page, "login_csrf")
+        login_cookie = _set_cookie_header(login_page, DEV_LOGIN_CSRF_COOKIE)
         response = _login(
             secure_client,
             username="admin",
@@ -307,7 +368,45 @@ def test_login_rejects_missing_or_mismatched_double_submit_token(
         response = test_client.post("/login", data=data)
 
     assert response.status_code == 403
+    assert response.headers["content-type"].startswith("text/html")
+    assert "登录页面已过期或在其他窗口被刷新" in response.text
     assert auth_service.login_calls == []
+
+
+def test_login_csrf_failure_issues_new_token_and_retry_succeeds(
+    raw_client: TestClient,
+    auth_service: FakeAuthService,
+) -> None:
+    raw_client.get("/login")
+    expired_token = raw_client.cookies[DEV_LOGIN_CSRF_COOKIE]
+
+    failed = raw_client.post(
+        "/login",
+        data={
+            "username": "admin",
+            "password": "admin123456",
+            "login_csrf": "stale-token",
+        },
+    )
+    recovered_token = raw_client.cookies[DEV_LOGIN_CSRF_COOKIE]
+
+    assert failed.status_code == 403
+    assert recovered_token != expired_token
+    assert recovered_token in failed.text
+    assert auth_service.login_calls == []
+
+    retried = raw_client.post(
+        "/login",
+        data={
+            "username": "admin",
+            "password": "admin123456",
+            "login_csrf": recovered_token,
+        },
+        follow_redirects=False,
+    )
+
+    assert retried.status_code == 303
+    assert len(auth_service.login_calls) == 1
 
 
 def test_login_rejects_an_expired_cookie_not_sent_by_the_browser(
@@ -316,8 +415,8 @@ def test_login_rejects_an_expired_cookie_not_sent_by_the_browser(
 ) -> None:
     with TestClient(app) as test_client:
         test_client.get("/login")
-        token = test_client.cookies["login_csrf"]
-        test_client.cookies.delete("login_csrf")
+        token = test_client.cookies[DEV_LOGIN_CSRF_COOKIE]
+        test_client.cookies.delete(DEV_LOGIN_CSRF_COOKIE)
         response = test_client.post(
             "/login",
             data={
@@ -480,7 +579,7 @@ def test_login_hash_concurrency_is_globally_bounded(
                 data={
                     "username": "admin",
                     "password": "admin123456",
-                    "login_csrf": async_client.cookies["login_csrf"],
+                    "login_csrf": async_client.cookies[DEV_LOGIN_CSRF_COOKIE],
                 },
                 follow_redirects=False,
             )
@@ -519,7 +618,7 @@ def test_login_hash_gate_is_recreated_for_each_application_lifespan(
                         data={
                             "username": "admin",
                             "password": "admin123456",
-                            "login_csrf": async_client.cookies["login_csrf"],
+                            "login_csrf": async_client.cookies[DEV_LOGIN_CSRF_COOKIE],
                         },
                         follow_redirects=False,
                     )

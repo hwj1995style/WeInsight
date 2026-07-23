@@ -233,6 +233,7 @@ def auth_config() -> AuthConfig:
         default_username="admin",
         session_cookie_name="weinsight_session",
         csrf_cookie_name="weinsight_csrf",
+        login_csrf_cookie_name="weinsight_dev_login_csrf",
         session_idle_minutes=480,
         session_absolute_minutes=1440,
         login_failure_limit=5,
