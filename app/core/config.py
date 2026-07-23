@@ -13,6 +13,7 @@ import yaml
 
 
 ENV_PATTERN = re.compile(r"\$\{([A-Z0-9_]+)\}")
+COOKIE_NAME_PATTERN = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
 
 
 @dataclass(frozen=True)
@@ -186,10 +187,26 @@ class AuthConfig:
     default_username: str
     session_cookie_name: str
     csrf_cookie_name: str
+    login_csrf_cookie_name: str
     session_idle_minutes: int
     session_absolute_minutes: int
     login_failure_limit: int
     login_lock_minutes: int
+
+    def __post_init__(self) -> None:
+        cookie_names = (
+            self.session_cookie_name,
+            self.csrf_cookie_name,
+            self.login_csrf_cookie_name,
+        )
+        if any(
+            not isinstance(name, str)
+            or COOKIE_NAME_PATTERN.fullmatch(name) is None
+            for name in cookie_names
+        ):
+            raise ValueError("auth cookie names must be valid HTTP cookie names")
+        if len(set(cookie_names)) != len(cookie_names):
+            raise ValueError("auth cookie names must be distinct")
 
 
 @dataclass(frozen=True)

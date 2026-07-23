@@ -168,10 +168,34 @@ def test_admin_web_config_defaults_are_explicit() -> None:
     assert config.auth.default_username == "admin"
     assert config.auth.session_cookie_name == "weinsight_session"
     assert config.auth.csrf_cookie_name == "weinsight_csrf"
+    assert config.auth.login_csrf_cookie_name == "weinsight_dev_login_csrf"
     assert config.auth.session_idle_minutes == 480
     assert config.auth.session_absolute_minutes == 1440
     assert config.auth.login_failure_limit == 5
     assert config.auth.login_lock_minutes == 15
+
+
+def test_login_csrf_cookie_names_are_isolated_by_runtime_config() -> None:
+    expected = {
+        "config.dev.yaml": "weinsight_dev_login_csrf",
+        "config.e2e.yaml": "weinsight_e2e_login_csrf",
+        "config.poc.yaml": "weinsight_poc_login_csrf",
+        "config.prod.example.yaml": "weinsight_prod_login_csrf",
+    }
+
+    for filename, cookie_name in expected.items():
+        raw = yaml.safe_load((Path("config") / filename).read_text(encoding="utf-8"))
+        assert raw["auth"]["login_csrf_cookie_name"] == cookie_name
+
+
+def test_auth_cookie_names_must_be_distinct() -> None:
+    config = load_config(Path("config/config.dev.yaml"))
+
+    with pytest.raises(ValueError, match="cookie names must be distinct"):
+        replace(
+            config.auth,
+            login_csrf_cookie_name=config.auth.csrf_cookie_name,
+        )
 
 
 def test_worker_config_defaults_are_explicit_and_safe() -> None:
